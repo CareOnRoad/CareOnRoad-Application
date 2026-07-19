@@ -22,6 +22,7 @@ import type {
   GarageInfo,
   ScheduleSlot,
   MechanicEarnings,
+  JobUpdatePayload,
 } from "@/lib/mechanic-types"
 
 export type MechanicScreenId =
@@ -29,12 +30,6 @@ export type MechanicScreenId =
   | "jobs"
   | "schedule"
   | "profile"
-
-export interface JobUpdatePayload {
-  price: number
-  notes?: string
-  partsReplaced?: string[]
-}
 
 interface MechanicState {
   // Profile / garage

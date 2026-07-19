@@ -1,33 +1,82 @@
 # CareOnRoad
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [v0](https://v0.app).
+A mobile-first prototype of a road-care companion app for Vietnamese motorbike riders — built with Next.js, React 19 and Tailwind v4.
 
-## Built with v0
+The app ships in two perspectives:
 
-This repository is linked to a [v0](https://v0.app) project. You can continue developing by visiting the link below -- start new chats to make changes, and v0 will push commits directly to this repo. Every merge to `main` will automatically deploy.
+- **Rider view** — vehicle management, emergency rescue, maintenance appointments and history.
+- **Mechanic view** — job board, job details with repair status timeline, weekly schedule, profile and earnings dashboard.
 
-[Continue working on v0 →](https://v0.app/chat/projects/prj_UXgwsAQWJNA7zs6ua8AKqDbRaeFm)
+A landing page lets you choose which perspective you want to demo. Your choice is saved to `localStorage` and can be flipped at any time from the in-app "Switch role" button or the Profile tab.
 
-## Getting Started
+## Tech stack
 
-First, run the development server:
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 16 (App Router, Turbopack) |
+| UI | React 19, Tailwind v4, shadcn (`base-nova`) |
+| Icons | `lucide-react` |
+| State | React Context (per role) |
+| Data | Mock data (no backend) |
+| Analytics | `@vercel/analytics` |
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
+## Project layout
+
+```
+app/                         # Next.js routes
+  page.tsx                   # Role picker → CareApp / MechanicApp
+components/
+  role-picker.tsx            # Landing + role persistence
+  care/                      # Rider view (existing)
+  mechanic/                  # Mechanic view (new)
+    cards/                   # Job, customer, earnings cards
+    forms/                   # Job update form
+    screens/                 # Dashboard, jobs, job-detail, schedule, profile
+lib/
+  types.ts                   # Rider domain types
+  mock-data.ts               # Rider mock data
+  mechanic-types.ts          # Mechanic domain types
+  mechanic-mock-data.ts      # Mechanic mock data
+  utils.ts                   # cn() className helper
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev      # http://localhost:3000
+npm run build    # production build (static, ~2s)
+npm run start    # serve the production build
+```
 
-## Learn More
+## Deploy to Vercel
 
-To learn more, take a look at the following resources:
+The repo includes a `vercel.json` that pins the framework to Next.js and explicitly sets the build / install / output commands, so deployment does not depend on auto-detection.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [v0 Documentation](https://v0.app/docs) - learn about v0 and how to use it.
+```bash
+# Option A — push to GitHub and import in the Vercel dashboard
+git init && git add . && git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/<you>/<repo>.git
+git push -u origin main
+
+# Option B — CLI
+npm i -g vercel
+vercel login
+vercel --prod
+```
+
+No environment variables are required.
+
+## Tách thành app riêng
+
+Because the rider and mechanic views are already isolated, splitting them later is mechanical:
+
+1. Move `components/mechanic/` to a new project (e.g. `apps/mechanic-app/components/`).
+2. Move `lib/mechanic-types.ts` and `lib/mechanic-mock-data.ts` with it.
+3. Lift `components/care/ui.tsx` (the shared Card/Badge/Button/Field/TextInput/SectionHeader primitives) into a shared package, or duplicate.
+4. Create a standalone `app/page.tsx` that renders `<MechanicApp />`.
+
+## Status
+
+Prototype / demo build. All data is in-memory and resets when the page reloads.

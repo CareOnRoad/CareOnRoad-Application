@@ -78,3 +78,9 @@ export interface MechanicEarnings {
   lastWeek: number
   thisMonth: number
 }
+
+export interface JobUpdatePayload {
+  price: number
+  notes?: string
+  partsReplaced?: string[]
+}
