@@ -11,11 +11,15 @@ import {
   mockVehicles,
   mockServices,
   mockAppointments,
+  mockCanceledAppointments,
+  mockEmergencyCalls,
 } from "@/lib/mock-data"
 import type {
   Vehicle,
   ServiceRecord,
   Appointment,
+  CanceledAppointment,
+  EmergencyCall,
   ScreenId,
   TabId,
 } from "@/lib/types"
@@ -31,9 +35,15 @@ interface AppState {
   vehicles: Vehicle[]
   services: ServiceRecord[]
   appointments: Appointment[]
+  canceledAppointments: CanceledAppointment[]
+  emergencyCalls: EmergencyCall[]
   addVehicle: (v: Omit<Vehicle, "id" | "image">) => void
   updateVehicle: (v: Vehicle) => void
   addAppointment: (a: Omit<Appointment, "id">) => Appointment
+  cancelAppointment: (id: string, reason: string) => void
+  addEmergencyCall: (
+    c: Omit<EmergencyCall, "id" | "status"> & { status?: EmergencyCall["status"] },
+  ) => EmergencyCall
 
   // selection
   selectedVehicleId: string | null
@@ -60,6 +70,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [services] = useState<ServiceRecord[]>(mockServices)
   const [appointments, setAppointments] =
     useState<Appointment[]>(mockAppointments)
+  const [canceledAppointments, setCanceledAppointments] =
+    useState<CanceledAppointment[]>(mockCanceledAppointments)
+  const [emergencyCalls, setEmergencyCalls] =
+    useState<EmergencyCall[]>(mockEmergencyCalls)
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null)
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
   const [darkMode, setDarkMode] = useState(false)
@@ -99,6 +113,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return appt
   }, [])
 
+  const cancelAppointment = useCallback((id: string, reason: string) => {
+    setAppointments((prev) => {
+      const target = prev.find((a) => a.id === id)
+      if (target) {
+        const canceled: CanceledAppointment = {
+          id: `ca${Date.now()}`,
+          vehicleName: target.vehicleName,
+          service: target.service,
+          date: target.date,
+          time: target.time,
+          canceledAt: new Date().toISOString(),
+          reason: reason || "Không có lý do",
+        }
+        setCanceledAppointments((prevCanceled) => [canceled, ...prevCanceled])
+      }
+      return prev.filter((a) => a.id !== id)
+    })
+  }, [])
+
+  const addEmergencyCall = useCallback(
+    (
+      c: Omit<EmergencyCall, "id" | "status"> & {
+        status?: EmergencyCall["status"]
+      },
+    ) => {
+      const call: EmergencyCall = {
+        ...c,
+        id: `e${Date.now()}`,
+        status: c.status ?? "completed",
+      }
+      setEmergencyCalls((prev) => [call, ...prev])
+      return call
+    },
+    [],
+  )
+
   const toggleDarkMode = useCallback(() => {
     setDarkMode((d) => !d)
   }, [])
@@ -111,9 +161,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     vehicles,
     services,
     appointments,
+    canceledAppointments,
+    emergencyCalls,
     addVehicle,
     updateVehicle,
     addAppointment,
+    cancelAppointment,
+    addEmergencyCall,
     selectedVehicleId,
     selectVehicle: setSelectedVehicleId,
     selectedServiceId,

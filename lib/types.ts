@@ -44,6 +44,30 @@ export interface Appointment {
   status: "confirmed" | "pending"
 }
 
+export interface CanceledAppointment {
+  id: string
+  vehicleName: string
+  service: string
+  date: string
+  time: string
+  canceledAt: string
+  reason: string
+}
+
+export interface EmergencyCall {
+  id: string
+  vehicleName: string
+  issue: string
+  damageDescription: string
+  repairs: string
+  date: string
+  time: string
+  mechanicName: string
+  price: number
+  status: "completed" | "cancelled"
+  notes?: string
+}
+
 export interface Mechanic {
   id: string
   name: string
@@ -53,6 +77,8 @@ export interface Mechanic {
   phone: string
   avatar: string
   specialty: string
+  certifications: string[]
+  experience: string
 }
 
 export type RescueStatus =

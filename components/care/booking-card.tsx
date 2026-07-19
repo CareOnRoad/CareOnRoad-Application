@@ -1,11 +1,18 @@
 "use client"
 
-import { CalendarClock, Clock, Bike } from "lucide-react"
-import { Card, Badge } from "./ui"
+import { CalendarClock, Clock, Bike, Check, X } from "lucide-react"
+import { Card, Badge, ActionButton } from "./ui"
 import { formatDate } from "@/lib/mock-data"
 import type { Appointment } from "@/lib/types"
 
-export function BookingCard({ appointment }: { appointment: Appointment }) {
+export function BookingCard({
+  appointment,
+  onCancel,
+}: {
+  appointment: Appointment
+  onCancel?: () => void
+}) {
+  const isConfirmed = appointment.status === "confirmed"
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between bg-[var(--navy)] px-4 py-3 text-white">
@@ -14,10 +21,10 @@ export function BookingCard({ appointment }: { appointment: Appointment }) {
           <span className="text-sm font-semibold">{appointment.service}</span>
         </div>
         <Badge
-          tone={appointment.status === "confirmed" ? "green" : "amber"}
+          tone={isConfirmed ? "green" : "amber"}
           className="bg-white/15 text-white"
         >
-          {appointment.status === "confirmed" ? "Confirmed" : "Pending"}
+          {isConfirmed ? "Confirmed" : "Pending"}
         </Badge>
       </div>
       <div className="grid grid-cols-3 gap-2 p-4">
@@ -43,6 +50,25 @@ export function BookingCard({ appointment }: { appointment: Appointment }) {
           </span>
           <span className="text-sm font-semibold">{appointment.time}</span>
         </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 border-t border-border px-4 py-3">
+        <ActionButton
+          variant="mint"
+          className="py-2.5 text-xs"
+          aria-label="Confirm appointment"
+        >
+          <Check className="size-4" />
+          Confirm
+        </ActionButton>
+        <ActionButton
+          variant="destructive"
+          className="py-2.5 text-xs"
+          onClick={onCancel}
+          aria-label="Cancel appointment"
+        >
+          <X className="size-4" />
+          Cancel
+        </ActionButton>
       </div>
     </Card>
   )

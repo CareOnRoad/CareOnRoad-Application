@@ -1,5 +1,5 @@
-import { CareApp } from "@/components/care/care-app"
+import { RolePicker } from "@/components/role-picker"
 
 export default function Page() {
-  return <CareApp />
+  return <RolePicker />
 }

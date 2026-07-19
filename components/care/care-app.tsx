@@ -2,7 +2,7 @@
 
 import { AppProvider, useApp } from "./app-context"
 import { BottomNavigation } from "./bottom-navigation"
-import { SOSButton } from "./sos-button"
+// import { SOSButton } from "./sos-button"
 import { HomeScreen } from "./screens/home-screen"
 import { VehiclesScreen } from "./screens/vehicles-screen"
 import { RescueScreen } from "./screens/rescue-screen"
@@ -47,7 +47,7 @@ function Shell() {
       <div className="flex-1 overflow-y-auto overscroll-contain">
         <ScreenRouter />
       </div>
-      {showSos && <SOSButton />}
+      {/* {showSos && <SOSButton />} */}
       <BottomNavigation />
     </div>
   )

@@ -15,10 +15,11 @@ import {
   Check,
   PhoneCall,
   RotateCcw,
+  Save,
 } from "lucide-react"
 import { useApp } from "../app-context"
 import { AppHeader } from "../app-header"
-import { Card, Badge, ActionButton } from "../ui"
+import { Card, Badge, ActionButton, Field, TextInput } from "../ui"
 import { MechanicCard } from "../mechanic-card"
 import { AiChatbox } from "../ai-chatbox"
 import { issueCategories, mockMechanics } from "@/lib/mock-data"
@@ -43,11 +44,16 @@ const timeline = [
 ]
 
 export function RescueScreen() {
-  const { vehicles } = useApp()
+  const { vehicles, addEmergencyCall } = useApp()
   const [phase, setPhase] = useState<Phase>("select")
   const [issue, setIssue] = useState<string | null>(null)
   const [step, setStep] = useState(1)
   const [eta, setEta] = useState(12)
+  const [completed, setCompleted] = useState(false)
+  const [damageDesc, setDamageDesc] = useState("")
+  const [repairs, setRepairs] = useState("")
+  const [price, setPrice] = useState("")
+  const [saved, setSaved] = useState(false)
   const mechanic = mockMechanics[0]
   const issueLabel = issueCategories.find((i) => i.id === issue)?.label
 
@@ -73,6 +79,7 @@ export function RescueScreen() {
     setStep((s) => {
       const next = Math.min(s + 1, timeline.length - 1)
       if (next >= 3) setEta(0)
+      if (next === timeline.length - 1) setCompleted(true)
       return next
     })
   }
@@ -82,6 +89,34 @@ export function RescueScreen() {
     setIssue(null)
     setStep(1)
     setEta(12)
+    setCompleted(false)
+    setDamageDesc("")
+    setRepairs("")
+    setPrice("")
+    setSaved(false)
+  }
+
+  const vehicleName = vehicles[0]?.name ?? "Vehicle"
+
+  const handleSave = () => {
+    if (!issue) return
+    const now = new Date()
+    addEmergencyCall({
+      vehicleName,
+      issue: issueLabel ?? "Emergency",
+      damageDescription:
+        damageDesc.trim() ||
+        "Chi tiết hư hại chưa được ghi nhận. Vui lòng bổ sung sau.",
+      repairs:
+        repairs.trim() ||
+        "Thợ đã hỗ trợ khắc phục sự cố tại chỗ và đảm bảo xe vận hành tạm ổn.",
+      date: now.toISOString().slice(0, 10),
+      time: now.toTimeString().slice(0, 5),
+      mechanicName: mechanic.name,
+      price: Number(price) > 0 ? Number(price) : 250000,
+      status: "completed",
+    })
+    setSaved(true)
   }
 
   if (phase === "searching") {
@@ -204,10 +239,57 @@ export function RescueScreen() {
                 Simulate next step
               </ActionButton>
             ) : (
-              <div className="mt-1 space-y-2">
+              <div className="mt-1 space-y-3">
                 <div className="flex items-center justify-center gap-2 rounded-2xl bg-[var(--green)]/10 py-3 text-sm font-semibold text-[var(--green)] dark:text-[var(--mint)]">
                   <Check className="size-4" /> Service completed successfully
                 </div>
+
+                {saved ? (
+                  <div className="rounded-2xl border border-[var(--green)]/30 bg-[var(--green)]/5 p-4 text-center">
+                    <p className="text-sm font-semibold text-[var(--green)] dark:text-[var(--mint)]">
+                      Saved to Emergency History
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Bạn có thể xem lại trong tab Schedule → Emergency History.
+                    </p>
+                  </div>
+                ) : (
+                  <Card className="space-y-3 p-4">
+                    <p className="text-sm font-semibold">Service summary</p>
+                    <Field label="Mô tả hư hại">
+                      <textarea
+                        rows={3}
+                        value={damageDesc}
+                        onChange={(e) => setDamageDesc(e.target.value)}
+                        placeholder="Ví dụ: Lốp trước bị đâm đinh, xẹp hoàn toàn..."
+                        className="w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      />
+                    </Field>
+                    <Field label="Nội dung đã sửa chữa">
+                      <textarea
+                        rows={3}
+                        value={repairs}
+                        onChange={(e) => setRepairs(e.target.value)}
+                        placeholder="Ví dụ: Thay lốp mới, cân bằng bánh trước..."
+                        className="w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      />
+                    </Field>
+                    <Field label="Chi phí (VND)">
+                      <TextInput
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
+                        placeholder="250000"
+                      />
+                    </Field>
+                    <ActionButton fullWidth onClick={handleSave}>
+                      <Save className="size-4" /> Save to Emergency History
+                    </ActionButton>
+                  </Card>
+                )}
+
                 <ActionButton fullWidth variant="outline" onClick={reset}>
                   <RotateCcw className="size-4" /> New request
                 </ActionButton>
