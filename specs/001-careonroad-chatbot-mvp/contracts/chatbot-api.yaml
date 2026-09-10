@@ -1,0 +1,232 @@
+openapi: 3.1.0
+info:
+  title: CareOnRoad AI Chatbot MVP API
+  version: 0.1.0
+  description: Demo API for Vietnamese motorcycle advisory diagnosis by text or local voice transcription.
+paths:
+  /api/chatbot/sessions:
+    post:
+      summary: Create a demo chatbot session
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id]
+                properties:
+                  session_id:
+                    type: string
+  /api/chatbot/sessions/{sessionId}/messages:
+    post:
+      summary: Submit text or voice message and receive diagnosis
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TextMessageRequest"
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/VoiceMessageRequest"
+      responses:
+        "200":
+          description: Diagnosis returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosisResponse"
+        "400":
+          description: Invalid input or ASR failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/chatbot/sessions/{sessionId}/diagnosis:
+    get:
+      summary: Return latest diagnosis for a session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Latest diagnosis or empty state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, diagnosis]
+                properties:
+                  session_id:
+                    type: string
+                  diagnosis:
+                    oneOf:
+                      - $ref: "#/components/schemas/DiagnosisResponse"
+                      - type: "null"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    TextMessageRequest:
+      type: object
+      required: [input_mode, content_text]
+      properties:
+        input_mode:
+          const: text
+        content_text:
+          type: string
+          minLength: 1
+        safety_answers:
+          type: object
+          additionalProperties: true
+    VoiceMessageRequest:
+      type: object
+      required: [input_mode, audio_file]
+      properties:
+        input_mode:
+          const: voice
+        audio_file:
+          type: string
+          format: binary
+          description: WAV preferred for MVP.
+        safety_answers:
+          type: string
+          description: Optional JSON object encoded as string in multipart form data.
+    DiagnosisResponse:
+      type: object
+      required:
+        - short_answer
+        - overall_confidence
+        - risk_level
+        - can_continue_riding
+        - top_hypotheses
+        - estimated_total
+        - recommended_next_actions
+        - followup_questions
+        - fallback_used
+      properties:
+        short_answer:
+          type: string
+          description: Maximum 3 short Vietnamese sentences. Must mention price is an estimate where price appears.
+        overall_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        risk_level:
+          enum: [low, medium, high, critical]
+        can_continue_riding:
+          type: boolean
+        top_hypotheses:
+          type: array
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/Hypothesis"
+        estimated_total:
+          $ref: "#/components/schemas/EstimatedTotal"
+        recommended_next_actions:
+          type: array
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/RecommendedAction"
+        followup_questions:
+          type: array
+          maxItems: 2
+          items:
+            type: string
+        transcribed_text:
+          type: string
+        fallback_used:
+          type: boolean
+    Hypothesis:
+      type: object
+      required:
+        - rank
+        - component_code
+        - cause
+        - symptoms
+        - consequences
+        - confidence
+        - estimated_cost_min
+        - estimated_cost_max
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+          maximum: 2
+        component_code:
+          enum:
+            - SPARK_PLUG
+            - BATTERY
+            - AIR_FILTER
+            - FUEL_SYSTEM
+            - BRAKE_SYSTEM
+            - ENGINE_OIL
+            - DRIVE_BELT
+            - TIRE
+            - ELECTRICAL_SYSTEM
+            - UNKNOWN
+        cause:
+          type: string
+        symptoms:
+          type: string
+        consequences:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        estimated_cost_min:
+          type: number
+          minimum: 0
+        estimated_cost_max:
+          type: number
+          minimum: 0
+    EstimatedTotal:
+      type: object
+      required: [currency, min, max]
+      properties:
+        currency:
+          const: VND
+        min:
+          type: number
+          minimum: 0
+        max:
+          type: number
+          minimum: 0
+    RecommendedAction:
+      type: object
+      required: [type, label]
+      properties:
+        type:
+          enum: [emergency_rescue, book_mobile_repair, ask_followup, safe_to_monitor]
+        label:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+          examples: [ASR_NOT_AVAILABLE, EMPTY_TRANSCRIPTION, INVALID_INPUT]
+        message:
+          type: string

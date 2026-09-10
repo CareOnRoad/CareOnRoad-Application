@@ -1,0 +1,3 @@
+import { describe, expect, it } from "vitest";
+import { readRetentionPolicy } from "../retention-policy";
+describe("retention policy", () => { it("has no destructive defaults", () => { expect(readRetentionPolicy({ NODE_ENV: "test" })).toEqual({ enabled: false, days: {} }); }); it("accepts only explicit bounded days", () => { expect(readRetentionPolicy({ NODE_ENV: "test", DATA_RETENTION_ENABLED: "true", RETENTION_WORKER_RUNS_DAYS: "90" })).toEqual({ enabled: true, days: { worker_runs: 90 } }); expect(() => readRetentionPolicy({ NODE_ENV: "test", RETENTION_WORKER_RUNS_DAYS: "0" })).toThrow(); }); });

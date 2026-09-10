@@ -2,5 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
-  msw: set this to true or false
-  sharp: set this to true or false
+  esbuild: true
+  msw: false
+  sharp: true
+  unrs-resolver: true

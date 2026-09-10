@@ -1,0 +1,59 @@
+import type { AssignmentRepository } from "./assignment.repository";
+import type { AdminInternalNoteRepository } from "./admin-internal-note.repository";
+import type { AdminQueryRepository } from "./admin-query.repository";
+import type { AuditRepository } from "./audit.repository";
+import type { ChatbotSessionRepository } from "./chatbot-session.repository";
+import type { DispatchRepository } from "./dispatch.repository";
+import type { DeviceDeliveryCredentialRepository } from "./device-delivery-credential.repository";
+import type { DiagnosisRepository } from "./diagnosis.repository";
+import type { IdempotencyRepository } from "./idempotency.repository";
+import type { MechanicOperationsRepository } from "./mechanic-operations.repository";
+import type { MechanicRepository } from "./mechanic.repository";
+import type { MediaUploadIntentRepository } from "./media-upload-intent.repository";
+import type { LiveTrackingRepository } from "./live-tracking.repository";
+import type { MotorcycleRepository } from "./motorcycle.repository";
+import type { NotificationRepository } from "./notification.repository";
+import type { NotificationDeliveryRepository } from "./notification-delivery.repository";
+import type { OperationalMonitoringRepository } from "./operational-monitoring.repository";
+import type { OutboxRepository } from "./outbox.repository";
+import type { PaymentRepository } from "./payment.repository";
+import type { QuoteRepository } from "./quote.repository";
+import type { RequestCodeRepository } from "./request-code.repository";
+import type { RequestMediaRepository } from "./request-media.repository";
+import type { ReminderRepository } from "./reminder.repository";
+import type { ReviewRepository } from "./review.repository";
+import type { ServiceRequestRepository } from "./service-request.repository";
+import type { UserRepository } from "./user.repository";
+
+export type FoundationRepositories = {
+  adminQueries: AdminQueryRepository;
+  adminInternalNotes: AdminInternalNoteRepository;
+  users: UserRepository;
+  idempotency: IdempotencyRepository;
+  outbox: OutboxRepository;
+  audit: AuditRepository;
+  motorcycles: MotorcycleRepository;
+  mechanics: MechanicRepository;
+  mediaUploadIntents: MediaUploadIntentRepository;
+  liveTracking: LiveTrackingRepository;
+  mechanicOperations: MechanicOperationsRepository;
+  serviceRequests: ServiceRequestRepository;
+  requestMedia: RequestMediaRepository;
+  requestCodes: RequestCodeRepository;
+  dispatch: DispatchRepository;
+  deviceDeliveryCredentials: DeviceDeliveryCredentialRepository;
+  assignments: AssignmentRepository;
+  diagnoses: DiagnosisRepository;
+  quotes: QuoteRepository;
+  reminders: ReminderRepository;
+  reviews: ReviewRepository;
+  notifications: NotificationRepository;
+  notificationDeliveries: NotificationDeliveryRepository;
+  operationalMonitoring: OperationalMonitoringRepository;
+  chatbotSessions: ChatbotSessionRepository;
+  payments: PaymentRepository;
+};
+
+export interface UnitOfWork {
+  execute<T>(work: (repositories: FoundationRepositories) => Promise<T>): Promise<T>;
+}

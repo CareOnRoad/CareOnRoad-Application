@@ -1,0 +1,185 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type { VerifiedSupabaseIdentity } from "../auth.types";
+import type { RequestActor } from "../auth.types";
+import { createAuthRouteHandlers } from "../auth.route-handlers";
+
+const identity: VerifiedSupabaseIdentity = {
+  subject: "11111111-1111-4111-8111-111111111111",
+  issuer: "https://careonroad.supabase.co/auth/v1",
+  audience: ["authenticated"]
+};
+const actor: RequestActor = {
+  id: identity.subject,
+  display_name: "Rider",
+  roles: ["rider"],
+  status: "active"
+};
+const device = {
+  id: "33333333-3333-4333-8333-333333333333",
+  platform: "android",
+  enabled: true,
+  last_registered_at: "2026-06-25T01:00:00.000Z",
+  push_token_registered: false
+};
+
+describe("auth routes", () => {
+  it("returns the current actor for GET /api/v1/auth/me", async () => {
+    const handlers = createHandlers();
+    const response = await handlers.getMe(
+      new Request("http://localhost/api/v1/auth/me", {
+        headers: { authorization: "Bearer valid-token" }
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(actor);
+  });
+
+  it("bootstraps a profile for POST /api/v1/auth/profile", async () => {
+    const handlers = createHandlers();
+    const response = await handlers.bootstrapProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ display_name: "Rider" })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(actor);
+  });
+
+  it("returns controlled errors for missing authentication and invalid input", async () => {
+    const handlers = createHandlers();
+    const unauthorized = await handlers.getMe(new Request("http://localhost/api/v1/auth/me"));
+    expect(unauthorized.status).toBe(401);
+    await expect(unauthorized.json()).resolves.toMatchObject({ error_code: "UNAUTHORIZED" });
+
+    const invalid = await handlers.bootstrapProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ display_name: "" })
+      })
+    );
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
+  });
+
+  it("registers validated device metadata for POST /api/v1/auth/devices", async () => {
+    const handlers = createHandlers();
+    const response = await handlers.registerDevice(
+      new Request("http://localhost/api/v1/auth/devices", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          device_key: "private-device-token-123456",
+          platform: "android"
+        })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(device);
+  });
+
+  it("rejects invalid device registration input", async () => {
+    const handlers = createHandlers();
+    const response = await handlers.registerDevice(
+      new Request("http://localhost/api/v1/auth/devices", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ device_key: "short", platform: "" })
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
+  });
+
+  it("rotates and revokes an owned push token with redacted responses", async () => {
+    const handlers = createHandlers();
+    const raw = "private-provider-token-route-123456";
+    const rotated = await handlers.rotatePushToken(
+      new Request("http://localhost/api/v1/auth/devices/device/push-token", {
+        method: "PUT",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ push_provider: "fcm", push_token: raw })
+      }),
+      device.id
+    );
+    const revoked = await handlers.revokePushToken(
+      new Request("http://localhost/api/v1/auth/devices/device/push-token", {
+        method: "DELETE",
+        headers: { authorization: "Bearer valid-token" }
+      }),
+      device.id
+    );
+
+    expect(rotated.status).toBe(200);
+    expect(revoked.status).toBe(200);
+    expect(await rotated.text()).not.toContain(raw);
+    expect(await revoked.text()).not.toContain(raw);
+  });
+
+  it("requires paired provider/token fields during device registration", async () => {
+    const handlers = createHandlers();
+    const response = await handlers.registerDevice(
+      new Request("http://localhost/api/v1/auth/devices", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          device_key: "stable-installation-key-123456",
+          platform: "android",
+          push_token: "private-provider-token-route-123456"
+        })
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
+  });
+});
+
+function createHandlers() {
+  return createAuthRouteHandlers({
+    authenticate: vi.fn(async (request: Request) => {
+      if (!request.headers.get("authorization")) {
+        const error = new Error("Authentication is required.") as Error & {
+          status: number;
+          errorCode: "UNAUTHORIZED";
+        };
+        error.status = 401;
+        error.errorCode = "UNAUTHORIZED";
+        throw error;
+      }
+      return identity;
+    }),
+    authService: {
+      getCurrentActor: vi.fn(async () => actor),
+      bootstrapProfile: vi.fn(async () => actor),
+      registerDevice: vi.fn(async () => device),
+      rotatePushToken: vi.fn(async () => device),
+      revokePushToken: vi.fn(async () => device)
+    }
+  });
+}

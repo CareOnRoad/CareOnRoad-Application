@@ -1,0 +1,72 @@
+openapi: 3.1.0
+info:
+  title: CareOnRoad Payment API
+  version: 0.1.0
+paths:
+  /api/v1/payments/orders:
+    post:
+      summary: Create a payOS/VietQR payment order for an approved quote.
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quote_id]
+              properties:
+                quote_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Payment order created.
+  /api/v1/payments/orders/{paymentOrderId}:
+    get:
+      summary: Get a payment order visible to rider, assigned mechanic, or admin.
+      parameters:
+        - name: paymentOrderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Payment order.
+  /api/v1/payments/orders/{paymentOrderId}/cancel:
+    post:
+      summary: Cancel a created, pending, or failed payment order.
+      parameters:
+        - name: paymentOrderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Payment order canceled.
+  /api/v1/payments/webhooks/payos:
+    post:
+      summary: payOS signed payment webhook.
+      responses:
+        "200":
+          description: Webhook accepted.
+  /api/v1/internal/workers/payments/reconcile:
+    post:
+      summary: Worker-secret protected stale pending payment reconciliation.
+      parameters:
+        - name: X-Worker-Secret
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Reconcile accepted.

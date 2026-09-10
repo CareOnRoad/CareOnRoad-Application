@@ -1,0 +1,45 @@
+openapi: 3.1.0
+info: { title: CareOnRoad Route ETA API, version: 1.0.0 }
+paths:
+  /api/v1/assignments/{assignmentId}/route-eta:
+    get:
+      summary: Read advisory route ETA for an active assignment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: assignmentId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Available, fallback, or controlled unavailable estimate
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteEtaResponse" }
+        "401": { description: Missing or invalid bearer token }
+        "403": { description: Actor cannot read this assignment }
+        "404": { description: Assignment or application profile not found }
+        "409": { description: Assignment is not active }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    RouteEtaResponse:
+      type: object
+      required: [assignment_id, status, source, calculated_at, expires_at, advisory]
+      properties:
+        assignment_id: { type: string, format: uuid }
+        status: { enum: [available, fallback, unavailable] }
+        source: { enum: [google_routes, straight_line_fallback, none] }
+        distance_meters: { type: integer, minimum: 1 }
+        duration_seconds: { type: integer, minimum: 1 }
+        calculated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        unavailable_reason:
+          enum: [provider_disabled, provider_timeout, provider_quota, provider_auth, provider_error, provider_invalid_response, no_route, origin_missing, origin_stale, destination_missing]
+        advisory:
+          type: object
+          required: [code, message]
+          properties:
+            code: { const: TWO_WHEELER_ROUTE_ESTIMATE }
+            message: { type: string }

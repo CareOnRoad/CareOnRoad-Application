@@ -1,0 +1,80 @@
+openapi: 3.1.0
+info: { title: CareOnRoad Live Tracking API, version: 1.0.0 }
+paths:
+  /api/v1/assignments/{assignmentId}/live-location:
+    put:
+      summary: Publish the assigned mechanic's latest travel location
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/AssignmentId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [latitude, longitude, observed_at, accuracy_meters]
+              properties:
+                latitude: { type: number, minimum: -90, maximum: 90 }
+                longitude: { type: number, minimum: -180, maximum: 180 }
+                observed_at: { type: string, format: date-time }
+                accuracy_meters: { type: number, minimum: 0, maximum: 100 }
+      responses:
+        "200": { description: Latest point accepted and replaced }
+        "201": { description: First latest point accepted }
+        "400": { description: Invalid coordinates, timestamp, or accuracy }
+        "403": { description: Assigned mechanic access required }
+        "409": { description: Disabled, ineligible state, replay, or too-frequent update }
+    get:
+      summary: Poll the non-expired latest point
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: "#/components/parameters/AssignmentId" }]
+      responses:
+        "200":
+          description: Current latest point
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LatestLocation" }
+        "403": { description: Owner rider, assigned mechanic, or admin required }
+        "404": { description: No current point }
+  /api/v1/internal/workers/live-locations/cleanup:
+    post:
+      summary: Delete expired latest points in a bounded batch
+      parameters:
+        - in: header
+          name: X-Worker-Secret
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                limit: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        "200": { description: Count-only cleanup summary }
+        "401": { description: Invalid worker authority }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    AssignmentId:
+      in: path
+      name: assignmentId
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    LatestLocation:
+      type: object
+      required: [assignment_id, latitude, longitude, observed_at, accuracy_meters, received_at, expires_at, freshness]
+      properties:
+        assignment_id: { type: string, format: uuid }
+        latitude: { type: number }
+        longitude: { type: number }
+        observed_at: { type: string, format: date-time }
+        accuracy_meters: { type: number }
+        received_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        freshness: { const: current }

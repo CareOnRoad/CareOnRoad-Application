@@ -1,0 +1,26 @@
+{
+  "name": "careonroad-application",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @careonroad/api dev",
+    "dev:mobile": "pnpm --filter @careonroad/mobile dev",
+    "dev:web": "pnpm --filter @careonroad/web dev",
+    "build": "pnpm -r --if-present run build",
+    "build:api": "pnpm --filter @careonroad/api build",
+    "build:mobile": "pnpm --filter @careonroad/mobile build",
+    "build:web": "pnpm --filter @careonroad/web build",
+    "typecheck": "pnpm --filter @careonroad/api typecheck",
+    "lint": "pnpm --filter @careonroad/api lint",
+    "lint:api": "pnpm --filter @careonroad/api lint",
+    "lint:web": "pnpm --filter @careonroad/web lint",
+    "test": "pnpm --filter @careonroad/api test",
+    "test:unit": "pnpm --filter @careonroad/api test:unit",
+    "test:db": "pnpm --filter @careonroad/api test:db",
+    "test:full": "pnpm --filter @careonroad/api test:full",
+    "asr:smoke": "pnpm --filter @careonroad/api asr:smoke",
+    "seed:mock": "pnpm --filter @careonroad/api seed:mock",
+    "seed:mock:verify": "pnpm --filter @careonroad/api seed:mock:verify"
+  }
+}

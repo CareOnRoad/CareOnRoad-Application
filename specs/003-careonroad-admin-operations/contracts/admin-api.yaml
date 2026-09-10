@@ -1,0 +1,1273 @@
+openapi: 3.1.0
+info:
+  title: CareOnRoad Admin Operations API
+  version: 0.1.0
+  description: |
+    Backend-only admin contract for feature 003. Every operation requires an
+    active CareOnRoad admin. Every mutation additionally requires
+    X-Idempotency-Key and a validated reason. Responses are admin-safe and
+    redacted. This contract adds no payment or frontend capability.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Admin Users
+  - name: Admin Mechanics
+  - name: Admin Requests
+  - name: Admin Dispatch
+  - name: Admin Assignments
+  - name: Admin Diagnosis Quotes
+  - name: Admin Reminders
+  - name: Admin Notifications
+  - name: Admin Outbox
+  - name: Admin Audit
+  - name: Admin Dashboard
+  - name: Admin Configuration
+
+paths:
+  /admin/users:
+    get:
+      tags: [Admin Users]
+      operationId: adminListUsers
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: role
+          in: query
+          schema: { $ref: "#/components/schemas/AppRole" }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/UserStatus" }
+        - name: query
+          in: query
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/users/{userId}:
+    get:
+      tags: [Admin Users]
+      operationId: adminGetUserDetail
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/users/{userId}/suspend:
+    post:
+      tags: [Admin Users]
+      operationId: adminSuspendUser
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/users/{userId}/reactivate:
+    post:
+      tags: [Admin Users]
+      operationId: adminReactivateUser
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/users/{userId}/archive:
+    post:
+      tags: [Admin Users]
+      operationId: adminArchiveUser
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/users/{userId}/devices:
+    get:
+      tags: [Admin Users]
+      operationId: adminListUserDevices
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/users/{userId}/roles/grant:
+    post:
+      tags: [Admin Users]
+      operationId: adminGrantUserRole
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/RoleMutation" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/users/{userId}/roles/revoke:
+    post:
+      tags: [Admin Users]
+      operationId: adminRevokeUserRole
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/RoleMutation" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/users/{userId}/activity:
+    get:
+      tags: [Admin Users]
+      operationId: adminGetUserActivity
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/devices/{deviceId}/revoke:
+    post:
+      tags: [Admin Users]
+      operationId: adminRevokeDevice
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /admin/mechanics:
+    get:
+      tags: [Admin Mechanics]
+      operationId: adminListMechanics
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: profile_status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, rejected, suspended, banned]
+        - name: service_type
+          in: query
+          schema: { type: string }
+        - name: is_available
+          in: query
+          schema: { type: boolean }
+        - name: location_freshness
+          in: query
+          schema:
+            type: string
+            enum: [fresh, stale, missing]
+        - name: work_state
+          in: query
+          schema:
+            type: string
+            enum: [idle, active_assignment]
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/mechanics/{mechanicId}:
+    get:
+      tags: [Admin Mechanics]
+      operationId: adminGetMechanicDetail
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/mechanics/{mechanicId}/approve:
+    post:
+      tags: [Admin Mechanics]
+      operationId: adminApproveMechanic
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/mechanics/{mechanicId}/reject:
+    post:
+      tags: [Admin Mechanics]
+      operationId: adminRejectMechanic
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/mechanics/{mechanicId}/suspend:
+    post:
+      tags: [Admin Mechanics]
+      operationId: adminSuspendMechanic
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/mechanics/{mechanicId}/ban:
+    post:
+      tags: [Admin Mechanics]
+      operationId: adminBanMechanic
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/mechanics/{mechanicId}/reactivate:
+    post:
+      tags: [Admin Mechanics]
+      operationId: adminReactivateMechanic
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/mechanics/{mechanicId}/skills:
+    put:
+      tags: [Admin Mechanics]
+      operationId: adminUpdateMechanicSkills
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MechanicSkillsMutation" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/mechanics/{mechanicId}/service-radius:
+    put:
+      tags: [Admin Mechanics]
+      operationId: adminUpdateMechanicRadius
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MechanicRadiusMutation" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/mechanics/{mechanicId}/force-unavailable:
+    post:
+      tags: [Admin Mechanics]
+      operationId: adminForceMechanicUnavailable
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/mechanics/{mechanicId}/work-history:
+    get:
+      tags: [Admin Mechanics]
+      operationId: adminGetMechanicWorkHistory
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/mechanics/{mechanicId}/performance:
+    get:
+      tags: [Admin Mechanics]
+      operationId: adminGetMechanicPerformance
+      parameters:
+        - $ref: "#/components/parameters/MechanicId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+
+  /admin/service-requests:
+    get:
+      tags: [Admin Requests]
+      operationId: adminListServiceRequests
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: service_type
+          in: query
+          schema: { $ref: "#/components/schemas/ServiceType" }
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [normal, high, emergency]
+        - name: rider_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: mechanic_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: request_code
+          in: query
+          schema: { type: string, maxLength: 40 }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/service-requests/{requestId}:
+    get:
+      tags: [Admin Requests]
+      operationId: adminGetServiceRequestDetail
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/service-requests/{requestId}/timeline:
+    get:
+      tags: [Admin Requests]
+      operationId: adminGetRequestTimeline
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/service-requests/{requestId}/cancel:
+    post:
+      tags: [Admin Requests]
+      operationId: adminCancelServiceRequest
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/service-requests/{requestId}/manual-escalate:
+    post:
+      tags: [Admin Requests]
+      operationId: adminEscalateServiceRequest
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/service-requests/{requestId}/notes:
+    post:
+      tags: [Admin Requests]
+      operationId: adminAddRequestNote
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/InternalNote" }
+      responses:
+        "201": { $ref: "#/components/responses/AdminObject" }
+  /admin/service-requests/{requestId}/media:
+    get:
+      tags: [Admin Requests]
+      operationId: adminGetRequestMediaMetadata
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/service-requests/{requestId}/assignment:
+    get:
+      tags: [Admin Requests]
+      operationId: adminGetRequestAssignment
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/service-requests/{requestId}/quotes:
+    get:
+      tags: [Admin Requests, Admin Diagnosis Quotes]
+      operationId: adminGetRequestQuoteHistory
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+
+  /admin/service-requests/{requestId}/dispatch:
+    get:
+      tags: [Admin Dispatch]
+      operationId: adminGetDispatchStatus
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/service-requests/{requestId}/dispatch/rounds:
+    get:
+      tags: [Admin Dispatch]
+      operationId: adminListDispatchRounds
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/dispatch/rounds/{roundId}:
+    get:
+      tags: [Admin Dispatch]
+      operationId: adminGetDispatchRound
+      parameters:
+        - $ref: "#/components/parameters/RoundId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/dispatch/rounds/{roundId}/expire:
+    post:
+      tags: [Admin Dispatch]
+      operationId: adminExpireDispatchRound
+      parameters:
+        - $ref: "#/components/parameters/RoundId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/service-requests/{requestId}/dispatch/retry:
+    post:
+      tags: [Admin Dispatch]
+      operationId: adminRetryDispatch
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "202": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/service-requests/{requestId}/dispatch/cancel:
+    post:
+      tags: [Admin Dispatch]
+      operationId: adminCancelDispatch
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/service-requests/{requestId}/dispatch/manual-assign:
+    post:
+      tags: [Admin Dispatch]
+      operationId: adminManualAssignMechanic
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MechanicCommand" }
+      responses:
+        "201": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/service-requests/{requestId}/dispatch/eligible-mechanics:
+    get:
+      tags: [Admin Dispatch]
+      operationId: adminListEligibleMechanics
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/service-requests/{requestId}/dispatch/explanation:
+    get:
+      tags: [Admin Dispatch]
+      operationId: adminExplainDispatchFailure
+      description: |
+        Returns all applicable failure reason categories, safe counts per
+        category where meaningful, and only allowlisted next-command categories
+        valid for the request's current state. Private location history and
+        secrets are never returned.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+
+  /admin/assignments/{assignmentId}:
+    get:
+      tags: [Admin Assignments]
+      operationId: adminGetAssignmentDetail
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/assignments/{assignmentId}/timeline:
+    get:
+      tags: [Admin Assignments]
+      operationId: adminGetAssignmentTimeline
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/assignments/{assignmentId}/cancel:
+    post:
+      tags: [Admin Assignments]
+      operationId: adminCancelAssignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/assignments/{assignmentId}/reassign:
+    post:
+      tags: [Admin Assignments, Admin Dispatch]
+      operationId: adminReassignAssignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MechanicCommand" }
+      responses:
+        "201": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/assignments/{assignmentId}/resolve-stuck:
+    post:
+      tags: [Admin Assignments]
+      operationId: adminResolveStuckAssignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StuckAssignmentCommand" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/assignments/{assignmentId}/notes:
+    post:
+      tags: [Admin Assignments]
+      operationId: adminAddAssignmentNote
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/InternalNote" }
+      responses:
+        "201": { $ref: "#/components/responses/AdminObject" }
+
+  /admin/assignments/{assignmentId}/diagnosis:
+    get:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminGetDiagnosisDetail
+      parameters:
+        - $ref: "#/components/parameters/AssignmentId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/diagnoses/{diagnosisId}/request-revision:
+    post:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminRequestDiagnosisRevision
+      parameters:
+        - $ref: "#/components/parameters/DiagnosisId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "202": { $ref: "#/components/responses/AdminObject" }
+  /admin/quotes/{quoteId}/request-revision:
+    post:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminRequestQuoteRevision
+      parameters:
+        - $ref: "#/components/parameters/QuoteId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "202": { $ref: "#/components/responses/AdminObject" }
+  /admin/quotes/{quoteId}/void:
+    post:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminVoidPendingQuote
+      parameters:
+        - $ref: "#/components/parameters/QuoteId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/quotes/{quoteId}/expire:
+    post:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminExpireQuote
+      parameters:
+        - $ref: "#/components/parameters/QuoteId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/service-requests/{requestId}/quote-dispute/resolve:
+    post:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminResolveQuoteDispute
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteDisputeCommand" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /admin/reminders:
+    get:
+      tags: [Admin Reminders]
+      operationId: adminListReminderRules
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: enabled
+          in: query
+          schema: { type: boolean }
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/reminders/{reminderId}:
+    get:
+      tags: [Admin Reminders]
+      operationId: adminGetReminderDetail
+      parameters:
+        - $ref: "#/components/parameters/ReminderId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/reminders/{reminderId}/disable:
+    post:
+      tags: [Admin Reminders]
+      operationId: adminDisableReminder
+      parameters:
+        - $ref: "#/components/parameters/ReminderId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/reminders/{reminderId}/enable:
+    post:
+      tags: [Admin Reminders]
+      operationId: adminEnableReminder
+      parameters:
+        - $ref: "#/components/parameters/ReminderId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnableReminderCommand" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/reminders/{reminderId}/occurrences:
+    get:
+      tags: [Admin Reminders]
+      operationId: adminListReminderOccurrences
+      parameters:
+        - $ref: "#/components/parameters/ReminderId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/reminder-occurrences/{occurrenceId}/retry:
+    post:
+      tags: [Admin Reminders]
+      operationId: adminRetryReminderOccurrence
+      parameters:
+        - $ref: "#/components/parameters/OccurrenceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "202": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/reminders/worker-health:
+    get:
+      tags: [Admin Reminders]
+      operationId: adminGetReminderWorkerHealth
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+
+  /admin/notifications:
+    get:
+      tags: [Admin Notifications]
+      operationId: adminListNotifications
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/notifications/{notificationId}:
+    get:
+      tags: [Admin Notifications]
+      operationId: adminGetNotificationDetail
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/notifications/{notificationId}/retry:
+    post:
+      tags: [Admin Notifications]
+      operationId: adminRetryNotification
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "202": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/notifications/{notificationId}/cancel:
+    post:
+      tags: [Admin Notifications]
+      operationId: adminCancelNotification
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/notifications/delivery-summary:
+    get:
+      tags: [Admin Notifications]
+      operationId: adminGetNotificationSummary
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+
+  /admin/outbox:
+    get:
+      tags: [Admin Outbox]
+      operationId: adminListOutboxEvents
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: topic
+          in: query
+          schema: { type: string, maxLength: 200 }
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/outbox/dead-letter:
+    get:
+      tags: [Admin Outbox]
+      operationId: adminListDeadLetterEvents
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/outbox/{eventId}:
+    get:
+      tags: [Admin Outbox]
+      operationId: adminGetOutboxEvent
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/outbox/{eventId}/retry:
+    post:
+      tags: [Admin Outbox]
+      operationId: adminRetryDeadLetterEvent
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "202": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/outbox/{eventId}/abandon:
+    post:
+      tags: [Admin Outbox]
+      operationId: adminAbandonOutboxEvent
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/AdminReason" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/outbox/worker-health:
+    get:
+      tags: [Admin Outbox]
+      operationId: adminGetOutboxWorkerHealth
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+
+  /admin/audit:
+    get:
+      tags: [Admin Audit]
+      operationId: adminSearchAudit
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: actor_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: action
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: entity_type
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/audit/entities/{entityType}/{entityId}:
+    get:
+      tags: [Admin Audit]
+      operationId: adminGetEntityAuditTimeline
+      parameters:
+        - name: entityType
+          in: path
+          required: true
+          schema: { type: string, maxLength: 100 }
+        - name: entityId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/audit/actors/{actorId}:
+    get:
+      tags: [Admin Audit]
+      operationId: adminGetActorAuditTimeline
+      parameters:
+        - $ref: "#/components/parameters/ActorId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/audit/export:
+    get:
+      tags: [Admin Audit]
+      operationId: adminExportAudit
+      description: |
+        Preserves all existing source audit rows, returns at most 10,000
+        sanitized records, and appends exactly one sanitized export-access audit
+        event containing only the requesting admin, filter hash, exported count,
+        and timestamp. Exported content is not copied into the access event.
+      responses:
+        "200":
+          description: Sanitized bounded export
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, exported_at]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 10000
+                    items: { $ref: "#/components/schemas/AdminSafeObject" }
+                  exported_at: { type: string, format: date-time }
+  /admin/audit/admin-actions:
+    get:
+      tags: [Admin Audit]
+      operationId: adminGetAdminActionHistory
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+
+  /admin/dashboard/summary:
+    get:
+      tags: [Admin Dashboard]
+      operationId: adminGetOperationalSummary
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/dashboard/dispatch:
+    get:
+      tags: [Admin Dashboard]
+      operationId: adminGetDispatchMetrics
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/dashboard/assignments:
+    get:
+      tags: [Admin Dashboard]
+      operationId: adminGetAssignmentMetrics
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/dashboard/mechanics:
+    get:
+      tags: [Admin Dashboard]
+      operationId: adminGetMechanicMetrics
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/dashboard/requests:
+    get:
+      tags: [Admin Dashboard]
+      operationId: adminGetRequestBreakdown
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/dashboard/workers:
+    get:
+      tags: [Admin Dashboard]
+      operationId: adminGetWorkerFailureSummary
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/dashboard/stuck-workflows:
+    get:
+      tags: [Admin Dashboard]
+      operationId: adminGetStuckWorkflows
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+
+  /admin/configuration:
+    get:
+      tags: [Admin Configuration]
+      operationId: adminGetOperationalConfiguration
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/configuration/dispatch:
+    put:
+      tags: [Admin Configuration]
+      operationId: adminUpdateDispatchConfiguration
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: { $ref: "#/components/requestBodies/ConfigMutation" }
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/configuration/provider-budgets:
+    get:
+      tags: [Admin Configuration]
+      operationId: adminGetProviderBudgetMetadata
+      description: |
+        Returns read-only provider budget limits and usage metadata without
+        credentials. Patch J exposes no provider-budget mutation.
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Supabase JWT
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 500 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 200 }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ActorId:
+      name: actorId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MechanicId:
+      name: mechanicId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RoundId:
+      name: roundId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AssignmentId:
+      name: assignmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DiagnosisId:
+      name: diagnosisId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    QuoteId:
+      name: quoteId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReminderId:
+      name: reminderId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OccurrenceId:
+      name: occurrenceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  requestBodies:
+    AdminReason:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AdminReason" }
+    RoleMutation:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RoleMutation" }
+    InternalNote:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/InternalNoteMutation" }
+    ConfigMutation:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ConfigMutation" }
+
+  responses:
+    AdminObject:
+      description: Admin-safe redacted result
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AdminSafeObject" }
+    PagedResult:
+      description: Bounded cursor-paginated admin-safe result
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PagedAdminResult" }
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Active admin role is required
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Target does not exist or is not visible
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Current state or concurrency invariant rejects the command
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    AppRole:
+      type: string
+      enum: [rider, mechanic, admin]
+    UserStatus:
+      type: string
+      enum: [active, suspended, archived]
+    AdminReason:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+    RoleMutation:
+      type: object
+      additionalProperties: false
+      required: [reason, role]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        role: { $ref: "#/components/schemas/AppRole" }
+    InternalNoteMutation:
+      type: object
+      additionalProperties: false
+      required: [reason, note]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        note: { type: string, minLength: 1, maxLength: 2000 }
+    MechanicSkillsMutation:
+      type: object
+      additionalProperties: false
+      required: [reason, service_types]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        service_types:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - emergency_rescue
+              - mobile_repair
+              - at_home_service
+              - periodic_maintenance
+              - other
+    MechanicRadiusMutation:
+      type: object
+      additionalProperties: false
+      required: [reason, service_radius_km]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        service_radius_km: { type: number, exclusiveMinimum: 0, maximum: 100 }
+    MechanicCommand:
+      type: object
+      additionalProperties: false
+      required: [reason, mechanic_id]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        mechanic_id: { type: string, format: uuid }
+    StuckAssignmentCommand:
+      type: object
+      additionalProperties: false
+      required: [reason, action]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        action:
+          type: string
+          enum: [cancel, reassign]
+        mechanic_id: { type: string, format: uuid }
+    QuoteDisputeCommand:
+      type: object
+      additionalProperties: false
+      required: [reason, resolution]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        resolution:
+          type: string
+          enum: [request_revision, void_pending_quote, uphold_latest_quote]
+    EnableReminderCommand:
+      type: object
+      additionalProperties: false
+      required: [reason, next_due_at]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        next_due_at: { type: string, format: date-time }
+    ConfigMutation:
+      type: object
+      additionalProperties: false
+      required: [reason, values]
+      properties:
+        reason: { type: string, minLength: 10, maxLength: 500 }
+        values:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          description: |
+            One or more allowlisted dispatch values. Radius steps must be
+            strictly ascending. When both values are present,
+            dispatch.total_wait_seconds must be greater than or equal to
+            dispatch.offer_expiry_seconds. Equivalent validation applies
+            against the effective stored offer expiry for partial updates.
+          properties:
+            "dispatch.radius_steps_km":
+              type: array
+              minItems: 1
+              maxItems: 8
+              items: { type: number, minimum: 1, maximum: 100 }
+              default: [2, 5, 8, 12]
+              description: Strictly ascending radius values in kilometers.
+            "dispatch.offer_expiry_seconds":
+              type: integer
+              minimum: 30
+              maximum: 300
+              default: 60
+            "dispatch.max_rounds":
+              type: integer
+              minimum: 1
+              maximum: 8
+              default: 4
+            "dispatch.total_wait_seconds":
+              type: integer
+              minimum: 60
+              maximum: 1800
+              default: 360
+    AdminSafeObject:
+      type: object
+      additionalProperties: true
+      description: |
+        Endpoint-specific allowlisted DTO. It never contains credentials, raw
+        device keys, provider secrets/payloads, raw audio, payment-sensitive
+        data, or unrestricted private text.
+    PagedAdminResult:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/AdminSafeObject" }
+        page:
+          type: object
+          additionalProperties: false
+          required: [limit, has_more]
+          properties:
+            limit: { type: integer, minimum: 1, maximum: 100 }
+            has_more: { type: boolean }
+            next_cursor: { type: [string, "null"] }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error_code, message]
+      properties:
+        error_code: { type: string }
+        message: { type: string }
+        request_id: { type: string }
