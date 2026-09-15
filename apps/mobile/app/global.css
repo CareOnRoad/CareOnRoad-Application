@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Brand tokens (kept for reference parity with old web demo) */
+:root {
+  --navy: #16202f;
+  --green: #145413;
+  --mint: #a9ffad;
+  --brand-blue: #1974f7;
+  --brand-red: #ed3f3a;
+}
+
+@layer base {
+  html,
+  body {
+    @apply bg-navy text-white;
+  }
+}

@@ -1,0 +1,45 @@
+import type { Config } from 'tailwindcss'
+
+export default {
+  content: ['./src/**/*.{ts,tsx}', './app/**/*.{ts,tsx}'],
+  presets: [require('nativewind/preset')],
+  theme: {
+    extend: {
+      colors: {
+        navy: '#16202f',
+        green: '#145413',
+        mint: '#a9ffad',
+        'brand-blue': '#1974f7',
+        'brand-red': '#ed3f3a',
+      },
+    },
+  },
+  safelist: [
+    'bg-primary',
+    'text-primary',
+    'bg-destructive',
+    'text-destructive-foreground',
+    'bg-[var(--navy)]',
+    'text-[var(--mint)]',
+    'bg-[var(--green)]',
+    'bg-[var(--green)]/15',
+    'bg-[var(--green)]/10',
+    'text-[var(--green)]',
+    'bg-amber-500/15',
+    'text-amber-600',
+    'dark:text-amber-400',
+    'bg-primary/10',
+    'bg-primary/5',
+    'bg-destructive/10',
+    'border-primary',
+    'ring-primary/30',
+    'bg-white/10',
+    'bg-white/5',
+    'bg-white/20',
+    'bg-white/15',
+    'ring-white/20',
+    'bg-[var(--mint)]/20',
+    'text-[var(--mint)]',
+    'border-[var(--mint)]/30',
+  ],
+} satisfies Config
