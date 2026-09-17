@@ -8,7 +8,7 @@ experience, and the complete backend/API service.
 ```text
 apps/
   api/      Next.js API service, chatbot and local ONNX ASR
-  mobile/   rider-oriented Next.js application
+  mobile/   Expo Router application for Android, iOS, and web
   web/      web Next.js application
 packages/   shared package workspaces
 supabase/   authoritative PostgreSQL migrations
@@ -33,16 +33,36 @@ Copy-Item apps/api/.env.example apps/api/.env.local
 pnpm.cmd run dev:api
 ```
 
+Mobile uses a separate pnpm installation boundary because Expo SDK 52 requires
+the React 18 / React Native dependency lane. Install it explicitly after the
+root boundary:
+
+```powershell
+pnpm.cmd --dir apps/mobile install
+```
+
 Do not commit secrets. Use only test/development Supabase credentials and review
 migration state before applying `supabase/migrations`.
 
-The applications can be started separately:
+API and web are run from the root workspace:
 
 ```powershell
 pnpm.cmd run dev:api
-pnpm.cmd run dev:mobile
 pnpm.cmd run dev:web
 ```
+
+Run mobile commands through its own boundary:
+
+```powershell
+pnpm.cmd run dev:mobile
+pnpm.cmd run lint:mobile
+pnpm.cmd run typecheck:mobile
+pnpm.cmd run build:mobile
+```
+
+`build:mobile` is an Android JavaScript/Hermes bundle verification command. It
+does not produce an installable APK; use the Android native build workflow when
+an APK or device installation is required.
 
 ## Checks
 
@@ -51,7 +71,12 @@ pnpm.cmd run typecheck
 pnpm.cmd run lint
 pnpm.cmd run lint:web
 pnpm.cmd run test
-pnpm.cmd run build
+pnpm.cmd run build:api
+pnpm.cmd run build:web
+pnpm.cmd run typecheck:mobile
+pnpm.cmd run lint:mobile
+pnpm.cmd run build:mobile
+pnpm.cmd run check:mobile-native-sync
 pnpm.cmd run asr:smoke
 ```
 
@@ -65,6 +90,41 @@ explicitly with `pnpm.cmd run test:db` or `pnpm.cmd run test:full`.
 - Database migrations: `supabase/migrations`
 - Spec Kit artifacts: `specs` and `.specify`
 - Repository guidance: `AGENTS.md`
+
+## Dependency boundaries
+
+| Application | Supported lane |
+|---|---|
+| API | Next.js 15 + React 19 |
+| Web | Next.js 16 + React 19 |
+| Mobile | Expo SDK 52 + React 18.3.1 + React Native 0.76.9 |
+
+Different React versions are intentional because these applications run in
+separate bundlers and installation boundaries. Do not use a repository-wide
+React override to force one version across all applications.
+
+## Native Android configuration
+
+`apps/mobile/android` is committed and synchronized from mobile `app.json`
+with controlled Expo Prebuild. When changing app name, orientation, splash,
+package ID, permissions, or Expo plugins, run:
+
+```powershell
+pnpm.cmd --dir apps/mobile run prebuild:android
+pnpm.cmd run check:mobile-native-sync
+```
+
+Review and commit the generated Android diff together with the `app.json`
+change. See `apps/mobile/NATIVE-CONFIG-WORKFLOW.md` for the full policy and
+`apps/mobile/DEVICE-SMOKE-TEST.md` for the required emulator/device release
+checklist.
+
+## Recovery merge strategy
+
+Review the dependency recovery as focused commits/PRs: workspace and scripts,
+mobile dependency alignment, Metro/NativeWind, lockfiles, then documentation.
+Merge only after root and mobile frozen installs, API/web checks, mobile bundle,
+native-sync check, and a device/emulator smoke test have passed.
 
 ## Deployment
 
