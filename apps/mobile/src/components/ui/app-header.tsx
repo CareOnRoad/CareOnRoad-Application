@@ -1,8 +1,18 @@
 import React from 'react';
-import { Pressable, Text, View, type ViewProps } from 'react-native';
-import { ArrowLeft, Bell, ChevronDown, ChevronRight } from 'lucide-react-native';
+import { Pressable, Text, View } from 'react-native';
+import { ArrowLeft, Bell } from 'lucide-react-native';
 import { cn } from '@/lib/utils';
 
+/**
+ * AppHeader - header chuẩn cho mọi màn hình.
+ *
+ * Variants:
+ *  - `default`: nền trắng, viền dưới slate-200. Phù hợp màn hình nội dung chính.
+ *  - `navy`: nền navy-900, chữ trắng. Phù hợp màn hình hero / on-boarding / tracking.
+ *
+ * Mặc định hiển thị 1 nút bell ở góc phải (notifications). Caller có thể override
+ * qua prop `right`.
+ */
 export function AppHeader({
   title,
   subtitle,
@@ -21,13 +31,14 @@ export function AppHeader({
     <View
       className={cn(
         'flex-row items-center gap-3 px-5 pb-4 pt-5',
-        isNavy ? 'bg-navy' : 'border-b border-border bg-card/95',
+        isNavy ? 'bg-navy' : 'border-b border-border bg-card',
       )}
     >
       {onBack && (
         <Pressable
           onPress={onBack}
-          accessibilityLabel="Go back"
+          accessibilityLabel="Quay lại"
+          accessibilityRole="button"
           className={cn(
             'size-9 shrink-0 items-center justify-center rounded-full active:scale-95',
             isNavy ? 'bg-white/10' : 'bg-secondary',
@@ -55,7 +66,8 @@ export function AppHeader({
       </View>
       {right ?? (
         <Pressable
-          accessibilityLabel="Notifications"
+          accessibilityLabel="Thông báo"
+          accessibilityRole="button"
           className={cn(
             'relative size-9 shrink-0 items-center justify-center rounded-full active:scale-95',
             isNavy ? 'bg-white/10' : 'bg-secondary',
@@ -68,5 +80,3 @@ export function AppHeader({
     </View>
   );
 }
-
-export { ChevronDown, ChevronRight };

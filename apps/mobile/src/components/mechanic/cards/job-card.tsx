@@ -1,7 +1,6 @@
 import React from 'react';
-import { Image, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { Phone, Bike, Wrench, ChevronRight, Clock } from 'lucide-react-native';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { formatVND } from '@/lib/mock-data';
 import type { MechanicJob } from '@/lib/mechanic-types';

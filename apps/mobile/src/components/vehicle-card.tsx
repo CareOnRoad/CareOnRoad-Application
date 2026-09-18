@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Gauge, ChevronRight } from 'lucide-react-native';
 import { Badge } from '@/components/ui/badge';

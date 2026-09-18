@@ -5,34 +5,35 @@ import {
   CalendarCheck,
   CalendarClock,
   Check,
-  Droplet,
-  Disc,
-  CircleDot,
   LucideIcon,
   Wrench,
   XCircle,
   FileText,
 } from 'lucide-react-native';
+
 import { useApp } from '@/contexts/app-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { BookingCard } from '@/components/booking-card';
 import { CancelAppointmentModal } from '@/components/cancel-appointment-modal';
 import { Card } from '@/components/ui/card';
-import { formatVND, serviceTypes, timeSlots } from '@/lib/mock-data';
+import { EmptyState } from '@/components/ui/empty-state';
+import { formatVND } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 import type { Appointment } from '@/lib/types';
-
-const serviceIcons: Record<string, LucideIcon> = {
-  oil: Droplet,
-  brake: Disc,
-  tire: CircleDot,
-  general: Wrench,
-};
 
 type HistoryTab = 'maintenance' | 'emergency';
 type MaintenanceFilter = 'upcoming' | 'canceled' | 'completed';
 
+/**
+ * ScheduleScreen - đặt lịch bảo dưỡng + xem lịch sử.
+ *
+ * Layout 2 cấp:
+ *  - Cấp 1: tab Maintenance / Emergency với badge count.
+ *  - Cấp 2 (chỉ Maintenance): filter Upcoming / Canceled / Completed.
+ *
+ * Mỗi filter có EmptyState riêng để hướng dẫn user.
+ */
 export default function ScheduleScreen() {
   const {
     appointments,
@@ -51,107 +52,66 @@ export default function ScheduleScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      <AppHeader title="Booking & History" subtitle="Schedule and review your services" />
+      <AppHeader title="Đặt lịch & Lịch sử" subtitle="Quản lý lịch bảo dưỡng và cứu hộ" />
+
+      {/* Tab chính */}
       <View className="px-5 pb-3 pt-1">
         <View className="flex-row gap-2 rounded-2xl border border-border bg-secondary/40 p-1">
-          <Pressable
+          <TabButton
+            active={tab === 'maintenance'}
+            icon={CalendarClock}
+            label="Bảo dưỡng"
+            count={totalMaintenance}
+            tone="primary"
             onPress={() => setTab('maintenance')}
-            className={cn(
-              'flex-1 flex-row items-center justify-center gap-1.5 rounded-xl py-2.5 active:scale-[0.97]',
-              tab === 'maintenance' ? 'bg-card shadow-sm' : '',
-            )}
-          >
-            <CalendarClock size={16} color={tab === 'maintenance' ? '#16202f' : '#64748b'} />
-            <Text
-              className={cn(
-                'text-sm font-semibold',
-                tab === 'maintenance' ? 'text-foreground' : 'text-muted-foreground',
-              )}
-            >
-              Maintenance
-            </Text>
-            <View
-              className={cn(
-                'rounded-full px-1.5 py-0.5',
-                tab === 'maintenance' ? 'bg-primary/10' : 'bg-muted',
-              )}
-            >
-              <Text
-                className={cn(
-                  'text-[10px] font-bold',
-                  tab === 'maintenance' ? 'text-primary' : 'text-muted-foreground',
-                )}
-              >
-                {totalMaintenance}
-              </Text>
-            </View>
-          </Pressable>
-          <Pressable
+          />
+          <TabButton
+            active={tab === 'emergency'}
+            icon={Wrench}
+            label="Cứu hộ"
+            count={totalEmergency}
+            tone="destructive"
             onPress={() => setTab('emergency')}
-            className={cn(
-              'flex-1 flex-row items-center justify-center gap-1.5 rounded-xl py-2.5 active:scale-[0.97]',
-              tab === 'emergency' ? 'bg-card shadow-sm' : '',
-            )}
-          >
-            <Wrench size={16} color={tab === 'emergency' ? '#16202f' : '#64748b'} />
-            <Text
-              className={cn(
-                'text-sm font-semibold',
-                tab === 'emergency' ? 'text-foreground' : 'text-muted-foreground',
-              )}
-            >
-              Emergency
-            </Text>
-            <View
-              className={cn(
-                'rounded-full px-1.5 py-0.5',
-                tab === 'emergency' ? 'bg-destructive/10' : 'bg-muted',
-              )}
-            >
-              <Text
-                className={cn(
-                  'text-[10px] font-bold',
-                  tab === 'emergency' ? 'text-destructive' : 'text-muted-foreground',
-                )}
-              >
-                {totalEmergency}
-              </Text>
-            </View>
-          </Pressable>
+          />
         </View>
       </View>
 
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
+        showsVerticalScrollIndicator={false}
       >
         {tab === 'maintenance' && (
-          <ActionButton fullWidth className="mb-5 py-3" onPress={() => router.push('/rider/schedule/booking')}>
-            <CalendarCheck size={16} color="#ffffff" />
-            <Text className="text-sm font-semibold text-primary-foreground">
-              Book new maintenance
-            </Text>
-          </ActionButton>
-        )}
-
-        {tab === 'maintenance' && (
           <>
+            <ActionButton
+              fullWidth
+              className="mb-5 py-3"
+              onPress={() => router.push('/rider/schedule/booking')}
+              accessibilityLabel="Đặt lịch bảo dưỡng mới"
+            >
+              <CalendarCheck size={18} color="#ffffff" />
+              <Text className="text-base font-semibold text-primary-foreground">Đặt lịch bảo dưỡng mới</Text>
+            </ActionButton>
+
+            {/* Filter cấp 2 */}
             <View className="mb-3 flex-row gap-2 rounded-2xl bg-secondary/40 p-1">
               {(
                 [
-                  { id: 'upcoming', label: 'Upcoming', count: appointments.length },
-                  { id: 'canceled', label: 'Canceled', count: canceledAppointments.length },
-                  { id: 'completed', label: 'Completed', count: completedCount },
+                  { id: 'upcoming', label: 'Sắp tới', count: appointments.length },
+                  { id: 'canceled', label: 'Đã huỷ', count: canceledAppointments.length },
+                  { id: 'completed', label: 'Hoàn tất', count: completedCount },
                 ] as { id: MaintenanceFilter; label: string; count: number }[]
               ).map((f) => {
                 const active = maintenanceFilter === f.id;
                 return (
                   <Pressable
                     key={f.id}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
                     onPress={() => setMaintenanceFilter(f.id)}
                     className={cn(
-                      'flex-1 flex-row items-center justify-center gap-1.5 rounded-xl py-2',
-                      active ? 'bg-card shadow-sm' : '',
+                      'flex-1 flex-row items-center justify-center gap-1.5 rounded-xl py-2 active:opacity-70',
+                      active && 'bg-card shadow-sm',
                     )}
                   >
                     <Text
@@ -162,12 +122,7 @@ export default function ScheduleScreen() {
                     >
                       {f.label}
                     </Text>
-                    <View
-                      className={cn(
-                        'rounded-full px-1.5',
-                        active ? 'bg-primary/10' : 'bg-muted',
-                      )}
-                    >
+                    <View className={cn('rounded-full px-1.5', active ? 'bg-primary/10' : 'bg-muted')}>
                       <Text
                         className={cn(
                           'text-[10px] font-bold',
@@ -185,9 +140,17 @@ export default function ScheduleScreen() {
             {maintenanceFilter === 'upcoming' && (
               <View className="gap-3">
                 {appointments.length === 0 ? (
-                  <EmptyHint
-                    title="No upcoming appointments"
-                    description="Book a maintenance visit and it will appear here."
+                  <EmptyState
+                    icon={CalendarClock}
+                    tone="primary"
+                    title="Chưa có lịch bảo dưỡng"
+                    description="Đặt lịch bảo dưỡng và nó sẽ hiển thị tại đây."
+                    action={
+                      <ActionButton onPress={() => router.push('/rider/schedule/booking')}>
+                        <CalendarCheck size={16} color="#ffffff" />
+                        <Text className="text-sm font-semibold text-primary-foreground">Đặt lịch ngay</Text>
+                      </ActionButton>
+                    }
                   />
                 ) : (
                   appointments.map((a) => (
@@ -200,9 +163,10 @@ export default function ScheduleScreen() {
             {maintenanceFilter === 'canceled' && (
               <View className="gap-3">
                 {canceledAppointments.length === 0 ? (
-                  <EmptyHint
-                    title="No canceled bookings"
-                    description="Canceled appointments with their reason will appear here."
+                  <EmptyState
+                    icon={XCircle}
+                    title="Chưa có lịch bị huỷ"
+                    description="Các lịch bị huỷ kèm lý do sẽ hiển thị tại đây."
                   />
                 ) : (
                   canceledAppointments.map((c) => <CanceledBookingCard key={c.id} canceled={c} />)
@@ -213,9 +177,11 @@ export default function ScheduleScreen() {
             {maintenanceFilter === 'completed' && (
               <View className="gap-3">
                 {services.length === 0 ? (
-                  <EmptyHint
-                    title="No completed services"
-                    description="Completed maintenance visits will appear here."
+                  <EmptyState
+                    icon={Check}
+                    tone="success"
+                    title="Chưa có dịch vụ hoàn tất"
+                    description="Các lần bảo dưỡng đã hoàn thành sẽ hiển thị tại đây."
                   />
                 ) : (
                   services.map((s) => (
@@ -257,17 +223,29 @@ export default function ScheduleScreen() {
         {tab === 'emergency' && (
           <View className="gap-3">
             {emergencyCalls.length === 0 ? (
-              <EmptyHint
-                title="No emergency calls yet"
-                description="Completed emergency rescue requests will appear here with damage and repair details."
+              <EmptyState
+                icon={Wrench}
+                tone="destructive"
+                title="Chưa có lịch sử cứu hộ"
+                description="Các yêu cầu cứu hộ đã hoàn thành kèm chi tiết hư hại/sửa chữa sẽ hiển thị tại đây."
+                action={
+                  <ActionButton
+                    variant="destructive"
+                    onPress={() => router.push('/rider/(tabs)/rescue')}
+                    accessibilityLabel="Yêu cầu cứu hộ ngay"
+                  >
+                    <Wrench size={16} color="#ffffff" />
+                    <Text className="text-sm font-semibold text-destructive-foreground">Yêu cầu cứu hộ</Text>
+                  </ActionButton>
+                }
               />
             ) : (
               emergencyCalls.map((call) => <EmergencyHistoryCard key={call.id} call={call} />)
             )}
-            <Card className="border-dashed bg-secondary/30 p-4">
+            <Card className="border-dashed bg-secondary/40 p-4">
               <Text className="text-center text-xs text-muted-foreground">
-                Need emergency help? Go to the{' '}
-                <Text className="font-semibold text-foreground">Rescue</Text> tab to request a mechanic.
+                Cần hỗ trợ khẩn cấp? Mở tab{' '}
+                <Text className="font-semibold text-foreground">Cứu hộ</Text> để gửi yêu cầu.
               </Text>
             </Card>
           </View>
@@ -291,6 +269,65 @@ export default function ScheduleScreen() {
   );
 }
 
+function TabButton({
+  active,
+  icon: Icon,
+  label,
+  count,
+  tone,
+  onPress,
+}: {
+  active: boolean;
+  icon: LucideIcon;
+  label: string;
+  count: number;
+  tone: 'primary' | 'destructive';
+  onPress: () => void;
+}) {
+  const activeColor = tone === 'primary' ? '#1974f7' : '#ed3f3a';
+  const inactiveColor = '#64748b';
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      className={cn(
+        'flex-1 flex-row items-center justify-center gap-1.5 rounded-xl py-2.5 active:scale-[0.97]',
+        active && 'bg-card shadow-sm',
+      )}
+    >
+      <Icon size={16} color={active ? activeColor : inactiveColor} />
+      <Text
+        className={cn(
+          'text-sm font-semibold',
+          active ? 'text-foreground' : 'text-muted-foreground',
+        )}
+      >
+        {label}
+      </Text>
+      <View
+        className={cn(
+          'rounded-full px-1.5 py-0.5',
+          active ? (tone === 'primary' ? 'bg-primary/10' : 'bg-destructive/10') : 'bg-muted',
+        )}
+      >
+        <Text
+          className={cn(
+            'text-[10px] font-bold',
+            active
+              ? tone === 'primary'
+                ? 'text-primary'
+                : 'text-destructive'
+              : 'text-muted-foreground',
+          )}
+        >
+          {count}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 function CanceledBookingCard({
   canceled,
 }: {
@@ -304,14 +341,14 @@ function CanceledBookingCard({
           <Text className="text-sm font-semibold text-white">{canceled.service}</Text>
         </View>
         <View className="rounded-full bg-white/15 px-2.5 py-1">
-          <Text className="text-xs font-semibold text-white">Canceled</Text>
+          <Text className="text-xs font-semibold text-white">Đã huỷ</Text>
         </View>
       </View>
       <View className="flex-row gap-2 p-4">
         <View className="flex-1 gap-1">
           <View className="flex-row items-center gap-1">
             <Wrench size={14} color="#64748b" />
-            <Text className="text-xs text-muted-foreground">Vehicle</Text>
+            <Text className="text-xs text-muted-foreground">Xe</Text>
           </View>
           <Text className="text-sm font-semibold leading-tight text-foreground">
             {canceled.vehicleName}
@@ -320,7 +357,7 @@ function CanceledBookingCard({
         <View className="flex-1 gap-1">
           <View className="flex-row items-center gap-1">
             <CalendarClock size={14} color="#64748b" />
-            <Text className="text-xs text-muted-foreground">Date</Text>
+            <Text className="text-xs text-muted-foreground">Ngày</Text>
           </View>
           <Text className="text-sm font-semibold text-foreground">
             {canceled.date} · {canceled.time}
@@ -329,7 +366,7 @@ function CanceledBookingCard({
         <View className="flex-1 gap-1">
           <View className="flex-row items-center gap-1">
             <FileText size={14} color="#64748b" />
-            <Text className="text-xs text-muted-foreground">Reason</Text>
+            <Text className="text-xs text-muted-foreground">Lý do</Text>
           </View>
           <Text className="text-xs font-medium text-foreground" numberOfLines={2}>
             {canceled.reason}
@@ -366,20 +403,11 @@ function EmergencyHistoryCard({ call }: { call: import('@/lib/types').EmergencyC
             </View>
             <View className="flex-row items-center gap-1 rounded-full bg-green/10 px-2.5 py-1">
               <Check size={12} color="#145413" />
-              <Text className="text-xs font-semibold text-green">Completed</Text>
+              <Text className="text-xs font-semibold text-green">Hoàn tất</Text>
             </View>
           </View>
         </View>
       </View>
-    </Card>
-  );
-}
-
-function EmptyHint({ title, description }: { title: string; description: string }) {
-  return (
-    <Card className="items-center gap-2 px-6 py-12">
-      <Text className="font-semibold text-foreground">{title}</Text>
-      <Text className="text-center text-sm text-muted-foreground">{description}</Text>
     </Card>
   );
 }

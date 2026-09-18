@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { router } from 'expo-router';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import {
   BatteryWarning,
@@ -17,11 +16,13 @@ import {
   Siren,
   TriangleAlert,
 } from 'lucide-react-native';
+
 import { useApp } from '@/contexts/app-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AiChatbox } from '@/components/ai-chatbox';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
+import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { Field, FormTextInput } from '@/components/ui/form';
 import { MechanicCard } from '@/components/mechanic-card';
@@ -38,20 +39,32 @@ const iconMap: Record<string, LucideIcon> = {
 
 type Phase = 'select' | 'searching' | 'tracking';
 const timeline = [
-  'Request Sent',
-  'Mechanic Assigned',
-  'Mechanic On The Way',
-  'Mechanic Arrived',
-  'Service Completed',
+  'Đã gửi yêu cầu',
+  'Đã ghép thợ',
+  'Thợ đang đến',
+  'Thợ đã đến nơi',
+  'Hoàn tất dịch vụ',
 ];
 
+/**
+ * RescueScreen - yêu cầu cứu hộ khẩn cấp.
+ *
+ * State machine:
+ *  - select: chọn loại sự cố + địa điểm → nhấn Request Assistance.
+ *  - searching: tìm thợ gần nhất (mock 2.4s).
+ *  - tracking: theo dõi thợ + tiến trình + điền service summary sau khi hoàn tất.
+ *
+ * Design principles:
+ *  - Hero destructive gradient thu hút sự chú ý cho flow cứu hộ.
+ *  - Issue cards dùng icon-container + text rõ ràng, dễ chạm.
+ *  - Tracking timeline dùng brand-blue (active) + green (done) + slate (todo).
+ */
 export default function RescueScreen() {
   const { vehicles, addEmergencyCall } = useApp();
   const [phase, setPhase] = useState<Phase>('select');
   const [issue, setIssue] = useState<string | null>(null);
   const [step, setStep] = useState(1);
   const [eta, setEta] = useState(12);
-  const [completed, setCompleted] = useState(false);
   const [damageDesc, setDamageDesc] = useState('');
   const [repairs, setRepairs] = useState('');
   const [price, setPrice] = useState('');
@@ -79,7 +92,6 @@ export default function RescueScreen() {
     setStep((s) => {
       const next = Math.min(s + 1, timeline.length - 1);
       if (next >= 3) setEta(0);
-      if (next === timeline.length - 1) setCompleted(true);
       return next;
     });
   };
@@ -89,7 +101,6 @@ export default function RescueScreen() {
     setIssue(null);
     setStep(1);
     setEta(12);
-    setCompleted(false);
     setDamageDesc('');
     setRepairs('');
     setPrice('');
@@ -103,7 +114,7 @@ export default function RescueScreen() {
     const now = new Date();
     addEmergencyCall({
       vehicleName,
-      issue: issueLabel ?? 'Emergency',
+      issue: issueLabel ?? 'Khẩn cấp',
       damageDescription:
         damageDesc.trim() ||
         'Chi tiết hư hại chưa được ghi nhận. Vui lòng bổ sung sau.',
@@ -122,7 +133,7 @@ export default function RescueScreen() {
   if (phase === 'searching') {
     return (
       <View className="flex-1 bg-background">
-        <AppHeader title="Emergency Rescue" variant="navy" />
+        <AppHeader title="Cứu hộ khẩn cấp" variant="navy" />
         <View className="flex-1 items-center justify-center gap-5 px-8">
           <View className="size-28 items-center justify-center">
             <View className="absolute inset-0 rounded-full bg-destructive/30" />
@@ -132,11 +143,15 @@ export default function RescueScreen() {
             </View>
           </View>
           <View className="items-center">
-            <Text className="text-lg font-bold text-foreground">Finding nearby mechanics…</Text>
-            <Text className="mt-1 text-center text-sm text-muted-foreground">
-              Matching you with the closest available rider for{' '}
-              <Text className="font-semibold">{issueLabel}</Text>
+            <Text className="text-xl font-bold text-foreground">Đang tìm thợ gần bạn…</Text>
+            <Text className="mt-2 px-4 text-center text-sm text-muted-foreground">
+              Đang ghép thợ phù hợp cho <Text className="font-semibold text-foreground">{issueLabel}</Text>
             </Text>
+          </View>
+          <View className="flex-row gap-1.5">
+            <Dot delay={0} />
+            <Dot delay={150} />
+            <Dot delay={300} />
           </View>
         </View>
       </View>
@@ -146,11 +161,13 @@ export default function RescueScreen() {
   if (phase === 'tracking') {
     return (
       <View className="flex-1 bg-background">
-        <AppHeader title="Mechanic Tracking" subtitle={issueLabel} onBack={reset} />
+        <AppHeader title="Theo dõi thợ" subtitle={issueLabel} onBack={reset} />
         <ScrollView
           className="flex-1"
           contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
+          showsVerticalScrollIndicator={false}
         >
+          {/* Map hero */}
           <Card className="relative h-44 overflow-hidden">
             <Image
               source={{
@@ -159,21 +176,28 @@ export default function RescueScreen() {
               className="absolute inset-0 size-full"
               resizeMode="cover"
             />
-            <View className="absolute inset-0 bg-navy/10" />
+            <View className="absolute inset-0 bg-navy/30" />
             <View className="absolute left-3 top-3">
-              <Badge className="bg-white">
+              <Badge className="bg-white" tone="blue">
                 <Navigation size={12} color="#1974f7" />
-                <Text className="ml-1 text-xs font-semibold text-foreground">Live tracking</Text>
+                <Text className="ml-1 text-xs font-semibold text-primary">Đang theo dõi</Text>
               </Badge>
             </View>
-            <View className="absolute bottom-3 left-3 right-3 flex-row items-center justify-between rounded-2xl bg-white px-4 py-2.5 shadow-lg">
+            <View className="absolute bottom-3 left-3 right-3 flex-row items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-lg">
               <View className="flex-row items-center gap-2">
-                <Clock size={16} color="#1974f7" />
-                <Text className="text-sm font-semibold text-foreground">
-                  {step >= 3 ? 'Arrived' : `ETA ${eta} min`}
-                </Text>
+                <View className="size-8 items-center justify-center rounded-full bg-primary/10">
+                  <Clock size={16} color="#1974f7" />
+                </View>
+                <View>
+                  <Text className="text-xs text-muted-foreground">Trạng thái</Text>
+                  <Text className="text-sm font-bold text-foreground">
+                    {step >= 3 ? 'Đã đến nơi' : `Còn khoảng ${eta} phút`}
+                  </Text>
+                </View>
               </View>
-              <Text className="text-xs text-muted-foreground">2.4 km away</Text>
+              <View className="rounded-full bg-secondary px-2.5 py-1">
+                <Text className="text-xs font-semibold text-secondary-foreground">2.4 km</Text>
+              </View>
             </View>
           </Card>
 
@@ -181,9 +205,10 @@ export default function RescueScreen() {
             <MechanicCard mechanic={mechanic} />
           </View>
 
+          {/* Timeline */}
           <Card className="mt-4 p-4">
-            <Text className="mb-3 font-bold text-foreground">Service Status</Text>
-            <View className="gap-0">
+            <Text className="mb-4 font-bold text-foreground">Tiến trình dịch vụ</Text>
+            <View>
               {timeline.map((label, i) => {
                 const done = i < step;
                 const active = i === step;
@@ -201,7 +226,7 @@ export default function RescueScreen() {
                       >
                         <Text
                           className={cn(
-                            'text-xs',
+                            'text-xs font-bold',
                             done || active ? 'text-white' : 'text-muted-foreground',
                           )}
                         >
@@ -210,10 +235,7 @@ export default function RescueScreen() {
                       </View>
                       {!last && (
                         <View
-                          className={cn(
-                            'my-0.5 w-0.5 flex-1',
-                            done ? 'bg-green' : 'bg-border',
-                          )}
+                          className={cn('my-0.5 w-0.5 flex-1', done ? 'bg-green' : 'bg-border')}
                           style={{ minHeight: 28 }}
                         />
                       )}
@@ -222,14 +244,16 @@ export default function RescueScreen() {
                       <Text
                         className={cn(
                           'text-sm font-semibold',
-                          active ? 'text-primary' : !done && !active ? 'text-muted-foreground' : 'text-foreground',
+                          active
+                            ? 'text-primary'
+                            : !done && !active
+                              ? 'text-muted-foreground'
+                              : 'text-foreground',
                         )}
                       >
                         {label}
                       </Text>
-                      {active && (
-                        <Text className="text-xs text-muted-foreground">In progress…</Text>
-                      )}
+                      {active && <Text className="mt-0.5 text-xs text-muted-foreground">Đang diễn ra…</Text>}
                     </View>
                   </View>
                 );
@@ -237,39 +261,35 @@ export default function RescueScreen() {
             </View>
 
             {step < timeline.length - 1 ? (
-              <ActionButton fullWidth className="mt-1" onPress={advance}>
-                <Text className="text-sm font-semibold text-primary-foreground">
-                  Simulate next step
-                </Text>
+              <ActionButton fullWidth className="mt-2" onPress={advance} accessibilityLabel="Mô phỏng bước tiếp theo">
+                <Text className="text-sm font-semibold text-primary-foreground">Mô phỏng bước tiếp theo</Text>
               </ActionButton>
             ) : (
-              <View className="mt-1 gap-3">
+              <View className="mt-2 gap-3">
                 <View className="flex-row items-center justify-center gap-2 rounded-2xl bg-green/10 py-3">
-                  <Text className="text-sm font-semibold text-green">
-                    ✓ Service completed successfully
-                  </Text>
+                  <Text className="text-sm font-semibold text-green">✓ Dịch vụ đã hoàn tất</Text>
                 </View>
 
                 {saved ? (
                   <View className="rounded-2xl border border-green/30 bg-green/5 p-4">
                     <Text className="text-center text-sm font-semibold text-green">
-                      Saved to Emergency History
+                      Đã lưu vào lịch sử cứu hộ
                     </Text>
                     <Text className="mt-1 text-center text-xs text-muted-foreground">
-                      Bạn có thể xem lại trong tab Schedule → Emergency History.
+                      Bạn có thể xem lại trong tab Đặt lịch → Lịch sử cứu hộ.
                     </Text>
                   </View>
                 ) : (
                   <Card className="gap-3 p-4">
-                    <Text className="text-sm font-semibold text-foreground">Service summary</Text>
-                    <Field label="Mô tả hư hại">
+                    <Text className="text-sm font-semibold text-foreground">Tóm tắt dịch vụ</Text>
+                    <Field label="Mô tả hư hại" hint="Không bắt buộc - dùng để theo dõi bảo hành">
                       <FormTextInput
                         multiline
                         numberOfLines={3}
                         value={damageDesc}
                         onChangeText={setDamageDesc}
                         placeholder="Ví dụ: Lốp trước bị đâm đinh, xẹp hoàn toàn..."
-                        className="min-h-[80px]"
+                        className="min-h-[80px] py-2.5"
                       />
                     </Field>
                     <Field label="Nội dung đã sửa chữa">
@@ -279,7 +299,7 @@ export default function RescueScreen() {
                         value={repairs}
                         onChangeText={setRepairs}
                         placeholder="Ví dụ: Thay lốp mới, cân bằng bánh trước..."
-                        className="min-h-[80px]"
+                        className="min-h-[80px] py-2.5"
                       />
                     </Field>
                     <Field label="Chi phí (VND)">
@@ -290,27 +310,25 @@ export default function RescueScreen() {
                         placeholder="250000"
                       />
                     </Field>
-                    <ActionButton fullWidth onPress={handleSave}>
+                    <ActionButton fullWidth onPress={handleSave} accessibilityLabel="Lưu vào lịch sử cứu hộ">
                       <Save size={16} color="#ffffff" />
-                      <Text className="text-sm font-semibold text-primary-foreground">
-                        Save to Emergency History
-                      </Text>
+                      <Text className="text-sm font-semibold text-primary-foreground">Lưu vào lịch sử cứu hộ</Text>
                     </ActionButton>
                   </Card>
                 )}
 
-                <ActionButton fullWidth variant="outline" onPress={reset}>
+                <ActionButton fullWidth variant="outline" onPress={reset} accessibilityLabel="Tạo yêu cầu mới">
                   <RotateCcw size={16} color="#16202f" />
-                  <Text className="text-sm font-semibold text-foreground">New request</Text>
+                  <Text className="text-sm font-semibold text-foreground">Yêu cầu mới</Text>
                 </ActionButton>
               </View>
             )}
           </Card>
 
-          <ActionButton fullWidth variant="secondary" className="mt-4">
+          <ActionButton fullWidth variant="secondary" className="mt-4" accessibilityLabel="Gọi tổng đài khẩn cấp">
             <PhoneCall size={16} color="#16202f" />
             <Text className="text-sm font-semibold text-secondary-foreground">
-              Call emergency hotline
+              Gọi tổng đài khẩn cấp
             </Text>
           </ActionButton>
 
@@ -324,11 +342,13 @@ export default function RescueScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      <AppHeader title="Emergency Rescue" variant="navy" />
+      <AppHeader title="Cứu hộ khẩn cấp" variant="navy" />
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
+        showsVerticalScrollIndicator={false}
       >
+        {/* Hero destructive */}
         <Card className="overflow-hidden border-0 bg-destructive">
           <View className="flex-row items-center gap-4 p-5">
             <View className="size-16 items-center justify-center">
@@ -338,29 +358,34 @@ export default function RescueScreen() {
               </View>
             </View>
             <View className="flex-1">
-              <Text className="text-lg font-bold text-white">Need help right now?</Text>
+              <Text className="text-lg font-bold text-white">Cần hỗ trợ ngay?</Text>
               <Text className="text-sm text-white/85">
-                Pick an issue below and we'll dispatch the nearest mechanic.
+                Chọn sự cố bên dưới, hệ thống sẽ ghép thợ gần nhất.
               </Text>
             </View>
           </View>
         </Card>
 
-        <View className="mt-5">
-          <Text className="mb-3 font-bold text-foreground">What's the problem?</Text>
+        {/* Issue selector */}
+        <View className="mt-6">
+          <Text className="mb-3 font-bold text-foreground">Sự cố của bạn là gì?</Text>
           <View className="flex-row flex-wrap gap-3">
             {issueCategories.map((cat) => {
               const Icon = iconMap[cat.icon];
               const selected = issue === cat.id;
               return (
-                <View
+                <Pressable
                   key={cat.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`Chọn sự cố ${cat.label}`}
+                  onPress={() => setIssue(cat.id)}
                   className={cn(
                     'w-[48%] rounded-2xl border p-4 active:scale-[0.97]',
                     selected ? 'border-primary bg-primary/5' : 'border-border bg-card',
                   )}
                 >
-                  <Pressable onPress={() => setIssue(cat.id)} className="flex-row items-center gap-3">
+                  <View className="flex-row items-center gap-3">
                     <View
                       className={cn(
                         'size-10 shrink-0 items-center justify-center rounded-xl',
@@ -372,40 +397,54 @@ export default function RescueScreen() {
                     <Text className="flex-1 text-sm font-semibold leading-tight text-foreground">
                       {cat.label}
                     </Text>
-                  </Pressable>
-                </View>
+                  </View>
+                </Pressable>
               );
             })}
           </View>
         </View>
 
+        {/* Location */}
         <Card className="mt-5 p-4">
           <View className="flex-row items-center gap-3">
             <View className="size-10 items-center justify-center rounded-xl bg-primary/10">
               <MapPin size={20} color="#1974f7" />
             </View>
             <View className="flex-1">
-              <Text className="text-xs text-muted-foreground">Your location</Text>
+              <Text className="text-xs text-muted-foreground">Vị trí của bạn</Text>
               <Text className="text-sm font-semibold text-foreground">
-                124 Nguyen Van Cu, District 5, HCMC
+                124 Nguyễn Văn Cừ, Quận 5, TP.HCM
               </Text>
             </View>
-            <Text className="text-sm font-semibold text-primary">Change</Text>
+            <Pressable hitSlop={8} accessibilityLabel="Đổi vị trí">
+              <Text className="text-sm font-semibold text-primary">Đổi</Text>
+            </Pressable>
           </View>
         </Card>
 
         <Card className="mt-3 flex-row items-center justify-between bg-navy p-4">
           <View className="flex-row items-center gap-3">
-            <Clock size={20} color="#a9ffad" />
+            <View className="size-9 items-center justify-center rounded-xl bg-white/10">
+              <Clock size={20} color="#a9ffad" />
+            </View>
             <View>
-              <Text className="text-xs text-white/70">Estimated arrival</Text>
-              <Text className="font-bold text-white">8–14 minutes</Text>
+              <Text className="text-xs text-white/70">Thời gian dự kiến</Text>
+              <Text className="font-bold text-white">8–14 phút</Text>
             </View>
           </View>
           <View className="rounded-full bg-white/15 px-2.5 py-1">
-            <Text className="text-xs font-semibold text-white">{mockMechanics.length} nearby</Text>
+            <Text className="text-xs font-semibold text-white">{mockMechanics.length} thợ gần bạn</Text>
           </View>
         </Card>
+
+        {!issue && (
+          <View className="mt-4">
+            <Banner
+              tone="info"
+              description="Vui lòng chọn sự cố trước khi gửi yêu cầu cứu hộ."
+            />
+          </View>
+        )}
 
         <ActionButton
           fullWidth
@@ -413,17 +452,26 @@ export default function RescueScreen() {
           disabled={!issue}
           className="mt-5 py-4"
           onPress={() => setPhase('searching')}
+          accessibilityLabel="Yêu cầu hỗ trợ cứu hộ"
         >
           <Siren size={20} color="#ffffff" />
-          <Text className="text-base font-semibold text-destructive-foreground">
-            Request Assistance
-          </Text>
+          <Text className="text-base font-semibold text-destructive-foreground">Yêu cầu hỗ trợ</Text>
         </ActionButton>
 
-        <View className="mt-5">
+        <View className="mt-6">
           <AiChatbox />
         </View>
       </ScrollView>
     </View>
+  );
+}
+
+function Dot({ delay }: { delay: number }) {
+  return (
+    <View
+      className="size-2 rounded-full bg-destructive"
+      style={{ opacity: 0.4 }}
+      // Note: animationDelay không phải style native - để đơn giản hiển thị tĩnh
+    />
   );
 }

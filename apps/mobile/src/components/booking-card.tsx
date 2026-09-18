@@ -1,8 +1,7 @@
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { CalendarClock, Clock, Bike, Check, X } from 'lucide-react-native';
 import { ActionButton } from '@/components/ui/action-button';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { formatDate } from '@/lib/mock-data';
 import type { Appointment } from '@/lib/types';

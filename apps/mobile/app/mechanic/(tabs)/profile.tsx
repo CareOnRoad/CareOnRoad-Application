@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   Award,
@@ -17,131 +16,224 @@ import {
   ShieldCheck,
   Star,
   TrendingUp,
+  Wrench,
 } from 'lucide-react-native';
+
 import { useMechanicApp } from '@/contexts/mechanic-app-context';
+import { useAuth } from '@/contexts/auth-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { RowIcon, ToggleRow } from '@/components/ui/toggle-row';
+import { NavRow, RowIcon, ToggleRow } from '@/components/ui/toggle-row';
 import { cn } from '@/lib/utils';
 import { formatVND } from '@/lib/mock-data';
 
+const languageCopy = { EN: 'English', VI: 'Tiếng Việt' } as const;
+
+/**
+ * MechanicProfileScreen - hồ sơ cá nhân + thống kê + cài đặt.
+ *
+ * Hero card navy có avatar, rating, garage info.
+ * Stats cards: total jobs, rating, this month earnings.
+ * Các phần: Garage, Certifications, Settings, Switch role, Logout.
+ */
 export default function MechanicProfileScreen() {
   const { mechanic, garage, earnings, darkMode, toggleDarkMode } = useMechanicApp();
+  const { user: authUser, logout, switchRoleDemo, isBackendConfigured } = useAuth();
   const [notifications, setNotifications] = useState(true);
-  const [language, setLanguage] = useState<'EN' | 'VI'>('EN');
+  const [language, setLanguage] = useState<'EN' | 'VI'>('VI');
+
+  const onLogout = async () => {
+    await logout();
+    router.replace('/login');
+  };
+
+  const onSwitchRole = async () => {
+    if (!isBackendConfigured) {
+      await switchRoleDemo();
+      router.replace('/rider');
+    } else {
+      router.replace('/login');
+    }
+  };
+
+  const displayName = authUser?.name ?? mechanic.name;
+  const displayAvatar = authUser?.avatar ?? mechanic.avatar;
+  const delta = earnings.lastWeek > 0
+    ? ((earnings.thisWeek - earnings.lastWeek) / earnings.lastWeek) * 100
+    : 0;
+  const isUp = delta >= 0;
 
   return (
     <View className="flex-1 bg-background">
-      <AppHeader title="Profile" />
+      <AppHeader title="Hồ sơ" />
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
+        showsVerticalScrollIndicator={false}
       >
+        {/* Hero */}
         <Card className="overflow-hidden border-0 bg-navy">
           <View className="p-5">
             <View className="flex-row items-center gap-4">
-              <Image source={{ uri: mechanic.avatar }} className="size-16 rounded-full" resizeMode="cover" />
+              <View className="size-16 overflow-hidden rounded-full border-2 border-white/20">
+                <Image
+                  source={{ uri: displayAvatar }}
+                  className="size-full"
+                  resizeMode="cover"
+                />
+              </View>
               <View className="flex-1">
-                <Text className="text-lg font-bold text-white">{mechanic.name}</Text>
+                <Text className="text-lg font-bold text-white">{displayName}</Text>
                 <Text className="text-xs text-white/70">{mechanic.specialty}</Text>
+                <View className="mt-1.5 flex-row items-center gap-1.5">
+                  <Badge tone="green">
+                    <Text className="text-[10px] font-semibold text-white">Mechanic</Text>
+                  </Badge>
+                </View>
                 <View className="mt-1 flex-row items-center gap-1">
                   <Star size={14} color="#a9ffad" fill="#a9ffad" />
-                  <Text className="text-xs font-semibold text-white">{mechanic.rating}</Text>
-                  <Text className="text-xs text-white/60">· {mechanic.totalJobs} jobs</Text>
+                  <Text className="text-xs font-bold text-white">{mechanic.rating}</Text>
+                  <Text className="text-xs text-white/60">· {mechanic.totalJobs} công việc</Text>
                 </View>
               </View>
             </View>
             <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
               <ShieldCheck size={16} color="#a9ffad" />
               <Text className="text-xs text-white">
-                {garage.name} · {mechanic.experienceYears} years experience
+                {garage.name} · {mechanic.experienceYears} năm kinh nghiệm
               </Text>
             </View>
           </View>
         </Card>
 
-        <View className="mt-5 flex-row gap-2">
-          <StatTile label="Total jobs" value={mechanic.totalJobs.toString()} tone="blue" />
-          <StatTile label="Rating" value={mechanic.rating.toString()} tone="green" />
-          <StatTile label="This month" value={formatVND(earnings.thisMonth)} tone="amber" small />
+        {/* Stats */}
+        <View className="mt-5 flex-row gap-3">
+          <StatTile
+            icon={Wrench}
+            tone="blue"
+            label="Tổng công việc"
+            value={mechanic.totalJobs.toString()}
+          />
+          <StatTile
+            icon={Star}
+            tone="green"
+            label="Đánh giá"
+            value={mechanic.rating.toString()}
+          />
+          <StatTile
+            icon={TrendingUp}
+            tone="amber"
+            label="Tháng này"
+            value={formatVND(earnings.thisMonth)}
+            small
+          />
         </View>
 
+        {/* Earnings trend */}
         <Card className="mt-5 p-4">
-          <View className="flex-row items-center gap-2">
+          <View className="flex-row items-center gap-3">
             <View className="size-10 shrink-0 items-center justify-center rounded-2xl bg-green/10">
               <TrendingUp size={20} color="#145413" />
             </View>
             <View className="min-w-0 flex-1">
-              <Text className="text-xs text-muted-foreground">This week vs last</Text>
+              <Text className="text-xs text-muted-foreground">Tuần này so với tuần trước</Text>
               <Text className="font-bold text-foreground">
-                +{formatVND(earnings.thisWeek - earnings.lastWeek)}
+                {isUp ? '+' : ''}
+                {formatVND(earnings.thisWeek - earnings.lastWeek)}
               </Text>
             </View>
-            <Badge tone="green">
-              <Text className="text-xs font-semibold text-green">
-                +
-                {(((earnings.thisWeek - earnings.lastWeek) / Math.max(earnings.lastWeek, 1)) * 100).toFixed(1)}%
+            <Badge tone={isUp ? 'green' : 'red'}>
+              <Text className={cn('text-xs font-semibold', isUp ? 'text-green' : 'text-destructive')}>
+                {isUp ? '+' : ''}
+                {delta.toFixed(1)}%
               </Text>
             </Badge>
           </View>
         </Card>
 
-        <View className="mt-5">
-          <Text className="mb-3 font-bold text-foreground">Garage</Text>
+        {/* Garage info */}
+        <View className="mt-6">
+          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Garage
+          </Text>
           <Card className="divide-y divide-border">
-            <Row icon={MapPin} label="Address" value={garage.address} />
-            <Row icon={Phone} label="Garage phone" value={garage.phone} />
-            <Row icon={Mail} label="Contact email" value="quan@quansgarage.vn" />
+            <Row icon={MapPin} label="Địa chỉ" value={garage.address} />
+            <Row icon={Phone} label="Hotline" value={garage.phone} />
+            <Row icon={Mail} label="Email liên hệ" value={authUser?.email ?? 'quan@quansgarage.vn'} />
           </Card>
         </View>
 
-        <View className="mt-5">
-          <Text className="mb-3 font-bold text-foreground">Certifications</Text>
+        {/* Certifications */}
+        <View className="mt-6">
+          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Chứng chỉ
+          </Text>
           <View className="gap-2">
             {mechanic.certifications.map((c) => (
               <Card key={c} className="flex-row items-center gap-3 p-3">
-                <View className="size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-                  <Award size={16} color="#1974f7" />
-                </View>
+                <RowIcon icon={Award} tone="blue" />
                 <Text className="flex-1 text-sm font-medium text-foreground">{c}</Text>
               </Card>
             ))}
           </View>
         </View>
 
-        <View className="mt-5">
-          <Text className="mb-3 font-bold text-foreground">Settings</Text>
+        {/* Settings */}
+        <View className="mt-6">
+          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Cài đặt
+          </Text>
           <Card className="divide-y divide-border">
             <ToggleRow
               icon={Bell}
-              label="Job notifications"
+              label="Thông báo công việc"
+              description="Báo khi có offer mới hoặc việc được ghép"
               checked={notifications}
               onChange={() => setNotifications((v) => !v)}
             />
-            <LanguageRow language={language} onPress={() => setLanguage((l) => (l === 'EN' ? 'VI' : 'EN'))} />
-            <ToggleRow icon={Moon} label="Dark Mode" checked={darkMode} onChange={toggleDarkMode} />
-            <HelpCenterRow />
+            <LanguageRow
+              language={language}
+              onPress={() => setLanguage((l) => (l === 'EN' ? 'VI' : 'EN'))}
+            />
+            <ToggleRow
+              icon={Moon}
+              label="Chế độ tối"
+              description="Giao diện dịu mắt"
+              checked={darkMode}
+              onChange={toggleDarkMode}
+            />
+            <NavRow
+              icon={LifeBuoy}
+              label="Trung tâm hỗ trợ"
+              right={<Text className="text-xs text-muted-foreground">›</Text>}
+            />
           </Card>
         </View>
+
+        {!isBackendConfigured && (
+          <ActionButton
+            fullWidth
+            variant="outline"
+            className="mt-6"
+            onPress={onSwitchRole}
+            accessibilityLabel="Chuyển sang vai trò Rider"
+          >
+            <RefreshCcw size={16} color="#1974f7" />
+            <Text className="text-sm font-semibold text-primary">Chuyển sang Rider</Text>
+          </ActionButton>
+        )}
 
         <ActionButton
           fullWidth
           variant="outline"
-          className="mt-5"
-          onPress={async () => {
-            await AsyncStorage.removeItem('careonroad.role');
-            router.replace('/');
-          }}
+          className="mt-3 border-destructive/30"
+          onPress={onLogout}
+          accessibilityLabel="Đăng xuất"
         >
-          <RefreshCcw size={16} color="#16202f" />
-          <Text className="text-sm font-semibold text-foreground">Switch to Rider view</Text>
-        </ActionButton>
-
-        <ActionButton fullWidth variant="outline" className="mt-3">
           <LogOut size={16} color="#ed3f3a" />
-          <Text className="text-sm font-semibold text-destructive">Logout</Text>
+          <Text className="text-sm font-semibold text-destructive">Đăng xuất</Text>
         </ActionButton>
 
         <Text className="mt-6 text-center text-xs text-muted-foreground">
@@ -154,24 +246,19 @@ export default function MechanicProfileScreen() {
 
 function LanguageRow({ language, onPress }: { language: 'EN' | 'VI'; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} className="flex-row items-center gap-3 p-4">
-      <RowIcon icon={Languages} />
-      <Text className="flex-1 text-sm font-medium text-foreground">Language</Text>
-      <Badge tone="blue">
-        <Text className="text-xs font-semibold text-primary">
-          {language === 'EN' ? 'English' : 'Tiếng Việt'}
-        </Text>
-      </Badge>
-    </Pressable>
-  );
-}
-
-function HelpCenterRow() {
-  return (
-    <Pressable className="flex-row items-center gap-3 p-4">
-      <RowIcon icon={LifeBuoy} />
-      <Text className="flex-1 text-sm font-medium text-foreground">Help Center</Text>
-    </Pressable>
+    <NavRow
+      icon={Languages}
+      label="Ngôn ngữ"
+      description={languageCopy[language]}
+      onPress={onPress}
+      right={
+        <Badge tone="blue">
+          <Text className="text-xs font-semibold text-primary">
+            {language === 'EN' ? 'EN' : 'VI'}
+          </Text>
+        </Badge>
+      }
+    />
   );
 }
 
@@ -196,35 +283,36 @@ function Row({
 }
 
 function StatTile({
+  icon: Icon,
+  tone,
   label,
   value,
-  tone,
   small,
 }: {
+  icon: LucideIcon;
+  tone: 'blue' | 'green' | 'amber';
   label: string;
   value: string;
-  tone: 'blue' | 'green' | 'amber';
   small?: boolean;
 }) {
   const toneStyles = {
-    blue: 'bg-primary/10',
-    green: 'bg-green/10',
-    amber: 'bg-amber-500/15',
-  };
-  const iconColor = {
-    blue: '#1974f7',
-    green: '#145413',
-    amber: '#d97706',
-  };
+    blue: { bg: 'bg-primary/10', fg: '#1974f7' },
+    green: { bg: 'bg-green/10', fg: '#145413' },
+    amber: { bg: 'bg-amber-500/15', fg: '#d97706' },
+  } as const;
+  const s = toneStyles[tone];
   return (
     <Card className="flex-1 items-center p-3">
-      <View className={`size-8 items-center justify-center rounded-xl ${toneStyles[tone]}`}>
-        <Star size={16} color={iconColor[tone]} />
+      <View
+        className="mb-2 size-9 items-center justify-center rounded-xl"
+        style={{ backgroundColor: `${s.fg}1a` }}
+      >
+        <Icon size={16} color={s.fg} />
       </View>
-      <Text className={cn('mt-2 font-bold text-foreground', small ? 'text-sm leading-tight' : 'text-xl')}>
+      <Text className={cn('font-bold text-foreground', small ? 'text-sm leading-tight' : 'text-xl')}>
         {value}
       </Text>
-      <Text className="text-[11px] text-muted-foreground">{label}</Text>
+      <Text className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{label}</Text>
     </Card>
   );
 }
