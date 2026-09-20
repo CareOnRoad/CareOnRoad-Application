@@ -39,7 +39,10 @@ import { cn } from '@/lib/utils';
  */
 export default function RegisterScreen() {
   const { register, isBackendConfigured } = useAuth();
+  // Backend không có endpoint client-side grant role mechanic,
+  // nên khi đã wire BE ta ép role = rider và hiển thị banner.
   const [role, setRole] = useState<AuthRole>('rider');
+  const allowMechanicRole = !isBackendConfigured;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -105,25 +108,37 @@ export default function RegisterScreen() {
             <Text className="mt-1 text-sm text-white/60">Tham gia CareOnRoad ngay hôm nay</Text>
           </View>
 
-          {/* Role selector */}
-          <View className="mt-6 flex-row gap-3">
-            <RoleCard
-              role="rider"
-              active={role === 'rider'}
-              icon={Bike}
-              title="Rider"
-              subtitle="Người dùng xe máy"
-              onPress={() => setRole('rider')}
-            />
-            <RoleCard
-              role="mechanic"
-              active={role === 'mechanic'}
-              icon={Wrench}
-              title="Mechanic"
-              subtitle="Thợ sửa xe"
-              onPress={() => setRole('mechanic')}
-            />
-          </View>
+          {/* Role selector - chỉ hiển thị ở demo mode */}
+          {allowMechanicRole ? (
+            <View className="mt-6 flex-row gap-3">
+              <RoleCard
+                role="rider"
+                active={role === 'rider'}
+                icon={Bike}
+                title="Rider"
+                subtitle="Người dùng xe máy"
+                onPress={() => setRole('rider')}
+              />
+              <RoleCard
+                role="mechanic"
+                active={role === 'mechanic'}
+                icon={Wrench}
+                title="Mechanic"
+                subtitle="Thợ sửa xe"
+                onPress={() => setRole('mechanic')}
+              />
+            </View>
+          ) : null}
+
+          {isBackendConfigured && (
+            <View className="mt-5">
+              <Banner
+                tone="info"
+                title="Đăng ký tài khoản Rider"
+                description="Tài khoản thợ (Mechanic) cần admin duyệt sau khi đăng ký. Vui lòng liên hệ support nếu bạn là thợ sửa xe."
+              />
+            </View>
+          )}
 
           {error && (
             <View className="mt-5">

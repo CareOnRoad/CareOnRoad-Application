@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Bell } from 'lucide-react-native';
 import { cn } from '@/lib/utils';
 
@@ -27,12 +28,17 @@ export function AppHeader({
   variant?: 'default' | 'navy';
 }) {
   const isNavy = variant === 'navy';
+  const insets = useSafeAreaInsets();
+  // Đẩy nội dung xuống dưới status bar / notch bằng top inset.
+  // Caller không cần wrap SafeAreaView riêng.
+  const topInset = Math.max(insets.top, 0);
   return (
     <View
       className={cn(
-        'flex-row items-center gap-3 px-5 pb-4 pt-5',
+        'flex-row items-center gap-3 px-5 pb-4',
         isNavy ? 'bg-navy' : 'border-b border-border bg-card',
       )}
+      style={{ paddingTop: topInset + 20 }}
     >
       {onBack && (
         <Pressable

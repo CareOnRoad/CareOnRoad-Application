@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
 import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check } from 'lucide-react-native';
 
 import { useApp } from '@/contexts/app-context';
@@ -78,7 +79,7 @@ export default function VehicleFormScreen() {
   };
 
   return (
-    <View className="flex-1 bg-background">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader
         title={existing ? 'Chỉnh sửa xe' : 'Thêm xe mới'}
         subtitle={existing ? `${existing.brand} · ${existing.plate}` : 'Điền thông tin bên dưới'}
@@ -173,7 +174,7 @@ export default function VehicleFormScreen() {
           Dữ liệu xe được đồng bộ với máy chủ khi đã tích hợp backend. Trong demo mode lưu cục bộ.
         </Text>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

@@ -269,6 +269,8 @@ export async function getCurrentSession(): Promise<Session | null> {
 
 /**
  * Lấy actor hiện tại từ backend.
+ *
+ * Timeout 20s (lớn hơn default 15s) để chờ BE compile lần đầu / mạng LAN chậm.
  */
 export async function fetchCurrentActor(): Promise<AppActor | null> {
   const client = getSupabase();
@@ -279,7 +281,7 @@ export async function fetchCurrentActor(): Promise<AppActor | null> {
     client.auth.getSession().then((s) => s.data.session?.access_token ?? null),
   );
   try {
-    return await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 10000 });
+    return await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 20000 });
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return null;

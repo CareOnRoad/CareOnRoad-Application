@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
 import { ActivityIndicator, Image, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Calendar,
   CalendarClock,
@@ -29,14 +30,22 @@ import { formatDate } from '@/lib/mock-data';
  */
 export default function VehicleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { vehicles, archiveVehicle } = useApp();
+  const { vehicles, archiveVehicle, reloadVehicles } = useApp();
   const vehicle = vehicles.find((v) => v.id === id);
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Refresh vehicles list when detail mounts so user sees latest data
+  // (e.g. after editing another tab) without manual pull-to-refresh.
+  useEffect(() => {
+    reloadVehicles();
+    // reloadVehicles intentionally not in deps — reference is stable via useCallback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   if (!vehicle) {
     return (
-      <View className="flex-1 bg-background">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
         <AppHeader title="Không tìm thấy xe" onBack={() => router.back()} />
         <View className="flex-1 items-center justify-center px-8">
           <Banner
@@ -45,7 +54,7 @@ export default function VehicleDetailScreen() {
             description="Có thể xe đã được lưu trữ. Vui lòng quay lại danh sách xe."
           />
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -70,7 +79,7 @@ export default function VehicleDetailScreen() {
   };
 
   return (
-    <View className="flex-1 bg-background">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader
         title={vehicle.name}
         subtitle={`${vehicle.brand} · ${vehicle.year}`}
@@ -169,7 +178,7 @@ export default function VehicleDetailScreen() {
           Mã xe: {vehicle.id}
         </Text>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

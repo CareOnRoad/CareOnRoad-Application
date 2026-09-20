@@ -1,36 +1,51 @@
-import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
+  AlarmClock,
   CalendarCheck,
   CalendarClock,
   Check,
   LucideIcon,
+  Plus,
   Wrench,
   XCircle,
   FileText,
+  Pause,
+  Play,
 } from 'lucide-react-native';
 
 import { useApp } from '@/contexts/app-context';
+import { useServiceRequests } from '@/hooks/use-service-requests';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
+import { Badge } from '@/components/ui/badge';
+import { Banner } from '@/components/ui/banner';
 import { BookingCard } from '@/components/booking-card';
 import { CancelAppointmentModal } from '@/components/cancel-appointment-modal';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatVND } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
+import { updateReminder } from '@/lib/reminders-service';
 import type { Appointment } from '@/lib/types';
+import {
+  listReminders,
+  recurrenceLabel,
+  type Reminder,
+  type ReminderRecurrence,
+} from '@/lib/reminders-service';
 
-type HistoryTab = 'maintenance' | 'emergency';
+type HistoryTab = 'maintenance' | 'reminders' | 'emergency';
 type MaintenanceFilter = 'upcoming' | 'canceled' | 'completed';
 
 /**
- * ScheduleScreen - đặt lịch bảo dưỡng + xem lịch sử.
+ * ScheduleScreen - đặt lịch bảo dưỡng + xem lịch sử + reminders.
  *
  * Layout 2 cấp:
- *  - Cấp 1: tab Maintenance / Emergency với badge count.
+ *  - Cấp 1: tab Maintenance / Reminders / Emergency với badge count.
  *  - Cấp 2 (chỉ Maintenance): filter Upcoming / Canceled / Completed.
+ *  - Tab Reminders: list reminders BE (active/snoozed/disabled) + nút tạo mới.
  *
  * Mỗi filter có EmptyState riêng để hướng dẫn user.
  */
@@ -42,11 +57,40 @@ export default function ScheduleScreen() {
     services,
     cancelAppointment,
   } = useApp();
+  const sr = useServiceRequests();
   const [tab, setTab] = useState<HistoryTab>('maintenance');
   const [maintenanceFilter, setMaintenanceFilter] = useState<MaintenanceFilter>('upcoming');
   const [cancelling, setCancelling] = useState<Appointment | null>(null);
 
+  // Reminders state
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [remindersLoading, setRemindersLoading] = useState(false);
+  const [remindersError, setRemindersError] = useState<string | null>(null);
+
+  const reloadReminders = async () => {
+    setRemindersLoading(true);
+    setRemindersError(null);
+    try {
+      const items = await listReminders();
+      setReminders(items);
+    } catch (e) {
+      setRemindersError(e instanceof Error ? e.message : 'Không thể tải nhắc nhở');
+    } finally {
+      setRemindersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'reminders') {
+      void reloadReminders();
+    }
+    if (tab === 'maintenance') {
+      void sr.reloadList();
+    }
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const completedCount = services.length;
+  const activeReminders = reminders.filter((r) => r.status === 'active' || r.status === 'snoozed');
   const totalMaintenance = appointments.length + canceledAppointments.length;
   const totalEmergency = emergencyCalls.length;
 
@@ -64,6 +108,14 @@ export default function ScheduleScreen() {
             count={totalMaintenance}
             tone="primary"
             onPress={() => setTab('maintenance')}
+          />
+          <TabButton
+            active={tab === 'reminders'}
+            icon={AlarmClock}
+            label="Nhắc nhở"
+            count={activeReminders.length}
+            tone="primary"
+            onPress={() => setTab('reminders')}
           />
           <TabButton
             active={tab === 'emergency'}
@@ -218,6 +270,47 @@ export default function ScheduleScreen() {
               </View>
             )}
           </>
+        )}
+
+        {tab === 'reminders' && (
+          <View className="gap-3">
+            <ActionButton
+              fullWidth
+              className="mb-3 py-3"
+              onPress={() => router.push('/rider/schedule/booking')}
+              accessibilityLabel="Tạo nhắc nhở mới"
+            >
+              <Plus size={18} color="#ffffff" />
+              <Text className="text-base font-semibold text-primary-foreground">Tạo nhắc nhở mới</Text>
+            </ActionButton>
+
+            {remindersError && (
+              <Banner tone="error" description={remindersError} />
+            )}
+
+            {remindersLoading ? (
+              <View className="items-center py-8">
+                <ActivityIndicator color="#1974f7" />
+              </View>
+            ) : reminders.length === 0 ? (
+              <EmptyState
+                icon={AlarmClock}
+                tone="primary"
+                title="Chưa có nhắc nhở"
+                description="Tạo nhắc nhở để được thông báo khi đến hạn thay nhớt, kiểm tra lốp, bảo dưỡng định kỳ…"
+                action={
+                  <ActionButton onPress={() => router.push('/rider/schedule/booking')}>
+                    <Plus size={16} color="#ffffff" />
+                    <Text className="text-sm font-semibold text-primary-foreground">Tạo nhắc nhở</Text>
+                  </ActionButton>
+                }
+              />
+            ) : (
+              reminders.map((r) => (
+                <ReminderCard key={r.id} reminder={r} onChanged={reloadReminders} />
+              ))
+            )}
+          </View>
         )}
 
         {tab === 'emergency' && (
@@ -407,6 +500,88 @@ function EmergencyHistoryCard({ call }: { call: import('@/lib/types').EmergencyC
             </View>
           </View>
         </View>
+      </View>
+    </Card>
+  );
+}
+
+function ReminderCard({
+  reminder,
+  onChanged,
+}: {
+  reminder: Reminder;
+  onChanged: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const togglePause = async () => {
+    setBusy(true);
+    try {
+      await updateReminder(reminder.id, {
+        status: reminder.status === 'disabled' ? 'active' : 'disabled',
+      });
+      await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const fireDate = new Date(reminder.scheduled_at);
+  return (
+    <Card className="p-4">
+      <View className="flex-row items-center justify-between">
+        <View className="flex-1 pr-2">
+          <Text className="text-sm font-bold text-foreground" numberOfLines={2}>
+            {reminder.title}
+          </Text>
+          {reminder.description && (
+            <Text className="mt-1 text-xs text-muted-foreground" numberOfLines={2}>
+              {reminder.description}
+            </Text>
+          )}
+        </View>
+        <Badge tone={reminder.status === 'active' ? 'blue' : reminder.status === 'snoozed' ? 'amber' : 'neutral'}>
+          <Text className="text-xs font-semibold">
+            {reminder.status === 'active'
+              ? 'Đang bật'
+              : reminder.status === 'snoozed'
+                ? 'Tạm hoãn'
+                : 'Tắt'}
+          </Text>
+        </Badge>
+      </View>
+      <View className="mt-2 flex-row items-center gap-2">
+        <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
+          <CalendarClock size={12} color="#64748b" />
+          <Text className="text-xs font-semibold text-secondary-foreground">
+            {fireDate.toLocaleDateString('vi-VN')} ·{' '}
+            {fireDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1">
+          <Text className="text-xs font-semibold text-primary">
+            {recurrenceLabel(reminder.recurrence as ReminderRecurrence)}
+          </Text>
+        </View>
+      </View>
+      <View className="mt-3 flex-row gap-2">
+        <ActionButton
+          variant="outline"
+          fullWidth
+          onPress={togglePause}
+          disabled={busy}
+          accessibilityLabel={reminder.status === 'disabled' ? 'Bật nhắc nhở' : 'Tắt nhắc nhở'}
+        >
+          {reminder.status === 'disabled' ? (
+            <>
+              <Play size={14} color="#16202f" />
+              <Text className="text-sm font-semibold text-foreground">Bật</Text>
+            </>
+          ) : (
+            <>
+              <Pause size={14} color="#16202f" />
+              <Text className="text-sm font-semibold text-foreground">Tắt</Text>
+            </>
+          )}
+        </ActionButton>
       </View>
     </Card>
   );

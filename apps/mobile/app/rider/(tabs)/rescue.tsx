@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { router } from 'expo-router';
 import {
   BatteryWarning,
   CircleDot,
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react-native';
 
 import { useApp } from '@/contexts/app-context';
+import { useServiceRequests } from '@/hooks/use-service-requests';
 import { ActionButton } from '@/components/ui/action-button';
 import { AiChatbox } from '@/components/ai-chatbox';
 import { AppHeader } from '@/components/ui/app-header';
@@ -25,9 +27,9 @@ import { Badge } from '@/components/ui/badge';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { Field, FormTextInput } from '@/components/ui/form';
-import { MechanicCard } from '@/components/mechanic-card';
 import { cn } from '@/lib/utils';
-import { issueCategories, mockMechanics } from '@/lib/mock-data';
+import { formatVnd } from '@/lib/quotes-service';
+import { issueCategories } from '@/lib/mock-data';
 
 const iconMap: Record<string, LucideIcon> = {
   Cog,
@@ -37,99 +39,88 @@ const iconMap: Record<string, LucideIcon> = {
   TriangleAlert,
 };
 
-type Phase = 'select' | 'searching' | 'tracking';
-const timeline = [
-  'Đã gửi yêu cầu',
-  'Đã ghép thợ',
-  'Thợ đang đến',
-  'Thợ đã đến nơi',
-  'Hoàn tất dịch vụ',
-];
+/** Map issue category sang problem_description mặc định (rider có thể sửa). */
+const ISSUE_TO_PROBLEM: Record<string, string> = {
+  engine: 'Động cơ có vấn đề, cần hỗ trợ tại chỗ.',
+  tire: 'Lốp xe bị đâm/xẹp, cần thay hoặc vá lốp.',
+  battery: 'Ắc quy yếu, xe không khởi động được.',
+  fuel: 'Hết xăng giữa đường, cần giao xăng tận nơi.',
+  accident: 'Tai nạn giao thông, cần hỗ trợ khẩn cấp.',
+};
+
+const DEFAULT_ADDRESS = '124 Nguyễn Văn Cừ, Quận 5, TP.HCM';
 
 /**
- * RescueScreen - yêu cầu cứu hộ khẩn cấp.
+ * RescueScreen — yêu cầu cứu hộ thật (backend-wired).
  *
- * State machine:
- *  - select: chọn loại sự cố + địa điểm → nhấn Request Assistance.
- *  - searching: tìm thợ gần nhất (mock 2.4s).
- *  - tracking: theo dõi thợ + tiến trình + điền service summary sau khi hoàn tất.
- *
- * Design principles:
- *  - Hero destructive gradient thu hút sự chú ý cho flow cứu hộ.
- *  - Issue cards dùng icon-container + text rõ ràng, dễ chạm.
- *  - Tracking timeline dùng brand-blue (active) + green (done) + slate (todo).
+ * State machine (phase):
+ *  - select:    chọn loại sự cố + xe → nhấn Yêu cầu hỗ trợ
+ *  - searching: spinner + polling mỗi 5s
+ *  - tracking:  đã có mechanic, hiển thị ETA + mechanic card
+ *  - quote:     có báo giá pending, hiển thị để duyệt/từ chối
+ *  - payment:   đã duyệt, đang chờ thanh toán (Phase 6 sẽ hook vào)
+ *  - completed: hoàn tất, có nút đánh giá
+ *  - canceled:  đã huỷ
  */
 export default function RescueScreen() {
   const { vehicles, addEmergencyCall } = useApp();
-  const [phase, setPhase] = useState<Phase>('select');
+  const sr = useServiceRequests();
   const [issue, setIssue] = useState<string | null>(null);
-  const [step, setStep] = useState(1);
-  const [eta, setEta] = useState(12);
+  const [address, setAddress] = useState(DEFAULT_ADDRESS);
   const [damageDesc, setDamageDesc] = useState('');
   const [repairs, setRepairs] = useState('');
   const [price, setPrice] = useState('');
   const [saved, setSaved] = useState(false);
-  const mechanic = mockMechanics[0];
+
   const issueLabel = issueCategories.find((i) => i.id === issue)?.label;
+  const vehicle = vehicles[0];
+  const vehicleName = vehicle?.name ?? 'Vehicle';
+  const phase = sr.active.phase;
 
-  useEffect(() => {
-    if (phase !== 'searching') return;
-    const t = setTimeout(() => {
-      setPhase('tracking');
-      setStep(1);
-      setEta(12);
-    }, 2400);
-    return () => clearTimeout(t);
-  }, [phase]);
-
-  useEffect(() => {
-    if (phase !== 'tracking' || step >= 3) return;
-    const t = setInterval(() => setEta((e) => (e > 1 ? e - 1 : 1)), 1500);
-    return () => clearInterval(t);
-  }, [phase, step]);
-
-  const advance = () => {
-    setStep((s) => {
-      const next = Math.min(s + 1, timeline.length - 1);
-      if (next >= 3) setEta(0);
-      return next;
+  const submitRescue = async () => {
+    if (!issue || !vehicle) return;
+    await sr.startRescue({
+      motorcycleId: vehicle.id,
+      problemDescription: `${ISSUE_TO_PROBLEM[issue] ?? 'Cần hỗ trợ'} (${address})`,
+      addressText: address,
     });
   };
 
-  const reset = () => {
-    setPhase('select');
-    setIssue(null);
-    setStep(1);
-    setEta(12);
-    setDamageDesc('');
-    setRepairs('');
-    setPrice('');
+  const handleCancel = async () => {
+    await sr.cancel('Người dùng huỷ từ app');
     setSaved(false);
   };
 
-  const vehicleName = vehicles[0]?.name ?? 'Vehicle';
+  const handleReset = () => {
+    sr.reset();
+    setIssue(null);
+    setSaved(false);
+  };
 
-  const handleSave = () => {
-    if (!issue) return;
+  const handleSave = async () => {
+    if (!sr.active.request) return;
+    // Lưu nhanh vào local history (mock — Phase 4 sẽ lưu vào DB qua media metadata).
     const now = new Date();
     addEmergencyCall({
       vehicleName,
       issue: issueLabel ?? 'Khẩn cấp',
       damageDescription:
         damageDesc.trim() ||
-        'Chi tiết hư hại chưa được ghi nhận. Vui lòng bổ sung sau.',
+        sr.active.request.problem_description ||
+        'Chi tiết hư hại chưa được ghi nhận.',
       repairs:
         repairs.trim() ||
         'Thợ đã hỗ trợ khắc phục sự cố tại chỗ và đảm bảo xe vận hành tạm ổn.',
       date: now.toISOString().slice(0, 10),
       time: now.toTimeString().slice(0, 5),
-      mechanicName: mechanic.name,
-      price: Number(price) > 0 ? Number(price) : 250000,
+      mechanicName: 'Thợ CareOnRoad',
+      price: Number(price) > 0 ? Number(price) : sr.active.quote?.total_amount ?? 250000,
       status: 'completed',
     });
     setSaved(true);
   };
 
+  // Searching state
   if (phase === 'searching') {
     return (
       <View className="flex-1 bg-background">
@@ -143,25 +134,60 @@ export default function RescueScreen() {
             </View>
           </View>
           <View className="items-center">
-            <Text className="text-xl font-bold text-foreground">Đang tìm thợ gần bạn…</Text>
-            <Text className="mt-2 px-4 text-center text-sm text-muted-foreground">
-              Đang ghép thợ phù hợp cho <Text className="font-semibold text-foreground">{issueLabel}</Text>
+            <Text className="text-xl font-bold text-foreground">
+              {sr.active.busy ? 'Đang gửi yêu cầu…' : 'Đang tìm thợ gần bạn…'}
             </Text>
+            <Text className="mt-2 px-4 text-center text-sm text-muted-foreground">
+              {sr.active.round
+                ? `Vòng ghép thợ #${sr.active.round.round_number} · bán kính ${(
+                    sr.active.round.radius_m / 1000
+                  ).toFixed(1)} km`
+                : `Đang ghép thợ phù hợp cho ${issueLabel ?? 'yêu cầu của bạn'}`}
+            </Text>
+            {sr.active.request?.request_code && (
+              <Text className="mt-2 font-mono text-xs text-muted-foreground">
+                Mã yêu cầu: {sr.active.request.request_code}
+              </Text>
+            )}
           </View>
           <View className="flex-row gap-1.5">
-            <Dot delay={0} />
-            <Dot delay={150} />
-            <Dot delay={300} />
+            <View className="size-2 rounded-full bg-destructive" style={{ opacity: 0.4 }} />
+            <View className="size-2 rounded-full bg-destructive" style={{ opacity: 0.4 }} />
+            <View className="size-2 rounded-full bg-destructive" style={{ opacity: 0.4 }} />
           </View>
+          <Pressable
+            onPress={handleCancel}
+            className="mt-4 rounded-full border border-destructive/40 bg-destructive/10 px-5 py-2.5"
+            accessibilityLabel="Huỷ yêu cầu cứu hộ"
+          >
+            <Text className="text-sm font-semibold text-destructive">Huỷ yêu cầu</Text>
+          </Pressable>
+          {sr.active.lastError && (
+            <View className="mt-3 w-full">
+              <Banner tone="error" description={sr.active.lastError} />
+            </View>
+          )}
         </View>
       </View>
     );
   }
 
-  if (phase === 'tracking') {
+  // Tracking — mechanic đã được gán
+  if (phase === 'tracking' || phase === 'quote' || phase === 'payment' || phase === 'completed') {
+    const eta = sr.active.eta;
+    const distanceLabel = eta?.distance_meters
+      ? `${(eta.distance_meters / 1000).toFixed(1)} km`
+      : '—';
+    const etaLabel =
+      eta?.status === 'available' && eta.duration_seconds
+        ? `~${Math.max(1, Math.round(eta.duration_seconds / 60))} phút`
+        : eta?.status === 'fallback'
+          ? 'Đang tính…'
+          : '—';
+
     return (
       <View className="flex-1 bg-background">
-        <AppHeader title="Theo dõi thợ" subtitle={issueLabel} onBack={reset} />
+        <AppHeader title="Theo dõi thợ" subtitle={issueLabel} onBack={handleReset} />
         <ScrollView
           className="flex-1"
           contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
@@ -180,7 +206,9 @@ export default function RescueScreen() {
             <View className="absolute left-3 top-3">
               <Badge className="bg-white" tone="blue">
                 <Navigation size={12} color="#1974f7" />
-                <Text className="ml-1 text-xs font-semibold text-primary">Đang theo dõi</Text>
+                <Text className="ml-1 text-xs font-semibold text-primary">
+                  {phase === 'tracking' ? 'Đang theo dõi' : statusLabelForPhase(phase)}
+                </Text>
               </Badge>
             </View>
             <View className="absolute bottom-3 left-3 right-3 flex-row items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-lg">
@@ -189,143 +217,264 @@ export default function RescueScreen() {
                   <Clock size={16} color="#1974f7" />
                 </View>
                 <View>
-                  <Text className="text-xs text-muted-foreground">Trạng thái</Text>
-                  <Text className="text-sm font-bold text-foreground">
-                    {step >= 3 ? 'Đã đến nơi' : `Còn khoảng ${eta} phút`}
-                  </Text>
+                  <Text className="text-xs text-muted-foreground">ETA</Text>
+                  <Text className="text-sm font-bold text-foreground">{etaLabel}</Text>
                 </View>
               </View>
               <View className="rounded-full bg-secondary px-2.5 py-1">
-                <Text className="text-xs font-semibold text-secondary-foreground">2.4 km</Text>
+                <Text className="text-xs font-semibold text-secondary-foreground">{distanceLabel}</Text>
               </View>
             </View>
           </Card>
 
-          <View className="mt-4">
-            <MechanicCard mechanic={mechanic} />
-          </View>
-
-          {/* Timeline */}
+          {/* Thông tin assignment */}
           <Card className="mt-4 p-4">
-            <Text className="mb-4 font-bold text-foreground">Tiến trình dịch vụ</Text>
-            <View>
-              {timeline.map((label, i) => {
-                const done = i < step;
-                const active = i === step;
-                const last = i === timeline.length - 1;
-                return (
-                  <View key={label} className="flex-row gap-3">
-                    <View className="items-center">
-                      <View
-                        className={cn(
-                          'size-7 items-center justify-center rounded-full border-2',
-                          done && 'border-green bg-green',
-                          active && 'border-primary bg-primary',
-                          !done && !active && 'border-border bg-card',
-                        )}
-                      >
-                        <Text
-                          className={cn(
-                            'text-xs font-bold',
-                            done || active ? 'text-white' : 'text-muted-foreground',
-                          )}
-                        >
-                          {i + 1}
-                        </Text>
-                      </View>
-                      {!last && (
-                        <View
-                          className={cn('my-0.5 w-0.5 flex-1', done ? 'bg-green' : 'bg-border')}
-                          style={{ minHeight: 28 }}
-                        />
-                      )}
-                    </View>
-                    <View className="pb-4">
-                      <Text
-                        className={cn(
-                          'text-sm font-semibold',
-                          active
-                            ? 'text-primary'
-                            : !done && !active
-                              ? 'text-muted-foreground'
-                              : 'text-foreground',
-                        )}
-                      >
-                        {label}
-                      </Text>
-                      {active && <Text className="mt-0.5 text-xs text-muted-foreground">Đang diễn ra…</Text>}
-                    </View>
-                  </View>
-                );
-              })}
+            <View className="flex-row items-center justify-between">
+              <View>
+                <Text className="text-xs text-muted-foreground">Mã yêu cầu</Text>
+                <Text className="font-mono text-sm font-bold text-foreground">
+                  {sr.active.request?.request_code ?? '—'}
+                </Text>
+              </View>
+              <Badge tone="blue">
+                <Text className="text-xs font-semibold text-primary">
+                  {sr.active.request?.status ?? '—'}
+                </Text>
+              </Badge>
             </View>
-
-            {step < timeline.length - 1 ? (
-              <ActionButton fullWidth className="mt-2" onPress={advance} accessibilityLabel="Mô phỏng bước tiếp theo">
-                <Text className="text-sm font-semibold text-primary-foreground">Mô phỏng bước tiếp theo</Text>
-              </ActionButton>
-            ) : (
-              <View className="mt-2 gap-3">
-                <View className="flex-row items-center justify-center gap-2 rounded-2xl bg-green/10 py-3">
-                  <Text className="text-sm font-semibold text-green">✓ Dịch vụ đã hoàn tất</Text>
+            {sr.active.assignment && (
+              <View className="mt-3 flex-row items-center gap-3 rounded-2xl bg-secondary px-3 py-2.5">
+                <View className="size-8 items-center justify-center rounded-full bg-primary/20">
+                  <Navigation size={14} color="#1974f7" />
                 </View>
-
-                {saved ? (
-                  <View className="rounded-2xl border border-green/30 bg-green/5 p-4">
-                    <Text className="text-center text-sm font-semibold text-green">
-                      Đã lưu vào lịch sử cứu hộ
-                    </Text>
-                    <Text className="mt-1 text-center text-xs text-muted-foreground">
-                      Bạn có thể xem lại trong tab Đặt lịch → Lịch sử cứu hộ.
-                    </Text>
-                  </View>
-                ) : (
-                  <Card className="gap-3 p-4">
-                    <Text className="text-sm font-semibold text-foreground">Tóm tắt dịch vụ</Text>
-                    <Field label="Mô tả hư hại" hint="Không bắt buộc - dùng để theo dõi bảo hành">
-                      <FormTextInput
-                        multiline
-                        numberOfLines={3}
-                        value={damageDesc}
-                        onChangeText={setDamageDesc}
-                        placeholder="Ví dụ: Lốp trước bị đâm đinh, xẹp hoàn toàn..."
-                        className="min-h-[80px] py-2.5"
-                      />
-                    </Field>
-                    <Field label="Nội dung đã sửa chữa">
-                      <FormTextInput
-                        multiline
-                        numberOfLines={3}
-                        value={repairs}
-                        onChangeText={setRepairs}
-                        placeholder="Ví dụ: Thay lốp mới, cân bằng bánh trước..."
-                        className="min-h-[80px] py-2.5"
-                      />
-                    </Field>
-                    <Field label="Chi phí (VND)">
-                      <FormTextInput
-                        keyboardType="numeric"
-                        value={price}
-                        onChangeText={setPrice}
-                        placeholder="250000"
-                      />
-                    </Field>
-                    <ActionButton fullWidth onPress={handleSave} accessibilityLabel="Lưu vào lịch sử cứu hộ">
-                      <Save size={16} color="#ffffff" />
-                      <Text className="text-sm font-semibold text-primary-foreground">Lưu vào lịch sử cứu hộ</Text>
-                    </ActionButton>
-                  </Card>
-                )}
-
-                <ActionButton fullWidth variant="outline" onPress={reset} accessibilityLabel="Tạo yêu cầu mới">
-                  <RotateCcw size={16} color="#16202f" />
-                  <Text className="text-sm font-semibold text-foreground">Yêu cầu mới</Text>
-                </ActionButton>
+                <View className="flex-1">
+                  <Text className="text-xs text-muted-foreground">Thợ đã nhận</Text>
+                  <Text className="text-sm font-semibold text-foreground">
+                    Mã thợ: {sr.active.assignment.mechanic_id.slice(0, 8)}…
+                  </Text>
+                </View>
+              </View>
+            )}
+            {sr.active.liveLocation && (
+              <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
+                <Text className="text-xs text-muted-foreground">
+                  Vị trí thợ: {sr.active.liveLocation.location.latitude.toFixed(4)},{' '}
+                  {sr.active.liveLocation.location.longitude.toFixed(4)} (cập nhật{' '}
+                  {Math.round(sr.active.liveLocation.age_seconds ?? 0)}s trước)
+                </Text>
               </View>
             )}
           </Card>
 
-          <ActionButton fullWidth variant="secondary" className="mt-4" accessibilityLabel="Gọi tổng đài khẩn cấp">
+          {/* Quote card (nếu có) */}
+          {sr.active.quote && (
+            <Card className="mt-4 p-4">
+              <View className="mb-2 flex-row items-center justify-between">
+                <Text className="text-sm font-bold text-foreground">
+                  Báo giá v{sr.active.quote.version}
+                </Text>
+                <Badge tone="amber">
+                  <Text className="text-xs font-semibold text-amber-700">Chờ duyệt</Text>
+                </Badge>
+              </View>
+              <View className="gap-1.5">
+                {sr.active.quote.lines.map((line) => (
+                  <View key={line.id} className="flex-row items-center justify-between">
+                    <Text className="flex-1 text-sm text-foreground">
+                      {line.description}{' '}
+                      <Text className="text-xs text-muted-foreground">
+                        × {line.quantity}
+                      </Text>
+                    </Text>
+                    <Text className="text-sm font-semibold text-foreground">
+                      {formatVnd(line.line_total_amount)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <View className="mt-2 border-t border-border pt-2">
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-sm text-muted-foreground">Tạm tính</Text>
+                  <Text className="text-sm text-foreground">
+                    {formatVnd(sr.active.quote.subtotal_amount)}
+                  </Text>
+                </View>
+                {sr.active.quote.discount_amount > 0 && (
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-sm text-muted-foreground">Giảm giá</Text>
+                    <Text className="text-sm text-foreground">
+                      -{formatVnd(sr.active.quote.discount_amount)}
+                    </Text>
+                  </View>
+                )}
+                <View className="mt-1 flex-row items-center justify-between">
+                  <Text className="text-base font-bold text-foreground">Tổng</Text>
+                  <Text className="text-base font-bold text-primary">
+                    {formatVnd(sr.active.quote.total_amount)}
+                  </Text>
+                </View>
+              </View>
+              {phase === 'quote' && (
+                <View className="mt-3 flex-row gap-2">
+                  <ActionButton
+                    variant="outline"
+                    fullWidth
+                    onPress={() => sr.rejectQuote()}
+                    accessibilityLabel="Từ chối báo giá"
+                  >
+                    <Text className="text-sm font-semibold text-foreground">Từ chối</Text>
+                  </ActionButton>
+                  <ActionButton
+                    fullWidth
+                    onPress={() => sr.approveQuote()}
+                    accessibilityLabel="Duyệt báo giá"
+                    disabled={sr.active.busy}
+                  >
+                    <Text className="text-sm font-semibold text-primary-foreground">Duyệt</Text>
+                  </ActionButton>
+                </View>
+              )}
+            </Card>
+          )}
+
+          {/* Phase payment - placeholder, Phase 6 sẽ render QR */}
+              {phase === 'payment' && (
+                <Card className="mt-4 border-amber-500/40 bg-amber-500/10 p-4">
+                  <View className="flex-row items-center gap-2">
+                    <Badge tone="amber">
+                      <Text className="text-xs font-semibold text-amber-700">Chờ thanh toán</Text>
+                    </Badge>
+                  </View>
+                  <Text className="mt-2 text-sm text-foreground">
+                    Báo giá đã được duyệt. Vui lòng thanh toán để thợ bắt đầu công việc.
+                  </Text>
+                  {sr.active.quote && (
+                    <Text className="mt-1 text-base font-bold text-primary">
+                      {formatVnd(sr.active.quote.total_amount)}
+                    </Text>
+                  )}
+                  <ActionButton
+                    fullWidth
+                    className="mt-3"
+                    onPress={() => {
+                      if (sr.active.quote && sr.active.requestId) {
+                        router.push({
+                          pathname: '/rider/payments/[quoteId]',
+                          params: {
+                            quoteId: sr.active.quote.id,
+                            requestId: sr.active.requestId,
+                          },
+                        });
+                      }
+                    }}
+                    accessibilityLabel="Mở màn hình thanh toán"
+                  >
+                    <Text className="text-sm font-semibold text-primary-foreground">
+                      Thanh toán ngay
+                    </Text>
+                  </ActionButton>
+                </Card>
+              )}
+
+          {/* Phase completed — review */}
+          {phase === 'completed' && sr.active.assignment && (
+            <Card className="mt-4 p-4">
+              <Text className="font-bold text-foreground">Hoàn tất dịch vụ</Text>
+              <Text className="mt-1 text-sm text-muted-foreground">
+                Bạn có thể đánh giá thợ để giúp cộng đồng CareOnRoad.
+              </Text>
+              <ActionButton
+                fullWidth
+                className="mt-3"
+                onPress={() => {
+                  if (sr.active.requestId) {
+                    router.push({
+                      pathname: '/rider/review',
+                      params: { requestId: sr.active.requestId },
+                    });
+                  }
+                }}
+                accessibilityLabel="Đánh giá thợ"
+              >
+                <Text className="text-sm font-semibold text-primary-foreground">Đánh giá thợ</Text>
+              </ActionButton>
+            </Card>
+          )}
+
+          {phase === 'completed' && (
+            <Card className="mt-4 gap-3 p-4">
+              <Text className="text-sm font-semibold text-foreground">Tóm tắt dịch vụ</Text>
+              <Field label="Mô tả hư hại" hint="Không bắt buộc - dùng để theo dõi bảo hành">
+                <FormTextInput
+                  multiline
+                  numberOfLines={3}
+                  value={damageDesc}
+                  onChangeText={setDamageDesc}
+                  placeholder="Ví dụ: Lốp trước bị đâm đinh, xẹp hoàn toàn..."
+                  className="min-h-[80px] py-2.5"
+                />
+              </Field>
+              <Field label="Nội dung đã sửa chữa">
+                <FormTextInput
+                  multiline
+                  numberOfLines={3}
+                  value={repairs}
+                  onChangeText={setRepairs}
+                  placeholder="Ví dụ: Thay lốp mới, cân bằng bánh trước..."
+                  className="min-h-[80px] py-2.5"
+                />
+              </Field>
+              <Field label="Chi phí (VND)">
+                <FormTextInput
+                  keyboardType="numeric"
+                  value={price}
+                  onChangeText={setPrice}
+                  placeholder="250000"
+                />
+              </Field>
+              {saved ? (
+                <View className="rounded-2xl border border-green/30 bg-green/5 p-4">
+                  <Text className="text-center text-sm font-semibold text-green">
+                    Đã lưu vào lịch sử cứu hộ
+                  </Text>
+                </View>
+              ) : (
+                <ActionButton
+                  fullWidth
+                  onPress={handleSave}
+                  accessibilityLabel="Lưu vào lịch sử cứu hộ"
+                >
+                  <Save size={16} color="#ffffff" />
+                  <Text className="text-sm font-semibold text-primary-foreground">
+                    Lưu vào lịch sử cứu hộ
+                  </Text>
+                </ActionButton>
+              )}
+              <ActionButton
+                fullWidth
+                variant="outline"
+                onPress={handleReset}
+                accessibilityLabel="Tạo yêu cầu mới"
+              >
+                <RotateCcw size={16} color="#16202f" />
+                <Text className="text-sm font-semibold text-foreground">Yêu cầu mới</Text>
+              </ActionButton>
+            </Card>
+          )}
+
+          {sr.active.lastError && (
+            <View className="mt-3">
+              <Banner tone="error" description={sr.active.lastError} />
+            </View>
+          )}
+
+          <ActionButton
+            fullWidth
+            variant="secondary"
+            className="mt-4"
+            accessibilityLabel="Gọi tổng đài khẩn cấp"
+            onPress={() => Linking.openURL('tel:113').catch(() => undefined)}
+          >
             <PhoneCall size={16} color="#16202f" />
             <Text className="text-sm font-semibold text-secondary-foreground">
               Gọi tổng đài khẩn cấp
@@ -336,6 +485,41 @@ export default function RescueScreen() {
             <AiChatbox />
           </View>
         </ScrollView>
+      </View>
+    );
+  }
+
+  // Phase canceled
+  if (phase === 'canceled') {
+    return (
+      <View className="flex-1 bg-background">
+        <AppHeader title="Đã huỷ" onBack={handleReset} />
+        <View className="flex-1 items-center justify-center px-8">
+          <Banner
+            tone="info"
+            title="Yêu cầu đã được huỷ"
+            description="Bạn có thể tạo yêu cầu cứu hộ mới bất kỳ lúc nào."
+          />
+          <ActionButton className="mt-5" onPress={handleReset}>
+            <Text className="text-sm font-semibold text-primary-foreground">Tạo yêu cầu mới</Text>
+          </ActionButton>
+        </View>
+      </View>
+    );
+  }
+
+  // Phase idle / select — form nhập
+  if (!vehicle) {
+    return (
+      <View className="flex-1 bg-background">
+        <AppHeader title="Cứu hộ khẩn cấp" variant="navy" />
+        <View className="flex-1 items-center justify-center px-8">
+          <Banner
+            tone="warning"
+            title="Chưa có xe nào"
+            description="Vui lòng thêm xe trước khi gửi yêu cầu cứu hộ."
+          />
+        </View>
       </View>
     );
   }
@@ -404,36 +588,27 @@ export default function RescueScreen() {
           </View>
         </View>
 
-        {/* Location */}
+        {/* Vehicle + Location */}
         <Card className="mt-5 p-4">
           <View className="flex-row items-center gap-3">
             <View className="size-10 items-center justify-center rounded-xl bg-primary/10">
               <MapPin size={20} color="#1974f7" />
             </View>
             <View className="flex-1">
-              <Text className="text-xs text-muted-foreground">Vị trí của bạn</Text>
-              <Text className="text-sm font-semibold text-foreground">
-                124 Nguyễn Văn Cừ, Quận 5, TP.HCM
-              </Text>
-            </View>
-            <Pressable hitSlop={8} accessibilityLabel="Đổi vị trí">
-              <Text className="text-sm font-semibold text-primary">Đổi</Text>
-            </Pressable>
-          </View>
-        </Card>
-
-        <Card className="mt-3 flex-row items-center justify-between bg-navy p-4">
-          <View className="flex-row items-center gap-3">
-            <View className="size-9 items-center justify-center rounded-xl bg-white/10">
-              <Clock size={20} color="#a9ffad" />
-            </View>
-            <View>
-              <Text className="text-xs text-white/70">Thời gian dự kiến</Text>
-              <Text className="font-bold text-white">8–14 phút</Text>
+              <Text className="text-xs text-muted-foreground">Vị trí & xe</Text>
+              <Text className="text-sm font-semibold text-foreground">{vehicleName}</Text>
+              <Text className="mt-1 text-xs text-muted-foreground">{address}</Text>
             </View>
           </View>
-          <View className="rounded-full bg-white/15 px-2.5 py-1">
-            <Text className="text-xs font-semibold text-white">{mockMechanics.length} thợ gần bạn</Text>
+          <View className="mt-3">
+            <Field label="Địa chỉ chi tiết" hint="Để trống nếu dùng vị trí GPS">
+              <FormTextInput
+                value={address}
+                onChangeText={setAddress}
+                accessibilityLabel="Địa chỉ"
+                placeholder={DEFAULT_ADDRESS}
+              />
+            </Field>
           </View>
         </Card>
 
@@ -449,14 +624,22 @@ export default function RescueScreen() {
         <ActionButton
           fullWidth
           variant="destructive"
-          disabled={!issue}
+          disabled={!issue || sr.active.busy}
           className="mt-5 py-4"
-          onPress={() => setPhase('searching')}
+          onPress={submitRescue}
           accessibilityLabel="Yêu cầu hỗ trợ cứu hộ"
         >
           <Siren size={20} color="#ffffff" />
-          <Text className="text-base font-semibold text-destructive-foreground">Yêu cầu hỗ trợ</Text>
+          <Text className="text-base font-semibold text-destructive-foreground">
+            {sr.active.busy ? 'Đang gửi…' : 'Yêu cầu hỗ trợ'}
+          </Text>
         </ActionButton>
+
+        {sr.active.lastError && (
+          <View className="mt-3">
+            <Banner tone="error" description={sr.active.lastError} />
+          </View>
+        )}
 
         <View className="mt-6">
           <AiChatbox />
@@ -466,12 +649,19 @@ export default function RescueScreen() {
   );
 }
 
-function Dot({ delay }: { delay: number }) {
-  return (
-    <View
-      className="size-2 rounded-full bg-destructive"
-      style={{ opacity: 0.4 }}
-      // Note: animationDelay không phải style native - để đơn giản hiển thị tĩnh
-    />
-  );
+function statusLabelForPhase(p: 'tracking' | 'quote' | 'payment' | 'completed' | 'canceled'): string {
+  switch (p) {
+    case 'tracking':
+      return 'Thợ đang đến';
+    case 'quote':
+      return 'Chờ duyệt báo giá';
+    case 'payment':
+      return 'Chờ thanh toán';
+    case 'completed':
+      return 'Hoàn tất';
+    case 'canceled':
+      return 'Đã huỷ';
+    default:
+      return '';
+  }
 }

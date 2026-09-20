@@ -15,6 +15,10 @@ import {
   saveSession as saveDemoSession,
 } from '@/lib/auth-storage';
 import {
+  ensureDeviceRegistered,
+  maybeGetExpoPushToken,
+} from '@/lib/devices-service';
+import {
   fetchCurrentActor,
   getCurrentSession,
   onAuthStateChange,
@@ -49,7 +53,8 @@ interface AuthState {
   role: AuthRole | null;
   /** Cho biết app đang dùng Supabase thật (true) hay demo mode (false). */
   isBackendConfigured: boolean;
-  login: (input: LoginInput) => Promise<void>;
+  /** Trả về PublicAuthUser để caller navigate theo role chính xác (không stale). */
+  login: (input: LoginInput) => Promise<PublicAuthUser>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
   /** Đổi vai trò demo - chỉ hoạt động trong demo mode. */
@@ -91,6 +96,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // =========================================================
   // Hydrate session khi app mount
+  //
+  // Lưu ý: Nếu có Supabase session nhưng BE /auth/me fail (timeout/mạng),
+  // vẫn coi là authenticated dùng minimal actor fallback — tránh xoá session
+  // của user chỉ vì BE tạm thời không phản hồi.
   // =========================================================
   useEffect(() => {
     let cancelled = false;
@@ -102,25 +111,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const session = await getCurrentSession();
           if (cancelled) return;
           if (session) {
-            const actor = await fetchCurrentActor();
-            if (cancelled) return;
-            if (actor) {
-              setUser(actorToPublic(actor, session.user.email ?? ''));
-              setRole(
-                actor.roles.includes('rider')
-                  ? 'rider'
-                  : actor.roles.includes('mechanic')
-                    ? 'mechanic'
-                    : 'rider',
-              );
-              setStatus('authenticated');
-              return;
+            try {
+              const actor = await fetchCurrentActor();
+              if (cancelled) return;
+              if (actor) {
+                setUser(actorToPublic(actor, session.user.email ?? ''));
+                setRole(
+                  actor.roles.includes('rider')
+                    ? 'rider'
+                    : actor.roles.includes('mechanic')
+                      ? 'mechanic'
+                      : 'rider',
+                );
+                setStatus('authenticated');
+                return;
+              }
+            } catch (err) {
+              // BE fail: vẫn giữ Supabase session, dùng fallback minimal actor
+              // để user không bị buộc login lại khi mạng chập chờn.
+              if (__DEV__) {
+                // eslint-disable-next-line no-console
+                console.warn('[auth] Hydrate BE failed, fallback to cached session:', err);
+              }
             }
+            // Fallback: dùng email từ Supabase session, role mặc định 'rider'
+            // (sẽ được điều chỉnh khi lần fetchCurrentActor tiếp theo thành công).
+            if (!cancelled) {
+              setUser({
+                id: session.user.id,
+                role: 'rider',
+                name:
+                  (session.user.user_metadata?.full_name as string | undefined) ??
+                  (session.user.email?.split('@')[0] ?? 'Người dùng'),
+                email: session.user.email ?? '',
+                phone: (session.user.user_metadata?.phone as string | undefined) ?? '',
+                avatar: '',
+              });
+              setRole('rider');
+              setStatus('authenticated');
+              // Fallback hydrate: thử đăng ký device (silent fail nếu lỗi).
+              try {
+                const expoToken = await maybeGetExpoPushToken();
+                await ensureDeviceRegistered(expoToken ?? undefined);
+              } catch {
+                // ignore
+              }
+            }
+            return;
           }
         } catch (err) {
           if (__DEV__) {
             // eslint-disable-next-line no-console
-            console.warn('[auth] Hydrate failed:', err);
+            console.warn('[auth] Hydrate Supabase failed:', err);
           }
         }
         if (!cancelled) setStatus('unauthenticated');
@@ -152,6 +194,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // =========================================================
   // Subscribe Supabase auth state changes (token refresh, auto signout...)
+  //
+  // Chỉ fetch actor ở event INITIAL/SIGNED_IN. TOKEN_REFRESHED chỉ refresh
+  // token provider — actor không đổi nên không cần gọi BE lại.
   // =========================================================
   useEffect(() => {
     if (!backendReady) return undefined;
@@ -162,7 +207,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setStatus('unauthenticated');
         return;
       }
-      if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+      // Bỏ qua TOKEN_REFRESHED để tránh timeout liên tục.
+      // Actor (id, role) không đổi khi chỉ refresh token.
+      if (event === 'TOKEN_REFRESHED') {
+        return;
+      }
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
         try {
           const actor = await fetchCurrentActor();
           if (actor) {
@@ -175,11 +225,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   : 'rider',
             );
             setStatus('authenticated');
+            // Sau khi auth thành công: đăng ký device (idempotent, silent fail).
+            // Push token (expo) chưa có sẽ lấy từ maybeGetExpoPushToken, optional.
+            try {
+              const expoToken = await maybeGetExpoPushToken();
+              await ensureDeviceRegistered(expoToken ?? undefined);
+            } catch {
+              // ignore — service đã log warn
+            }
           }
         } catch (err) {
+          // Không set unauthenticated khi BE fail — giữ state hiện tại.
           if (__DEV__) {
             // eslint-disable-next-line no-console
-            console.warn('[auth] onAuthStateChange handler failed:', err);
+            console.warn('[auth] onAuthStateChange BE fetch failed (giữ nguyên state):', err);
           }
         }
       }
@@ -191,15 +250,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // =========================================================
   // Login
+  //
+  // Trả về PublicAuthUser để caller (LoginScreen) navigate theo role chính xác
+  // mà không cần đọc stale state từ closure.
   // =========================================================
   const login = useCallback(
-    async ({ email, password }: LoginInput) => {
+    async ({ email, password }: LoginInput): Promise<PublicAuthUser> => {
       if (backendReady) {
         const { user: pub } = await authSignIn(email, password);
         setUser(pub);
         setRole(pub.role);
         setStatus('authenticated');
-        return;
+        return pub;
       }
       // Demo fallback
       const existing = await findUserByEmail(email);
@@ -216,6 +278,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(newSession.user);
       setRole(newSession.user.role);
       setStatus('authenticated');
+      return newSession.user;
     },
     [backendReady],
   );
@@ -256,17 +319,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // =========================================================
   // Logout
+  //
+  // Luôn reset state local về 'unauthenticated' dù Supabase có lỗi.
+  // Throw error để caller (UI) hiển thị banner nếu cần thiết.
   // =========================================================
   const logout = useCallback(async () => {
+    let warning: string | null = null;
     if (backendReady) {
-      await authSignOut();
+      try {
+        await authSignOut();
+      } catch (err) {
+        // Logout vẫn thành công về mặt UX — session local đã bị xoá.
+        // Ghi warning để caller có thể thông báo (vd. "Đăng xuất trên máy chủ thất bại").
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[auth] signOut failed:', err);
+        }
+        warning =
+          err instanceof Error
+            ? err.message
+            : 'Đăng xuất trên máy chủ thất bại. Phiên local đã được xoá.';
+      }
     } else {
-      await clearSession();
+      try {
+        await clearSession();
+      } catch (err) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[auth] clearSession failed:', err);
+        }
+      }
     }
     setUser(null);
     setRole(null);
     setDemoSession(null);
     setStatus('unauthenticated');
+    if (warning) {
+      throw new Error(warning);
+    }
   }, [backendReady]);
 
   // =========================================================

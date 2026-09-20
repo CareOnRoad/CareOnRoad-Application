@@ -161,6 +161,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           model_text: next.name.replace(next.brand, '').trim() || next.name,
           license_plate: next.plate || undefined,
           year: next.year,
+          ...(next.mileage !== undefined ? {} : {}),
         });
         setVehicles((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
         return updated;

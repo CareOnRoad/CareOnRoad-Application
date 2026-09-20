@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   ArrowRight,
   Bike,
+  Bell,
   CalendarPlus,
   History,
   LucideIcon,
@@ -22,6 +23,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { MaintenanceCard } from '@/components/maintenance-card';
 import { SectionHeader } from '@/components/ui/form';
 import { formatDate } from '@/lib/mock-data';
+import { getUnreadCount } from '@/lib/notifications-service';
 
 type QuickAction = {
   id: string;
@@ -54,6 +56,13 @@ const quickActions: QuickAction[] = [
     href: '/rider/(tabs)/vehicles',
   },
   {
+    id: 'notifications',
+    label: 'Thông báo',
+    icon: Bell,
+    tone: 'primary',
+    href: '/rider/notifications',
+  },
+  {
     id: 'history',
     label: 'Lịch sử dịch vụ',
     icon: History,
@@ -83,6 +92,23 @@ const toneStyles: Record<QuickAction['tone'], { bg: string; fg: string }> = {
 export default function HomeScreen() {
   const { user: appUser, vehicles, services } = useApp();
   const { user: authUser } = useAuth();
+  const [unread, setUnread] = useState(0);
+
+  const refreshUnread = useCallback(async () => {
+    try {
+      const c = await getUnreadCount();
+      setUnread(c);
+    } catch {
+      // im lặng
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshUnread();
+    // Refresh mỗi 60s — phase 7 sẽ chuyển sang foreground refresh khi focus.
+    const t = setInterval(() => void refreshUnread(), 60_000);
+    return () => clearInterval(t);
+  }, [refreshUnread]);
 
   // Ưu tiên tên từ auth session, fallback mock.
   const displayName = authUser?.name ?? appUser.name;
@@ -102,16 +128,36 @@ export default function HomeScreen() {
         title="Trang chủ"
         subtitle={greeting()}
         right={
-          <View className="size-9 overflow-hidden rounded-full bg-secondary">
-            {displayAvatar ? (
-              <Image source={{ uri: displayAvatar }} className="size-full" resizeMode="cover" />
-            ) : (
-              <View className="size-full items-center justify-center">
-                <Text className="text-sm font-bold text-foreground">
-                  {displayName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
+          <View className="flex-row items-center gap-2">
+            <Pressable
+              onPress={() => router.push('/rider/notifications')}
+              accessibilityLabel="Mở thông báo"
+              className="relative size-9 items-center justify-center rounded-full bg-secondary active:scale-95"
+            >
+              <Bell size={18} color="#16202f" />
+              {unread > 0 && (
+                <View className="absolute -right-0.5 -top-0.5 min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 py-0.5">
+                  <Text className="text-[10px] font-bold text-destructive-foreground">
+                    {unread > 99 ? '99+' : unread}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/rider/(tabs)/profile')}
+              accessibilityLabel="Mở hồ sơ"
+              className="size-9 overflow-hidden rounded-full bg-secondary"
+            >
+              {displayAvatar ? (
+                <Image source={{ uri: displayAvatar }} className="size-full" resizeMode="cover" />
+              ) : (
+                <View className="size-full items-center justify-center">
+                  <Text className="text-sm font-bold text-foreground">
+                    {displayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
           </View>
         }
       />

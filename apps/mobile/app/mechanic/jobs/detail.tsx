@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
   AlertCircle,
@@ -80,7 +81,7 @@ export default function MechanicJobDetailScreen() {
 
   if (!job) {
     return (
-      <View className="flex-1 bg-background">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
         <AppHeader title="Không tìm thấy" onBack={() => router.back()} />
         <View className="flex-1 items-center justify-center px-8">
           <Banner
@@ -89,7 +90,7 @@ export default function MechanicJobDetailScreen() {
             description="Có thể đã hoàn tất hoặc bị huỷ. Vui lòng quay lại danh sách."
           />
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -97,7 +98,7 @@ export default function MechanicJobDetailScreen() {
   const tone = statusTone[job.status];
 
   return (
-    <View className="flex-1 bg-background">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader
         title={job.type}
         subtitle={`${job.vehicle.plate} · ${job.scheduledTime}`}
@@ -274,6 +275,6 @@ export default function MechanicJobDetailScreen() {
           <Text className="text-xs text-muted-foreground underline">Mở vị trí đón khách trên bản đồ</Text>
         </Pressable>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }

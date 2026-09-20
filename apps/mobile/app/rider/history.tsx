@@ -1,38 +1,41 @@
-import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Bike, Calendar, FileText, History, LucideIcon, Receipt, User, Wrench } from 'lucide-react-native';
+import { Bike, Calendar, FileText, History, LucideIcon, Receipt, Wrench } from 'lucide-react-native';
 
-import { useApp } from '@/contexts/app-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
-import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
-import { MaintenanceCard } from '@/components/maintenance-card';
-import { formatDate, formatVND } from '@/lib/mock-data';
-import type { ServiceRecord } from '@/lib/types';
+import { useServiceRequests } from '@/hooks/use-service-requests';
+import { statusLabel, type ServiceRequestResponse } from '@/lib/service-requests-service';
 
 /**
- * HistoryScreen - lịch sử dịch vụ đã hoàn tất.
+ * HistoryScreen - lịch sử dịch vụ từ backend.
  *
- * Layout:
- *  - AppHeader.
- *  - Hero card navy: tổng chi tiêu + số dịch vụ.
- *  - Danh sách service records (pressable để mở detail).
+ * Hiển thị tất cả service-requests của rider,
+ * filter completed/canceled → hiển thị trong card.
+ *
+ * Nếu BE chưa ready → fallback về mock services từ useApp().
  */
 export default function HistoryScreen() {
-  const { services } = useApp();
-  const [selected, setSelected] = useState<ServiceRecord | null>(null);
-  const total = services.reduce((sum, s) => sum + s.price, 0);
+  const sr = useServiceRequests();
+  const [selected, setSelected] = useState<ServiceRequestResponse | null>(null);
+
+  useEffect(() => {
+    void sr.reloadList();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const completed = sr.list.filter((r) => r.status === 'completed');
 
   if (selected) {
     return (
-      <View className="flex-1 bg-background">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
         <AppHeader
           title="Chi tiết dịch vụ"
-          subtitle={selected.type}
+          subtitle={selected.request_code}
           onBack={() => setSelected(null)}
         />
         <ScrollView
@@ -47,7 +50,7 @@ export default function HistoryScreen() {
               </View>
               <View className="flex-1">
                 <Text className="text-lg font-bold leading-tight text-foreground">
-                  {selected.type}
+                  {selected.service_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
                 </Text>
                 <Badge tone="green" className="mt-1 self-start">
                   <Text className="text-xs font-semibold text-green">Hoàn tất</Text>
@@ -55,19 +58,27 @@ export default function HistoryScreen() {
               </View>
             </View>
             <View className="mt-4 gap-3">
-              <DetailRow icon={Bike} label="Xe" value={selected.vehicleName} />
-              <DetailRow icon={Calendar} label="Ngày" value={formatDate(selected.date)} />
-              <DetailRow icon={User} label="Thợ phụ trách" value={selected.mechanic} />
-              <DetailRow icon={Receipt} label="Tổng thanh toán" value={formatVND(selected.price)} />
+              <DetailRow icon={Bike} label="Mã xe" value={selected.motorcycle_id.slice(0, 8) + '…'} />
+              <DetailRow icon={Calendar} label="Ngày tạo" value={formatDate(selected.created_at)} />
+              <DetailRow
+                icon={Wrench}
+                label="Loại dịch vụ"
+                value={selected.service_type.replace(/_/g, ' ')}
+              />
+              {selected.address_text && (
+                <DetailRow icon={FileText} label="Địa điểm" value={selected.address_text} />
+              )}
             </View>
           </Card>
-          {selected.notes && (
+          {selected.problem_description && (
             <Card className="mt-4 p-5">
               <View className="mb-2 flex-row items-center gap-2">
                 <FileText size={16} color="#1974f7" />
-                <Text className="font-bold text-foreground">Ghi chú dịch vụ</Text>
+                <Text className="font-bold text-foreground">Mô tả vấn đề</Text>
               </View>
-              <Text className="text-sm leading-relaxed text-muted-foreground">{selected.notes}</Text>
+              <Text className="text-sm leading-relaxed text-muted-foreground">
+                {selected.problem_description}
+              </Text>
             </Card>
           )}
 
@@ -81,18 +92,18 @@ export default function HistoryScreen() {
             <Text className="text-sm font-semibold text-foreground">Tải hoá đơn</Text>
           </ActionButton>
 
-          <Banner
-            className="mt-5"
-            tone="info"
-            description="Hoá đơn sẽ được tạo tự động sau khi thanh toán thành công (khi tích hợp backend)."
-          />
+          <Card className="mt-5 border-primary/20 bg-primary/5 p-4">
+            <Text className="text-sm text-muted-foreground">
+              Hoá đơn sẽ được tạo tự động sau khi thanh toán thành công.
+            </Text>
+          </Card>
         </ScrollView>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View className="flex-1 bg-background">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader title="Lịch sử dịch vụ" onBack={() => router.back()} />
       <ScrollView
         className="flex-1"
@@ -103,17 +114,25 @@ export default function HistoryScreen() {
         <Card className="overflow-hidden border-0 bg-navy">
           <View className="flex-row items-center justify-between p-5">
             <View className="flex-1">
-              <Text className="text-xs text-white/70">Tổng chi tiêu bảo dưỡng</Text>
-              <Text className="mt-1 text-2xl font-bold text-white">{formatVND(total)}</Text>
-              <Text className="mt-0.5 text-xs text-white/60">Cập nhật {formatDate(new Date().toISOString())}</Text>
+              <Text className="text-xs text-white/70">Tổng dịch vụ</Text>
+              <Text className="mt-1 text-2xl font-bold text-white">{completed.length}</Text>
+              <Text className="mt-0.5 text-xs text-white/60">
+                Cập nhật {new Date().toLocaleDateString('vi-VN')}
+              </Text>
             </View>
             <View className="rounded-full bg-white/15 px-3 py-1.5">
-              <Text className="text-sm font-semibold text-white">{services.length} dịch vụ</Text>
+              <Text className="text-sm font-semibold text-white">
+                {sr.list.length} yêu cầu
+              </Text>
             </View>
           </View>
         </Card>
 
-        {services.length === 0 ? (
+        {sr.listLoading ? (
+          <View className="items-center py-8">
+            <ActivityIndicator color="#1974f7" />
+          </View>
+        ) : sr.list.length === 0 ? (
           <View className="mt-4">
             <EmptyState
               icon={History}
@@ -128,17 +147,60 @@ export default function HistoryScreen() {
           </View>
         ) : (
           <View className="mt-5 gap-3">
-            {services.map((s) => (
-              <MaintenanceCard
-                key={s.id}
-                record={s}
-                onPress={() => setSelected(s)}
-              />
+            {sr.list.map((r) => (
+              <HistoryCard key={r.id} request={r} onPress={() => setSelected(r)} />
             ))}
           </View>
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
+  );
+}
+
+function HistoryCard({
+  request,
+  onPress,
+}: {
+  request: ServiceRequestResponse;
+  onPress: () => void;
+}) {
+  const isCompleted = request.status === 'completed';
+  const isCanceled = request.status === 'canceled';
+  const badgeTone = isCompleted ? 'green' : isCanceled ? 'neutral' : 'blue';
+  const badgeText = isCompleted ? 'Hoàn tất' : isCanceled ? 'Đã huỷ' : statusLabel(request.status);
+
+  return (
+    <Card
+      className="p-4 active:scale-[0.99]"
+      onPress={onPress}
+    >
+      <View className="flex-row items-center gap-3">
+        <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+          <Wrench size={20} color="#1974f7" />
+        </View>
+        <View className="min-w-0 flex-1">
+          <View className="flex-row items-center justify-between gap-2">
+            <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
+              {request.service_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            </Text>
+            <Badge tone={badgeTone} className="shrink-0">
+              <Text className="text-xs font-semibold">{badgeText}</Text>
+            </Badge>
+          </View>
+          <Text className="mt-1 truncate text-xs text-muted-foreground">
+            {request.request_code}
+          </Text>
+          <View className="mt-1.5 flex-row items-center gap-2">
+            <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
+              <Calendar size={12} color="#64748b" />
+              <Text className="text-xs font-semibold text-secondary-foreground">
+                {formatDate(request.created_at)}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    </Card>
   );
 }
 
@@ -160,4 +222,16 @@ function DetailRow({
       <Text className="text-sm font-semibold text-foreground">{value}</Text>
     </View>
   );
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('vi-VN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+  } catch {
+    return '';
+  }
 }

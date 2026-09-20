@@ -1,50 +1,65 @@
-import React from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Check, MapPin, Wrench } from 'lucide-react-native';
 
 import { ActionButton } from '@/components/ui/action-button';
 import { Banner } from '@/components/ui/banner';
-import { BookingCard } from '@/components/booking-card';
 import { AppHeader } from '@/components/ui/app-header';
 import { Card } from '@/components/ui/card';
-import { useApp } from '@/contexts/app-context';
+import { Field, FormTextInput } from '@/components/ui/form';
+import { getServiceRequest, type ServiceRequestResponse } from '@/lib/service-requests-service';
 
 /**
- * ConfirmedScreen - thông báo đặt lịch thành công.
+ * ConfirmedScreen - thông báo đặt lịch thành công (BE-wired).
  *
- * Hero success animation: 3 lớp pulse + check lớn.
- * Hiển thị booking card với các thông tin đã đặt.
- * CTA: Book another service, View my bookings.
+ * Hiển thị service-request code từ BE + thông tin lịch hẹn.
  */
 export default function ConfirmedScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const { appointments } = useApp();
-  const appointment = appointments.find((a) => a.id === id);
+  const { id, code } = useLocalSearchParams<{ id?: string; code?: string }>();
+  const [request, setRequest] = useState<ServiceRequestResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!appointment) {
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await getServiceRequest(id);
+        if (!cancelled) setRequest(r);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Không thể tải lịch');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (!id) {
     return (
-      <View className="flex-1 bg-background">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
         <AppHeader title="Đặt lịch thành công" />
         <View className="flex-1 items-center justify-center px-8">
           <Banner
             tone="warning"
             title="Không tìm thấy lịch"
-            description="Có thể lịch đã bị huỷ. Vui lòng thử đặt lại."
+            description="Vui lòng thử đặt lại."
           />
-          <ActionButton
-            className="mt-5"
-            onPress={() => router.replace('/rider/(tabs)/schedule')}
-          >
-            <Text className="text-sm font-semibold text-primary-foreground">Về trang đặt lịch</Text>
-          </ActionButton>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View className="flex-1 bg-background">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader title="Đặt lịch thành công" />
       <ScrollView
         className="flex-1"
@@ -68,10 +83,61 @@ export default function ConfirmedScreen() {
           </View>
         </View>
 
-        <Text className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-          Chi tiết lịch hẹn
-        </Text>
-        <BookingCard appointment={appointment} />
+        {/* Mã yêu cầu */}
+        <Card className="border-primary/30 bg-primary/5 p-4">
+          <Text className="text-xs text-muted-foreground">Mã yêu cầu</Text>
+          <Text className="font-mono text-xl font-bold text-foreground">
+            {code ?? request?.request_code ?? id}
+          </Text>
+          {request?.status && (
+            <View className="mt-1">
+              <Text className="text-xs text-muted-foreground">Trạng thái: {request.status}</Text>
+            </View>
+          )}
+        </Card>
+
+        {loading && (
+          <View className="mt-6 items-center">
+            <ActivityIndicator color="#1974f7" />
+          </View>
+        )}
+
+        {error && (
+          <View className="mt-4">
+            <Banner tone="error" description={error} />
+          </View>
+        )}
+
+        {request && (
+          <Card className="mt-4 p-4">
+            <Field label="Mô tả">
+              <FormTextInput
+                value={request.problem_description}
+                editable={false}
+                multiline
+                numberOfLines={2}
+                className="min-h-[60px] py-2.5"
+              />
+            </Field>
+            {request.scheduled_start_at && (
+              <View className="mt-3">
+                <Field label="Ngày giờ hẹn">
+                  <FormTextInput
+                    value={new Date(request.scheduled_start_at).toLocaleString('vi-VN')}
+                    editable={false}
+                  />
+                </Field>
+              </View>
+            )}
+            {request.address_text && (
+              <View className="mt-3">
+                <Field label="Địa điểm">
+                  <FormTextInput value={request.address_text} editable={false} />
+                </Field>
+              </View>
+            )}
+          </Card>
+        )}
 
         {/* Tips */}
         <Card className="mt-5 border-primary/20 bg-primary/5 p-4">
@@ -108,7 +174,7 @@ export default function ConfirmedScreen() {
           </ActionButton>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

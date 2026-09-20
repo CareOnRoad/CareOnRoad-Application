@@ -29,7 +29,7 @@ App phục vụ cả **Rider** (người dùng) và **Mechanic** (thợ sửa xe
 # Cài dependencies (lần đầu hoặc khi có thay đổi package.json)
 pnpm install
 
-# Chạy dev server (Expo)
+# Chạy dev server (Expo) - mặc định dùng .env
 pnpm start
 
 # Hoặc chạy thẳng trên Android/iOS
@@ -43,6 +43,23 @@ pnpm lint
 ```
 
 > Dùng `pnpm.cmd` thay vì `pnpm` nếu PowerShell chặn script (Windows).
+
+### 4 cách start tuỳ môi trường
+
+| Lệnh | Khi nào dùng | Ghi chú |
+|------|--------------|---------|
+| `pnpm start` | Dev trên iOS Simulator / Android Emulator cùng máy với BE | Dùng `http://localhost:3000` (mặc định trong `.env`) |
+| `pnpm start:lan` | **Dev trên thiết bị thật qua WiFi LAN** | Script tự detect IP LAN và inject vào `EXPO_PUBLIC_API_BASE_URL_OVERRIDE`. **Không cần sửa `.env` khi IP đổi.** |
+| `pnpm start:tunnel` | Dev khi máy dev không cùng LAN với thiết bị | Expo tunnel (cần đăng nhập Expo account) |
+| `EXPO_PUBLIC_API_BASE_URL_OVERRIDE=http://X.X.X.X:3000 pnpm start` | Override thủ công khi IP đặc biệt | Đặt biến trước khi start |
+
+Thứ tự ưu tiên khi đọc API URL (xem `src/lib/config.ts`):
+
+```
+1. EXPO_PUBLIC_API_BASE_URL_OVERRIDE   ← set qua terminal (cao nhất)
+2. EXPO_PUBLIC_API_BASE_URL            ← set trong .env hoặc EAS profile
+3. APP_VARIANT + hardcoded fallback    ← chỉ cho production build
+```
 
 ---
 
@@ -158,7 +175,7 @@ apps/mobile/
 │   │   └── auth-types.ts      # Types: AuthRole, PublicAuthUser, ...
 │   └── components/          # UI components (cards, buttons, ...)
 │
-├── app.json               # Expo config (bundle id, permissions)
+├── app.config.ts         # Expo dynamic config (đọc env vars khi build)
 ├── tailwind.config.ts     # Tailwind + NativeWind
 └── package.json
 ```
@@ -168,7 +185,45 @@ apps/mobile/
 | Lệnh | Mô tả |
 |------|-------|
 | `pnpm.cmd start` | Khởi động Expo dev server |
+| `pnpm.cmd start:lan` | Tự detect IP LAN, khởi động Expo với API URL đúng |
+| `pnpm.cmd start:tunnel` | Expo tunnel (chạy khi không cùng LAN) |
 | `pnpm.cmd android` | Build + chạy trên Android |
 | `pnpm.cmd ios` | Build + chạy trên iOS |
 | `pnpm.cmd typecheck` | TypeScript check |
 | `pnpm.cmd lint` | ESLint |
+
+---
+
+## Build cho nhiều môi trường (EAS)
+
+Mỗi môi trường có profile riêng trong `eas.json`:
+
+| Profile | API URL | Bundle ID | Mục đích |
+|---------|---------|-----------|----------|
+| `development` | `http://localhost:3000` | `com.careonroad.mobile.dev` | Dev trên simulator/emulator |
+| `preview` | `http://localhost:3000` | `com.careonroad.mobile.preview` | Internal test qua EAS build |
+| `staging` | `https://staging-api.careonroad.example` | `com.careonroad.mobile.staging` | Test với backend staging |
+| `production` | `https://api.careonroad.example` | `com.careonroad.mobile` | App store / production |
+
+Build commands (cần `eas-cli`):
+
+```bash
+# Dev client (cho simulator/emulator)
+eas build --profile development --platform ios
+eas build --profile development --platform android
+
+# Preview (internal tester, vẫn localhost API)
+eas build --profile preview
+
+# Staging (cho QA)
+eas build --profile staging
+
+# Production (lên store)
+eas build --profile production
+```
+
+EAS tự inject các biến `EXPO_PUBLIC_*` từ `eas.json` vào bundle. Khi cần
+thay đổi URL backend cho staging/production, sửa `eas.json` rồi rebuild,
+**không bao giờ** commit URL thật vào git.
+
+Secrets (service_role key, etc.) nên dùng `eas secret:create` thay vì hardcode.

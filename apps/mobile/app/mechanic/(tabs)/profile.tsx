@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Image, ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   Award,
@@ -11,6 +11,7 @@ import {
   Mail,
   MapPin,
   Moon,
+  Pencil,
   Phone,
   RefreshCcw,
   ShieldCheck,
@@ -25,9 +26,12 @@ import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { EditProfileSheet } from '@/components/ui/edit-profile-sheet';
 import { NavRow, RowIcon, ToggleRow } from '@/components/ui/toggle-row';
 import { cn } from '@/lib/utils';
 import { formatVND } from '@/lib/mock-data';
+import { loadProfile, type LocalProfile } from '@/lib/profile-service';
 
 const languageCopy = { EN: 'English', VI: 'Tiếng Việt' } as const;
 
@@ -43,10 +47,51 @@ export default function MechanicProfileScreen() {
   const { user: authUser, logout, switchRoleDemo, isBackendConfigured } = useAuth();
   const [notifications, setNotifications] = useState(true);
   const [language, setLanguage] = useState<'EN' | 'VI'>('VI');
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [localProfile, setLocalProfile] = useState<LocalProfile | null>(null);
 
-  const onLogout = async () => {
-    await logout();
-    router.replace('/login');
+  // Load profile local (sửa được từ EditProfileSheet)
+  const reloadLocalProfile = useCallback(async () => {
+    if (!authUser?.id) {
+      setLocalProfile(null);
+      return;
+    }
+    const stored = await loadProfile(authUser.id);
+    setLocalProfile(stored);
+  }, [authUser?.id]);
+
+  useEffect(() => {
+    reloadLocalProfile();
+  }, [reloadLocalProfile]);
+
+  const handleConfirmLogout = async () => {
+    setLogoutError(null);
+    setLoggingOut(true);
+    try {
+      await logout();
+      setLogoutDialogOpen(false);
+      setLoggingOut(false);
+      router.replace('/login');
+    } catch (err) {
+      setLogoutError(
+        err instanceof Error ? err.message : 'Đăng xuất thất bại. Vui lòng thử lại.',
+      );
+      setLoggingOut(false);
+    }
+  };
+
+  const openLogoutDialog = () => {
+    setLogoutError(null);
+    setLogoutDialogOpen(true);
+  };
+
+  const cancelLogout = () => {
+    if (loggingOut) return;
+    setLogoutDialogOpen(false);
+    setLogoutError(null);
   };
 
   const onSwitchRole = async () => {
@@ -58,8 +103,15 @@ export default function MechanicProfileScreen() {
     }
   };
 
-  const displayName = authUser?.name ?? mechanic.name;
-  const displayAvatar = authUser?.avatar ?? mechanic.avatar;
+  const displayName = localProfile?.name ?? authUser?.name ?? mechanic.name;
+  const displayAvatar =
+    localProfile?.avatar ?? authUser?.avatar ?? mechanic.avatar;
+  const displayPhone = localProfile?.phone ?? authUser?.phone ?? garage.phone;
+  const displayEmail =
+    localProfile?.email ?? authUser?.email ?? 'quan@quansgarage.vn';
+  const handleProfileSaved = (profile: LocalProfile) => {
+    setLocalProfile(profile);
+  };
   const delta = earnings.lastWeek > 0
     ? ((earnings.thisWeek - earnings.lastWeek) / earnings.lastWeek) * 100
     : 0;
@@ -97,7 +149,19 @@ export default function MechanicProfileScreen() {
                   <Text className="text-xs font-bold text-white">{mechanic.rating}</Text>
                   <Text className="text-xs text-white/60">· {mechanic.totalJobs} công việc</Text>
                 </View>
+                <View className="mt-1 flex-row items-center gap-1">
+                  <Phone size={11} color="#ffffff" className="opacity-70" />
+                  <Text className="text-[11px] text-white/70">{displayPhone}</Text>
+                </View>
               </View>
+              <Pressable
+                onPress={() => setEditProfileOpen(true)}
+                accessibilityLabel="Sửa hồ sơ"
+                accessibilityRole="button"
+                className="size-9 items-center justify-center rounded-full bg-white/10 active:scale-95"
+              >
+                <Pencil size={14} color="#ffffff" />
+              </Pressable>
             </View>
             <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
               <ShieldCheck size={16} color="#a9ffad" />
@@ -161,7 +225,7 @@ export default function MechanicProfileScreen() {
           <Card className="divide-y divide-border">
             <Row icon={MapPin} label="Địa chỉ" value={garage.address} />
             <Row icon={Phone} label="Hotline" value={garage.phone} />
-            <Row icon={Mail} label="Email liên hệ" value={authUser?.email ?? 'quan@quansgarage.vn'} />
+            <Row icon={Mail} label="Email liên hệ" value={displayEmail} />
           </Card>
         </View>
 
@@ -229,7 +293,7 @@ export default function MechanicProfileScreen() {
           fullWidth
           variant="outline"
           className="mt-3 border-destructive/30"
-          onPress={onLogout}
+          onPress={openLogoutDialog}
           accessibilityLabel="Đăng xuất"
         >
           <LogOut size={16} color="#ed3f3a" />
@@ -240,6 +304,33 @@ export default function MechanicProfileScreen() {
           CareOnRoad Mechanic · Prototype v1.0
         </Text>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={logoutDialogOpen}
+        title="Đăng xuất khỏi CareOnRoad?"
+        description={
+          logoutError
+            ? logoutError
+            : 'Bạn sẽ cần đăng nhập lại để tiếp tục sử dụng ứng dụng.'
+        }
+        confirmLabel="Đăng xuất"
+        cancelLabel="Huỷ"
+        tone="destructive"
+        loading={loggingOut}
+        onConfirm={handleConfirmLogout}
+        onCancel={cancelLogout}
+      />
+
+      <EditProfileSheet
+        visible={editProfileOpen}
+        userId={authUser?.id ?? ''}
+        initialName={displayName}
+        initialEmail={displayEmail}
+        initialPhone={displayPhone}
+        initialAvatar={displayAvatar}
+        onClose={() => setEditProfileOpen(false)}
+        onSaved={handleProfileSaved}
+      />
     </View>
   );
 }

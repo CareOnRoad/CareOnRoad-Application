@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Link } from 'expo-router';
+import { Link, router } from 'expo-router';
 import {
   Bike,
   Eye,
@@ -37,13 +37,27 @@ import type { AuthRole } from '@/lib/auth-types';
  *  - Tài khoản demo chỉ hiển thị khi chưa cấu hình backend, không gây nhiễu user thật.
  */
 export default function LoginScreen() {
-  const { login, isBackendConfigured, bypassLoginAs } = useAuth();
+  const { login, isBackendConfigured, bypassLoginAs, role } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [bypassing, setBypassing] = useState<AuthRole | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Sau khi auth state đổi sang 'authenticated', chuyển sang nhóm role tương ứng.
+  // Lý do: React Navigation Stack không tự swap initial route khi state đổi,
+  // nên cần explicit điều hướng ra khỏi nhóm (auth).
+  // `authRole` được truyền vào từ caller (không đọc từ closure `role` vì stale).
+  const navigateAfterAuth = (authRole: AuthRole) => {
+    if (authRole === 'mechanic') {
+      router.replace('/mechanic');
+    } else if (authRole === 'rider') {
+      router.replace('/rider');
+    } else {
+      router.replace('/');
+    }
+  };
 
   const onSubmit = async () => {
     setError(null);
@@ -57,7 +71,9 @@ export default function LoginScreen() {
     }
     setSubmitting(true);
     try {
-      await login({ email: email.trim(), password });
+      const result = await login({ email: email.trim(), password });
+      // Dùng role trả về từ login() thay vì `role` từ closure (state cũ).
+      navigateAfterAuth(result.role);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Đăng nhập thất bại');
     } finally {
@@ -70,6 +86,7 @@ export default function LoginScreen() {
     setBypassing(target);
     try {
       await bypassLoginAs(target);
+      navigateAfterAuth(target);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không thể bypass đăng nhập');
     } finally {
