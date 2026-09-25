@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   AlarmClock,
+  Bell,
+  Bike,
   CalendarCheck,
   CalendarClock,
   Check,
@@ -21,14 +23,14 @@ import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
 import { Banner } from '@/components/ui/banner';
-import { BookingCard } from '@/components/booking-card';
 import { CancelAppointmentModal } from '@/components/cancel-appointment-modal';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatVND } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
-import { updateReminder } from '@/lib/reminders-service';
-import type { Appointment } from '@/lib/types';
+import { updateReminder, snoozeReminder } from '@/lib/reminders-service';
+import type { Appointment, CanceledAppointment } from '@/lib/types';
+import type { ServiceRequestResponse } from '@/lib/service-requests-service';
 import {
   listReminders,
   recurrenceLabel,
@@ -38,6 +40,60 @@ import {
 
 type HistoryTab = 'maintenance' | 'reminders' | 'emergency';
 type MaintenanceFilter = 'upcoming' | 'canceled' | 'completed';
+
+const SERVICE_LABELS: Record<string, string> = {
+  periodic_maintenance: 'Bảo dưỡng định kỳ',
+  emergency_rescue: 'Cứu hộ khẩn cấp',
+  mobile_repair: 'Sửa chữa lưu động',
+  at_home_service: 'Dịch vụ tại nhà',
+  other: 'Khác',
+};
+
+const UPCOMING_STATUSES = new Set([
+  'submitted',
+  'dispatching',
+  'offered',
+  'assigned',
+  'mechanic_en_route',
+  'in_service',
+  'awaiting_quote_approval',
+  'awaiting_payment',
+]);
+
+/**
+ * Map BE ServiceRequestResponse → Appointment UI shape.
+ * Dùng cho scheduled maintenance (periodic_maintenance + scheduled_visit).
+ */
+function requestToAppointment(
+  req: ServiceRequestResponse,
+  vehicleName: string,
+): Appointment {
+  const dt = req.scheduled_start_at ? new Date(req.scheduled_start_at) : new Date(req.created_at);
+  const date = dt.toISOString().slice(0, 10);
+  const time = dt.toTimeString().slice(0, 5);
+  return {
+    id: req.id,
+    vehicleId: req.motorcycle_id,
+    vehicleName,
+    service: SERVICE_LABELS[req.service_type] ?? req.service_type,
+    date,
+    time,
+    status: 'confirmed',
+  };
+}
+
+function requestToCanceled(req: ServiceRequestResponse, vehicleName: string): CanceledAppointment {
+  const dt = req.scheduled_start_at ? new Date(req.scheduled_start_at) : new Date(req.created_at);
+  return {
+    id: req.id,
+    vehicleName,
+    service: SERVICE_LABELS[req.service_type] ?? req.service_type,
+    date: dt.toISOString().slice(0, 10),
+    time: dt.toTimeString().slice(0, 5),
+    canceledAt: req.updated_at,
+    reason: req.canceled_reason ?? 'Không có lý do',
+  };
+}
 
 /**
  * ScheduleScreen - đặt lịch bảo dưỡng + xem lịch sử + reminders.
@@ -50,17 +106,13 @@ type MaintenanceFilter = 'upcoming' | 'canceled' | 'completed';
  * Mỗi filter có EmptyState riêng để hướng dẫn user.
  */
 export default function ScheduleScreen() {
-  const {
-    appointments,
-    canceledAppointments,
-    emergencyCalls,
-    services,
-    cancelAppointment,
-  } = useApp();
+  const { vehicles, canceledAppointments, emergencyCalls, services, cancelAppointmentLocal } =
+    useApp();
   const sr = useServiceRequests();
   const [tab, setTab] = useState<HistoryTab>('maintenance');
   const [maintenanceFilter, setMaintenanceFilter] = useState<MaintenanceFilter>('upcoming');
   const [cancelling, setCancelling] = useState<Appointment | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // Reminders state
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -89,10 +141,46 @@ export default function ScheduleScreen() {
     }
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const completedCount = services.length;
+  // =========================================================
+  // Maintenance từ BE: filter theo service_type === periodic_maintenance.
+  // =========================================================
+  const maintenanceFromBE = sr.list.filter(
+    (r) => r.service_type === 'periodic_maintenance',
+  );
+  const vehicleNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    vehicles.forEach((v) => map.set(v.id, v.name));
+    return map;
+  }, [vehicles]);
+
+  const upcomingMaintenance: Appointment[] = maintenanceFromBE
+    .filter((r) => UPCOMING_STATUSES.has(r.status))
+    .map((r) => requestToAppointment(r, vehicleNameById.get(r.motorcycle_id) ?? 'Xe'))
+    .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+
+  const canceledMaintenance: CanceledAppointment[] = [
+    ...maintenanceFromBE
+      .filter((r) => r.status === 'canceled')
+      .map((r) => requestToCanceled(r, vehicleNameById.get(r.motorcycle_id) ?? 'Xe')),
+    ...canceledAppointments,
+  ];
+
+  const completedCount = services.length + maintenanceFromBE.filter((r) => r.status === 'completed').length;
   const activeReminders = reminders.filter((r) => r.status === 'active' || r.status === 'snoozed');
-  const totalMaintenance = appointments.length + canceledAppointments.length;
+  const totalMaintenance = upcomingMaintenance.length + canceledMaintenance.length;
   const totalEmergency = emergencyCalls.length;
+
+  const handleCancelMaintenance = async (reason: string) => {
+    if (!cancelling) return;
+    setCancelError(null);
+    try {
+      await sr.cancelById(cancelling.id, reason);
+      cancelAppointmentLocal(cancelling.id, reason);
+      setCancelling(null);
+    } catch (e) {
+      setCancelError(e instanceof Error ? e.message : 'Không thể huỷ lịch');
+    }
+  };
 
   return (
     <View className="flex-1 bg-background">
@@ -108,8 +196,7 @@ export default function ScheduleScreen() {
             count={totalMaintenance}
             tone="primary"
             onPress={() => setTab('maintenance')}
-          />
-          <TabButton
+          />          <TabButton
             active={tab === 'reminders'}
             icon={AlarmClock}
             label="Nhắc nhở"
@@ -145,12 +232,28 @@ export default function ScheduleScreen() {
               <Text className="text-base font-semibold text-primary-foreground">Đặt lịch bảo dưỡng mới</Text>
             </ActionButton>
 
+            {sr.listError && (
+              <View className="mb-3">
+                <Banner
+                  tone="error"
+                  title="Không thể tải lịch bảo dưỡng"
+                  description={sr.listError}
+                />
+              </View>
+            )}
+
+            {sr.listLoading && (
+              <View className="items-center py-4">
+                <ActivityIndicator color="#1974f7" />
+              </View>
+            )}
+
             {/* Filter cấp 2 */}
             <View className="mb-3 flex-row gap-2 rounded-2xl bg-secondary/40 p-1">
               {(
                 [
-                  { id: 'upcoming', label: 'Sắp tới', count: appointments.length },
-                  { id: 'canceled', label: 'Đã huỷ', count: canceledAppointments.length },
+                  { id: 'upcoming', label: 'Sắp tới', count: upcomingMaintenance.length },
+                  { id: 'canceled', label: 'Đã huỷ', count: canceledMaintenance.length },
                   { id: 'completed', label: 'Hoàn tất', count: completedCount },
                 ] as { id: MaintenanceFilter; label: string; count: number }[]
               ).map((f) => {
@@ -191,7 +294,7 @@ export default function ScheduleScreen() {
 
             {maintenanceFilter === 'upcoming' && (
               <View className="gap-3">
-                {appointments.length === 0 ? (
+                {upcomingMaintenance.length === 0 ? (
                   <EmptyState
                     icon={CalendarClock}
                     tone="primary"
@@ -205,8 +308,12 @@ export default function ScheduleScreen() {
                     }
                   />
                 ) : (
-                  appointments.map((a) => (
-                    <BookingCard key={a.id} appointment={a} onCancel={() => setCancelling(a)} />
+                  upcomingMaintenance.map((a) => (
+                    <UpcomingMaintenanceCard
+                      key={a.id}
+                      appointment={a}
+                      onCancel={() => setCancelling(a)}
+                    />
                   ))
                 )}
               </View>
@@ -214,21 +321,21 @@ export default function ScheduleScreen() {
 
             {maintenanceFilter === 'canceled' && (
               <View className="gap-3">
-                {canceledAppointments.length === 0 ? (
+                {canceledMaintenance.length === 0 ? (
                   <EmptyState
                     icon={XCircle}
                     title="Chưa có lịch bị huỷ"
                     description="Các lịch bị huỷ kèm lý do sẽ hiển thị tại đây."
                   />
                 ) : (
-                  canceledAppointments.map((c) => <CanceledBookingCard key={c.id} canceled={c} />)
+                  canceledMaintenance.map((c) => <CanceledBookingCard key={c.id} canceled={c} />)
                 )}
               </View>
             )}
 
             {maintenanceFilter === 'completed' && (
               <View className="gap-3">
-                {services.length === 0 ? (
+                {services.length === 0 && maintenanceFromBE.filter((r) => r.status === 'completed').length === 0 ? (
                   <EmptyState
                     icon={Check}
                     tone="success"
@@ -236,36 +343,47 @@ export default function ScheduleScreen() {
                     description="Các lần bảo dưỡng đã hoàn thành sẽ hiển thị tại đây."
                   />
                 ) : (
-                  services.map((s) => (
-                    <Card key={s.id} className="p-4">
-                      <View className="flex-row items-center gap-3">
-                        <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
-                          <Wrench size={20} color="#1974f7" />
-                        </View>
-                        <View className="min-w-0 flex-1">
-                          <View className="flex-row items-center justify-between gap-2">
-                            <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
-                              {s.type}
+                  <>
+                    {maintenanceFromBE
+                      .filter((r) => r.status === 'completed')
+                      .map((r) => (
+                        <CompletedMaintenanceCard
+                          key={r.id}
+                          request={r}
+                          vehicleName={vehicleNameById.get(r.motorcycle_id) ?? 'Xe'}
+                        />
+                      ))}
+                    {services.map((s) => (
+                      <Card key={s.id} className="p-4">
+                        <View className="flex-row items-center gap-3">
+                          <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+                            <Wrench size={20} color="#1974f7" />
+                          </View>
+                          <View className="min-w-0 flex-1">
+                            <View className="flex-row items-center justify-between gap-2">
+                              <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
+                                {s.type}
+                              </Text>
+                              <Text className="shrink-0 text-sm font-bold text-foreground">
+                                {formatVND(s.price)}
+                              </Text>
+                            </View>
+                            <Text className="truncate text-xs text-muted-foreground">
+                              {s.vehicleName} · {s.mechanic}
                             </Text>
-                            <Text className="shrink-0 text-sm font-bold text-foreground">
-                              {formatVND(s.price)}
+                            <Text className="mt-1 text-xs text-muted-foreground">{s.date}</Text>
+                          </View>
+                        </View>
+                        {s.notes && (
+                          <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
+                            <Text className="text-xs text-muted-foreground" numberOfLines={2}>
+                              {s.notes}
                             </Text>
                           </View>
-                          <Text className="truncate text-xs text-muted-foreground">
-                            {s.vehicleName} · {s.mechanic}
-                          </Text>
-                          <Text className="mt-1 text-xs text-muted-foreground">{s.date}</Text>
-                        </View>
-                      </View>
-                      {s.notes && (
-                        <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
-                          <Text className="text-xs text-muted-foreground" numberOfLines={2}>
-                            {s.notes}
-                          </Text>
-                        </View>
-                      )}
-                    </Card>
-                  ))
+                        )}
+                      </Card>
+                    ))}
+                  </>
                 )}
               </View>
             )}
@@ -352,12 +470,17 @@ export default function ScheduleScreen() {
             ? `${cancelling.service} · ${cancelling.vehicleName} · ${cancelling.time}`
             : undefined
         }
-        onClose={() => setCancelling(null)}
-        onConfirm={(reason) => {
-          if (cancelling) cancelAppointment(cancelling.id, reason);
+        onClose={() => {
           setCancelling(null);
+          setCancelError(null);
         }}
+        onConfirm={handleCancelMaintenance}
       />
+      {cancelError && (
+        <View className="px-5 pb-3">
+          <Banner tone="error" description={cancelError} />
+        </View>
+      )}
     </View>
   );
 }
@@ -470,6 +593,129 @@ function CanceledBookingCard({
   );
 }
 
+function UpcomingMaintenanceCard({
+  appointment,
+  onCancel,
+}: {
+  appointment: Appointment;
+  onCancel: () => void;
+}) {
+  const isUpcomingSoon = isWithinDays(appointment.date, 14);
+  return (
+    <Card className="overflow-hidden">
+      <View className="flex-row items-center justify-between bg-navy px-4 py-3">
+        <View className="flex-row items-center gap-2">
+          <CalendarClock size={16} color="#ffffff" />
+          <Text className="text-sm font-semibold text-white">{appointment.service}</Text>
+        </View>
+        <View className="rounded-full bg-white/15 px-2.5 py-1">
+          <Text className="text-xs font-semibold text-white">
+            {appointment.status === 'confirmed' ? 'Đã đặt' : 'Chờ xác nhận'}
+          </Text>
+        </View>
+      </View>
+      <View className="flex-row gap-2 p-4">
+        <View className="flex-1 gap-1">
+          <View className="flex-row items-center gap-1">
+            <Bike size={14} color="#64748b" />
+            <Text className="text-xs text-muted-foreground">Xe</Text>
+          </View>
+          <Text className="text-sm font-semibold leading-tight text-foreground" numberOfLines={1}>
+            {appointment.vehicleName}
+          </Text>
+        </View>
+        <View className="flex-1 gap-1">
+          <View className="flex-row items-center gap-1">
+            <CalendarClock size={14} color="#64748b" />
+            <Text className="text-xs text-muted-foreground">Ngày</Text>
+          </View>
+          <Text className="text-sm font-semibold text-foreground">
+            {appointment.date} · {appointment.time}
+          </Text>
+        </View>
+        <View className="flex-1 gap-1">
+          <View className="flex-row items-center gap-1">
+            <FileText size={14} color="#64748b" />
+            <Text className="text-xs text-muted-foreground">Trạng thái</Text>
+          </View>
+          <Text
+            className={cn(
+              'text-xs font-semibold',
+              isUpcomingSoon ? 'text-amber-600' : 'text-foreground',
+            )}
+          >
+            {isUpcomingSoon ? 'Sắp đến hạn' : 'Đang chờ'}
+          </Text>
+        </View>
+      </View>
+      <View className="flex-row gap-2 border-t border-border px-4 py-3">
+        <ActionButton
+          variant="destructive"
+          fullWidth
+          onPress={onCancel}
+          accessibilityLabel="Huỷ lịch bảo dưỡng"
+        >
+          <XCircle size={16} color="#ffffff" />
+          <Text className="text-xs font-semibold text-destructive-foreground">Huỷ lịch</Text>
+        </ActionButton>
+      </View>
+    </Card>
+  );
+}
+
+function CompletedMaintenanceCard({
+  request,
+  vehicleName,
+}: {
+  request: ServiceRequestResponse;
+  vehicleName: string;
+}) {
+  return (
+    <Card className="p-4">
+      <View className="flex-row items-center gap-3">
+        <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+          <Wrench size={20} color="#1974f7" />
+        </View>
+        <View className="min-w-0 flex-1">
+          <View className="flex-row items-center justify-between gap-2">
+            <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
+              {SERVICE_LABELS[request.service_type] ?? request.service_type}
+            </Text>
+            <Badge tone="green">
+              <Text className="text-xs font-semibold text-green">Hoàn tất</Text>
+            </Badge>
+          </View>
+          <Text className="truncate text-xs text-muted-foreground">
+            {request.request_code} · {vehicleName}
+          </Text>
+          <View className="mt-1.5 flex-row items-center gap-2">
+            <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
+              <CalendarClock size={12} color="#64748b" />
+              <Text className="text-xs font-semibold text-secondary-foreground">
+                {new Date(request.created_at).toLocaleDateString('vi-VN')}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+      {request.problem_description && (
+        <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
+          <Text className="text-xs text-muted-foreground" numberOfLines={2}>
+            {request.problem_description}
+          </Text>
+        </View>
+      )}
+    </Card>
+  );
+}
+
+function isWithinDays(isoDate: string, days: number): boolean {
+  const target = new Date(isoDate).getTime();
+  const today = Date.now();
+  const diffDays = (target - today) / (1000 * 60 * 60 * 24);
+  return diffDays >= 0 && diffDays <= days;
+}
+
 function EmergencyHistoryCard({ call }: { call: import('@/lib/types').EmergencyCall }) {
   return (
     <Card className="p-4">
@@ -524,6 +770,56 @@ function ReminderCard({
       setBusy(false);
     }
   };
+  /**
+   * Mở Alert chọn 1 trong 4 mốc: 15 phút / 1 giờ / tới sáng / 1 ngày.
+   * BE nhận ISO datetime, mình set offset tương ứng từ now().
+   */
+  const handleSnooze = () => {
+    const options: { label: string; ms: number }[] = [
+      { label: '15 phút', ms: 15 * 60 * 1000 },
+      { label: '1 giờ', ms: 60 * 60 * 1000 },
+      { label: 'Tới sáng mai (08:00)', ms: 0 }, // calculated dynamically
+      { label: '1 ngày', ms: 24 * 60 * 60 * 1000 },
+    ];
+    Alert.alert(
+      'Tạm hoãn nhắc nhở',
+      'Chọn khoảng thời gian bạn muốn nhắc lại:',
+      [
+        ...options.map((opt) => {
+          const until = new Date(
+            opt.ms === 0
+              ? (() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() + 1);
+                  d.setHours(8, 0, 0, 0);
+                  return d.getTime();
+                })()
+              : Date.now() + opt.ms,
+          );
+          const labelWithTime = `${opt.label} (${until.toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })})`;
+          return {
+            text: labelWithTime,
+            onPress: async () => {
+              setBusy(true);
+              try {
+                await snoozeReminder(reminder.id, until.toISOString());
+                await onChanged();
+              } finally {
+                setBusy(false);
+              }
+            },
+          } as const;
+        }),
+        {
+          text: 'Huỷ',
+          style: 'cancel' as const,
+        },
+      ],
+    );
+  };
   const fireDate = new Date(reminder.scheduled_at);
   return (
     <Card className="p-4">
@@ -563,6 +859,18 @@ function ReminderCard({
         </View>
       </View>
       <View className="mt-3 flex-row gap-2">
+        {reminder.status !== 'disabled' && (
+          <ActionButton
+            variant="secondary"
+            fullWidth
+            onPress={handleSnooze}
+            disabled={busy}
+            accessibilityLabel="Tạm hoãn nhắc nhở"
+          >
+            <Bell size={14} color="#16202f" />
+            <Text className="text-sm font-semibold text-foreground">Snooze</Text>
+          </ActionButton>
+        )}
         <ActionButton
           variant="outline"
           fullWidth

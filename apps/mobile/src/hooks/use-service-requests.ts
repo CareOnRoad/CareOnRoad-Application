@@ -85,6 +85,8 @@ interface UseServiceRequestsReturn {
   }) => Promise<void>;
   /** Huỷ request hiện tại. */
   cancel: (reason: string) => Promise<void>;
+  /** Huỷ 1 request cụ thể qua id (dùng từ danh sách, không cần đang tracking). */
+  cancelById: (requestId: string, reason: string) => Promise<void>;
   /** Duyệt báo giá. */
   approveQuote: () => Promise<void>;
   /** Từ chối báo giá. */
@@ -318,6 +320,18 @@ export function useServiceRequests(): UseServiceRequestsReturn {
     [active.requestId, refreshActive, reloadList], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  /**
+   * Huỷ 1 request bất kỳ qua id. Dùng cho danh sách maintenance / history.
+   * Không cần request đang được tracking ở active session.
+   */
+  const cancelById = useCallback<UseServiceRequestsReturn['cancelById']>(
+    async (requestId, reason) => {
+      await apiCancelServiceRequest(requestId, reason);
+      await reloadList();
+    },
+    [reloadList],
+  );
+
   const approveQuoteHandler = useCallback(async () => {
     const { requestId, quote } = active;
     if (!requestId || !quote) return;
@@ -372,6 +386,7 @@ export function useServiceRequests(): UseServiceRequestsReturn {
       startRescue,
       scheduleMaintenance,
       cancel,
+      cancelById,
       approveQuote: approveQuoteHandler,
       rejectQuote: rejectQuoteHandler,
       reset,
@@ -385,6 +400,7 @@ export function useServiceRequests(): UseServiceRequestsReturn {
       startRescue,
       scheduleMaintenance,
       cancel,
+      cancelById,
       approveQuoteHandler,
       rejectQuoteHandler,
       reset,

@@ -49,7 +49,8 @@ interface AppState {
   updateVehicle: (v: Vehicle) => Promise<Vehicle | null>;
   archiveVehicle: (id: string) => Promise<boolean>;
   addAppointment: (a: Omit<Appointment, 'id'>) => Appointment;
-  cancelAppointment: (id: string, reason: string) => void;
+  /** Cancel appointment cục bộ (mock data). KHÔNG gọi BE. */
+  cancelAppointmentLocal: (id: string, reason: string) => void;
   addEmergencyCall: (
     c: Omit<EmergencyCall, 'id' | 'status'> & { status?: EmergencyCall['status'] },
   ) => EmergencyCall;
@@ -200,7 +201,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return appt;
   }, []);
 
-  const cancelAppointment = useCallback((id: string, reason: string) => {
+  const cancelAppointmentLocal = useCallback((id: string, reason: string) => {
     setAppointments((prev) => {
       const target = prev.find((a) => a.id === id);
       if (target) {
@@ -264,7 +265,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateVehicle,
       archiveVehicle,
       addAppointment,
-      cancelAppointment,
+      cancelAppointmentLocal,
       addEmergencyCall,
       selectedVehicleId,
       selectVehicle: setSelectedVehicleId,
@@ -287,7 +288,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateVehicle,
       archiveVehicle,
       addAppointment,
-      cancelAppointment,
+      cancelAppointmentLocal,
       addEmergencyCall,
       selectedVehicleId,
       selectedServiceId,

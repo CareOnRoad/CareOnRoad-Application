@@ -38,6 +38,7 @@ export default function MechanicLayout() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="jobs/detail" options={{ headerShown: false }} />
+        <Stack.Screen name="notifications" options={{ headerShown: false }} />
       </Stack>
     </MechanicAppProvider>
   );

@@ -29,7 +29,6 @@ type EnvShape = {
 };
 
 const DEFAULT_LOCAL_API_URL = 'http://localhost:3000';
-const DEFAULT_LAN_API_URL = 'http://192.168.1.1:3000';
 
 /**
  * Hardcoded fallback theo EAS profile. CHỈ dùng cho production build khi

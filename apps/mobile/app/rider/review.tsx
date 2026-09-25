@@ -66,15 +66,28 @@ export default function ReviewScreen() {
     setSubmitting(true);
     setError(null);
     try {
-      // Service-request id không phải assignment id; cần lấy assignment id từ BE.
-      // listAssignments đã được static import.
-      const listRes = await listAssignments({ limit: 100 });
-      const a = listRes.items.find((x) => x.request_id === requestId);
-      if (!a) {
+      // Service-request id không phải assignment id; phân trang tìm assignment
+      // khớp request_id. BE không filter theo request_id, nên duyệt cursor đến khi
+      // tìm thấy hoặc hết page.
+      let cursor: string | undefined;
+      let assignmentId: string | null = null;
+      let safetyCounter = 0;
+      while (safetyCounter < 20) {
+        safetyCounter += 1;
+        const page = await listAssignments({ limit: 50, cursor });
+        const match = page.items.find((x) => x.request_id === requestId);
+        if (match) {
+          assignmentId = match.id;
+          break;
+        }
+        if (!page.next_cursor) break;
+        cursor = page.next_cursor;
+      }
+      if (!assignmentId) {
         setError('Không tìm thấy assignment để đánh giá.');
         return;
       }
-      await createReview(a.id, { rating, comment: comment.trim() || undefined });
+      await createReview(assignmentId, { rating, comment: comment.trim() || undefined });
       router.replace('/rider/(tabs)/rescue');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không thể gửi đánh giá');

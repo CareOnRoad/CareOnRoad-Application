@@ -335,9 +335,9 @@ function PendingPaymentCard({
 
 function PaymentSuccess({
   order,
-  requestId: _requestId,
 }: {
   order: PaymentOrder;
+  /** BE trả về service-request id qua params; hiện không dùng trên UI này. */
   requestId?: string;
 }) {
   useEffect(() => {

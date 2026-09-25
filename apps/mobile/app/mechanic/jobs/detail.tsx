@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
@@ -259,8 +259,12 @@ export default function MechanicJobDetailScreen() {
           <Card className="p-4">
             <JobUpdateForm
               job={job}
-              onSave={(status, notes) => updateJobStatus(job.id, status, notes)}
-              onComplete={(payload) => completeJob(job.id, payload)}
+              onSave={(status, notes) => {
+                void updateJobStatus(job.id, status, notes);
+              }}
+              onComplete={(payload) => {
+                void completeJob(job.id, payload);
+              }}
             />
           </Card>
         </View>
@@ -268,7 +272,14 @@ export default function MechanicJobDetailScreen() {
         <Pressable
           accessibilityRole="link"
           accessibilityLabel="Mở vị trí đón khách trên bản đồ"
-          onPress={() => undefined}
+          onPress={() => {
+            // Trong khi location chi tiết chưa được wire lên job UI,
+            // mở Google Maps với query là địa chỉ khách hàng.
+            // Khi MapPicker tích hợp, thay bằng lat/lng cụ thể từ request.location.
+            const q = job.customer?.name ?? 'CareOnRoad';
+            const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+            Linking.openURL(url).catch(() => undefined);
+          }}
           className="mt-5 flex-row items-center gap-2 self-start"
         >
           <MapPin size={14} color="#64748b" />

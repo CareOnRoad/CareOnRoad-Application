@@ -15,7 +15,7 @@ import { Pencil, X } from 'lucide-react-native';
 
 import { cn } from '@/lib/utils';
 import { Banner } from '@/components/ui/banner';
-import { loadProfile, saveProfile, validateProfile, type LocalProfile } from '@/lib/profile-service';
+import { saveProfile, validateProfile, type LocalProfile } from '@/lib/profile-service';
 
 /**
  * EditProfileSheet - modal slide-up để sửa thông tin cá nhân (tên, SĐT, email, avatar).

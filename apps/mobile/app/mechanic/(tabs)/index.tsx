@@ -46,7 +46,10 @@ export default function MechanicDashboardScreen() {
 
   const handleStartNext = () => {
     if (!nextJob) return;
-    if (nextJob.status === 'pending') updateJobStatus(nextJob.id, 'in_progress');
+    if (nextJob.status === 'pending') {
+      // Fire-and-forget; context sẽ optimistic update rồi rollback nếu BE lỗi.
+      void updateJobStatus(nextJob.id, 'in_progress');
+    }
     router.push({ pathname: '/mechanic/jobs/detail', params: { id: nextJob.id } });
   };
 
@@ -56,16 +59,25 @@ export default function MechanicDashboardScreen() {
         title="Dashboard"
         subtitle={greeting()}
         right={
-          <View className="size-9 overflow-hidden rounded-full bg-secondary">
-            {displayAvatar ? (
-              <Image source={{ uri: displayAvatar }} className="size-full" resizeMode="cover" />
-            ) : (
-              <View className="size-full items-center justify-center">
-                <Text className="text-sm font-bold text-foreground">
-                  {displayName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
+          <View className="flex-row items-center gap-2">
+            <Pressable
+              accessibilityLabel="Mở thông báo"
+              onPress={() => router.push('/mechanic/notifications' as never)}
+              className="size-9 items-center justify-center rounded-full bg-secondary active:opacity-70"
+            >
+              <Bell size={16} color="#16202f" />
+            </Pressable>
+            <View className="size-9 overflow-hidden rounded-full bg-secondary">
+              {displayAvatar ? (
+                <Image source={{ uri: displayAvatar }} className="size-full" resizeMode="cover" />
+              ) : (
+                <View className="size-full items-center justify-center">
+                  <Text className="text-sm font-bold text-foreground">
+                    {displayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
         }
       />

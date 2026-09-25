@@ -37,7 +37,7 @@ import type { AuthRole } from '@/lib/auth-types';
  *  - Tài khoản demo chỉ hiển thị khi chưa cấu hình backend, không gây nhiễu user thật.
  */
 export default function LoginScreen() {
-  const { login, isBackendConfigured, bypassLoginAs, role } = useAuth();
+  const { login, isBackendConfigured, bypassLoginAs } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);

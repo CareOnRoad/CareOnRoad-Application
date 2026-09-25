@@ -5,6 +5,7 @@ import {
   Briefcase,
   CalendarCheck,
   Home,
+  Inbox,
   LucideIcon,
   User as UserIcon,
 } from 'lucide-react-native';
@@ -19,6 +20,7 @@ import {
  */
 const tabIcons: Record<string, LucideIcon> = {
   index: Home,
+  offers: Inbox,
   jobs: Briefcase,
   schedule: CalendarCheck,
   profile: UserIcon,
@@ -56,6 +58,10 @@ export default function MechanicTabsLayout() {
       <Tabs.Screen
         name="index"
         options={{ title: 'Dashboard', tabBarIcon: makeTabBarIcon('index') }}
+      />
+      <Tabs.Screen
+        name="offers"
+        options={{ title: 'Offers', tabBarIcon: makeTabBarIcon('offers') }}
       />
       <Tabs.Screen
         name="jobs"
