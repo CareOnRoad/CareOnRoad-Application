@@ -6,7 +6,9 @@ export type DeadLetterItem = {
   attemptCount: number; lastErrorCode?: string; createdAt: Date;
 };
 export type NeedsReviewPaymentItem = {
-  id: string; requestId: string; assignmentId: string; status: "needs_review"; updatedAt: Date;
+  id: string; requestId: string; assignmentId: string; status: "needs_review";
+  /** Display code of the owning service request, e.g. `COR-BIKE-20260928-0007`. */
+  requestCode?: string; updatedAt: Date;
 };
 export type StuckDispatchItem = {
   id: string; requestCode: string; status: "dispatching" | "offered"; updatedAt: Date;

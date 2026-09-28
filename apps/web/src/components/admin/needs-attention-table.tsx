@@ -1,176 +1,211 @@
+import type { OperationalQueueListResponse } from "@careonroad/api-contract/admin/operations";
+
 /**
- * Section 1: Items Needing Immediate Attention — Dashboard section #4 (figma node 253:10448).
- * Bảng 5 hàng dữ liệu: MÃ YÊU CẦU / PHƯƠNG TIỆN VỊ TRÍ / ĐIỂM NGHẼN / TRẠNG THÁI / THỜI GIAN / THAO TÁC
- * Có filter chips: Tất cả (5) / Tắc nghẽn (3) / Tranh chấp (2)
+ * Items Needing Immediate Attention — Dashboard section #4.
+ *
+ * Two real queues, side by side instead of one merged table:
+ *  - `dispatch-stuck`: requests that no mechanic has picked up.
+ *  - `payments-needs-review`: payment orders whose status needs a human.
+ *
+ * Both queue item schemas are `z.record(z.unknown())`, so every field is read
+ * defensively: a missing key renders as a dash rather than `undefined`. A queue
+ * that failed to load renders an explicit error row — it is never mixed in with
+ * the other queue's rows, so a broken queue can never be mistaken for an empty
+ * one.
+ *
+ * There is no per-row action link. The `/admin/service-requests/[requestId]`
+ * page does not exist yet, and linking to it produced a guaranteed 404. The
+ * request id is shown instead so the row stays copyable.
  */
-const rows = [
-  {
-    code: "YC-8921",
-    vehicle: "Honda SH 150i ABS (2022)",
-    location: "Tòa S1.05, Phân khu The Rainbow, Vinhomes Grand Park, TP. Thủ Đức, TP. HCM",
-    issue: "Kỹ thuật viên không phản hồi báo giá (8 phút)",
-    tag: { text: "Đã gửi báo giá", tone: "amber" as const },
-    tagText: "Đã gửi báo giá",
-    tagColor: { fg: "#d97706", bg: "rgba(217,119,6,0.14)" },
-    time: "3 phút trước",
-  },
-  {
-    code: "YC-8904",
-    vehicle: "Honda Air Blade 125",
-    location: "Tòa S6.02, Phân khu The Origami, Vinhomes Grand Park, TP. Thủ Đức, TP. HCM",
-    issue: "Không tìm thấy thợ cứu hộ trong bán kính 15km",
-    tagText: "Đang tìm thợ cứu hộ",
-    tagColor: { fg: "#162130", bg: "#f3f5f8" },
-    time: "6 phút trước",
-  },
-  {
-    code: "YC-8889",
-    vehicle: "Honda Vision 110cc (2022)",
-    location: "Đường D2D, Phân khu Origami, Vinhomes Grand Park, TP. Thủ Đức, TP. HCM",
-    issue: 'Khách khiếu nại phát chẩn đoán đề xuất (1.500.000đ)',
-    tagText: "Cần xử lý thủ công",
-    tagColor: { fg: "#93000a", bg: "rgba(147,0,10,0.10)" },
-    time: "11 phút trước",
-  },
-  {
-    code: "YC-8872",
-    vehicle: "Honda Winner X 150 (2022)",
-    location: "Đường Nguyễn Xiển, Phân khu The Rainbow, Vinhomes Grand Park, TP. Thủ Đức, TP. HCM",
-    issue: "Lái xe kéo tới chỉ chờ điều phối từ động",
-    tagText: "Đã gửi báo giá",
-    tagColor: { fg: "#d97706", bg: "rgba(217,119,6,0.14)" },
-    time: "14 phút trước",
-  },
-  {
-    code: "YC-8850",
-    vehicle: "Yamaha Exciter 155 VVA (2023)",
-    location: "Hầm B2 Tòa S10.02, Phân khu Origami, Vinhomes Grand Park, TP. Thủ Đức, TP. HCM",
-    issue: "Mất kết nối truyền động & phụ phương tiện hỏng sớm",
-    tagText: "Cần xử lý thủ công",
-    tagColor: { fg: "#93000a", bg: "rgba(147,0,10,0.10)" },
-    time: "22 phút trước",
-  },
-];
 
-const filters = [
-  { label: "Tất cả (5)", active: true, tone: "dark" as const },
-  { label: "Tắc nghẽn (3)", active: false, tone: "neutral" as const },
-  { label: "Tranh chấp (2)", active: false, tone: "neutral" as const },
-];
+type QueueResult = PromiseSettledResult<OperationalQueueListResponse>;
 
-export function NeedsAttentionTable() {
+function rowsOf(result: QueueResult) {
+  return result.status === "fulfilled" ? result.value.items : [];
+}
+
+function readString(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function formatTimestamp(value: string | null) {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Asia/Ho_Chi_Minh"
+  }).format(date);
+}
+
+const statusTone: Record<string, { fg: string; bg: string }> = {
+  dispatching: { fg: "#d97706", bg: "rgba(217,119,6,0.14)" },
+  offered: { fg: "#3d6dcc", bg: "rgba(61,109,204,0.12)" },
+  needs_review: { fg: "#93000a", bg: "rgba(147,0,10,0.10)" }
+};
+
+const statusLabel: Record<string, string> = {
+  dispatching: "Đang điều phối",
+  offered: "Đã gửi đề nghị",
+  needs_review: "Chờ soát xét"
+};
+
+export function NeedsAttentionTable({
+  stuckDispatch,
+  needsReview
+}: {
+  stuckDispatch: QueueResult;
+  needsReview: QueueResult;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <QueueCard
+        title="Yêu cầu chưa có thợ nhận"
+        description="Yêu cầu đang điều phối nhưng không thợ nào nhận trước khi hết hạn"
+        result={stuckDispatch}
+        renderRow={(row) => {
+          const status = readString(row, "status") ?? "dispatching";
+          const attempts = readString(row, "updated_at");
+          return (
+            <>
+              <CodeCell value={readString(row, "request_code") ?? readString(row, "id")} />
+              <StatusCell status={status} />
+              <Cell text={formatTimestamp(attempts)} />
+            </>
+          );
+        }}
+        columns={["Mã yêu cầu", "Trạng thái", "Cập nhật lúc"]}
+      />
+
+      <QueueCard
+        title="Giao dịch chờ soát xét"
+        description="Lệnh thanh toán bị giữ lại để đối chiếu thủ công"
+        result={needsReview}
+        renderRow={(row) => {
+          const status = readString(row, "status") ?? "needs_review";
+          const amount = row.amount;
+          return (
+            <>
+              <CodeCell value={readString(row, "request_code") ?? readString(row, "request_id")} />
+              <Cell
+                text={
+                  typeof amount === "number"
+                    ? new Intl.NumberFormat("vi-VN").format(amount) + " đ"
+                    : "—"
+                }
+              />
+              <StatusCell status={status} />
+              <Cell text={formatTimestamp(readString(row, "updated_at"))} />
+            </>
+          );
+        }}
+        columns={["Mã yêu cầu", "Số tiền", "Nhóm", "Cập nhật lúc"]}
+      />
+    </div>
+  );
+}
+
+function QueueCard({
+  title,
+  description,
+  columns,
+  result,
+  renderRow
+}: {
+  title: string;
+  description: string;
+  columns: string[];
+  result: QueueResult;
+  renderRow: (row: Record<string, unknown>) => React.ReactNode;
+}) {
+  const rows = rowsOf(result);
+  const failed = result.status === "rejected";
+  const hasMore = result.status === "fulfilled" ? result.value.page.has_more : false;
+
   return (
     <section className="flex flex-col gap-4 rounded-2xl bg-white p-5 shadow-sm">
       <header className="flex flex-col gap-1">
-        <h2 className="text-base font-bold" style={{ color: "#162130" }}>
-          Cần xử lý ngay
-        </h2>
-        <p className="text-xs" style={{ color: "#3d4d63" }}>
-          Các điểm nghẽn nghiêm trọng đòi hỏi trưởng ca can thiệp thủ công
-        </p>
+        <h2 className="text-base font-bold text-ink">{title}</h2>
+        <p className="text-xs text-ink-muted">{description}</p>
       </header>
 
-      {/* Filter chips */}
-      <div className="flex flex-wrap items-center gap-2">
-        {filters.map((f) => (
-          <button
-            key={f.label}
-            type="button"
-            className="rounded-full px-3 py-1.5 text-xs font-semibold"
-            style={
-              f.active
-                ? { backgroundColor: "#162130", color: "#fff" }
-                : { backgroundColor: "#f3f5f8", color: "#3d4d63" }
-            }
-          >
-            {f.label}
-          </button>
-        ))}
-        <a
-          href="/admin/service-requests?filter=attention"
-          className="ml-auto inline-flex items-center text-xs font-semibold"
-          style={{ color: "#3d6dcc" }}
+      {failed ? (
+        <p
+          className="rounded-lg px-3 py-2 text-xs font-semibold"
+          style={{ backgroundColor: "rgba(147,0,10,0.10)", color: "#93000a" }}
         >
-          Xem tất cả →
-        </a>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr
-              className="border-b text-left text-xs uppercase tracking-wide"
-              style={{ borderColor: "#e5e9ef", color: "#3d4d63" }}
-            >
-              <th className="py-2 pr-3">Mã yêu cầu</th>
-              <th className="py-2 pr-3">Phương tiện / Vị trí</th>
-              <th className="py-2 pr-3">Điểm nghẽn</th>
-              <th className="py-2 pr-3">Trạng thái</th>
-              <th className="py-2 pr-3">Thời gian trôi qua</th>
-              <th className="py-2 text-right">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, idx) => (
-              <tr
-                key={r.code}
-                className="border-b align-top"
-                style={{ borderColor: "#e5e9ef" }}
-              >
-                <td className="py-3 pr-3">
-                  <span
-                    className="text-sm font-bold"
-                    style={{ color: "#3d6dcc" }}
-                  >
-                    {r.code}
-                  </span>
-                </td>
-                <td className="py-3 pr-3">
-                  <div className="flex flex-col">
-                    <span className="font-semibold" style={{ color: "#162130" }}>
-                      {r.vehicle}
-                    </span>
-                    <span className="text-xs" style={{ color: "#3d4d63" }}>
-                      {r.location}
-                    </span>
-                  </div>
-                </td>
-                <td className="py-3 pr-3">
-                  <span className="text-sm" style={{ color: "#162130" }}>
-                    {r.issue}
-                  </span>
-                </td>
-                <td className="py-3 pr-3">
-                  <span
-                    className="inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold"
-                    style={{
-                      backgroundColor: r.tagColor.bg,
-                      color: r.tagColor.fg,
-                    }}
-                  >
-                    {r.tagText}
-                  </span>
-                </td>
-                <td className="py-3 pr-3">
-                  <span className="text-sm" style={{ color: "#3d4d63" }}>
-                    {r.time}
-                  </span>
-                </td>
-                <td className="py-3 text-right">
-                  <a
-                    href={`/admin/service-requests/${r.code}`}
-                    className="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold"
-                    style={{ backgroundColor: "#f3f5f8", color: "#3d6dcc" }}
-                  >
-                    Kiểm tra chi tiết
-                  </a>
-                </td>
+          Không tải được hàng đợi này. Số liệu phía trên không bao gồm mục này.
+        </p>
+      ) : rows.length === 0 ? (
+        <p
+          className="rounded-lg px-3 py-2 text-xs font-semibold"
+          style={{ backgroundColor: "rgba(0,162,58,0.12)", color: "#00a23a" }}
+        >
+          Không có mục nào cần xử lý.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs uppercase tracking-wide text-ink-muted" style={{ borderColor: "#e5e9ef" }}>
+                {columns.map((column) => (
+                  <th key={column} className="py-2 pr-3 font-semibold">
+                    {column}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={readString(row, "id") ?? index} className="border-b align-top" style={{ borderColor: "#e5e9ef" }}>
+                  {renderRow(row)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {hasMore ? (
+            <p className="pt-3 text-[11px] text-ink-muted">
+              Đang hiển thị {rows.length} mục đầu. Xem toàn bộ tại hàng đợi vận hành.
+            </p>
+          ) : null}
+        </div>
+      )}
     </section>
+  );
+}
+
+function CodeCell({ value }: { value: string | null }) {
+  return (
+    <td className="py-3 pr-3">
+      <span className="font-mono text-xs font-bold" style={{ color: "#3d6dcc" }}>
+        {value ?? "—"}
+      </span>
+    </td>
+  );
+}
+
+function Cell({ text }: { text: string }) {
+  return (
+    <td className="py-3 pr-3 text-sm text-ink">{text}</td>
+  );
+}
+
+function StatusCell({ status }: { status: string }) {
+  const tone = statusTone[status] ?? { fg: "#3d4d63", bg: "#f3f5f8" };
+  return (
+    <td className="py-3 pr-3">
+      <span
+        className="inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold"
+        style={{ backgroundColor: tone.bg, color: tone.fg }}
+      >
+        {statusLabel[status] ?? status}
+      </span>
+    </td>
   );
 }

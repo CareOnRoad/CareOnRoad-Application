@@ -23,51 +23,32 @@ interface AdminLayoutProps {
   active?: string;
   navItems?: NavItem[];
   crumb?: string[];
-  zoneLabel?: string;
   userName?: string;
-  userCode?: string;
-  userRole?: string;
 }
 
-const defaultNav: NavItem[] = [
-  { label: "Tổng quan", href: "/admin/dashboard", active: true },
-  {
-    label: "Yêu cầu Cứu hộ",
-    href: "/admin/service-requests",
-    badge: { text: "14 Chờ", tone: "neutral" },
-  },
-  {
-    label: "Kỹ thuật viên",
-    href: "/admin/mechanics",
-    badge: { text: "3 đang duyệt", tone: "neutral" },
-  },
-  {
-    label: "Người dùng",
-    href: "/admin/users",
-    badge: { text: "128", tone: "neutral" },
-  },
-  {
-    label: "Vận hành hệ thống",
-    href: "/admin/operations",
-    badge: { text: "2 Cảnh báo", tone: "danger" },
-  },
-];
+const defaultNav: NavItem[] = [{ label: "Tổng quan", href: "/admin/dashboard" }];
 
 const ink: CSSProperties = { color: "#162130" };
 const inkSubtle: CSSProperties = { color: "#3d4d63" };
-const accentBlue: CSSProperties = { color: "#3d6dcc" };
 const accentGreen: CSSProperties = { color: "#00a23a" };
-const accentRed: CSSProperties = { color: "#93000a" };
+
+/** Up to two initials from the signed-in display name, e.g. "Nguyễn Minh An" → "NA". */
+function initialsOf(userName: string) {
+  const words = userName.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return "?";
+  }
+  const first = words[0].charAt(0);
+  const last = words.length > 1 ? words[words.length - 1].charAt(0) : "";
+  return `${first}${last}`.toUpperCase();
+}
 
 export function AdminLayout({
   children,
   active,
   navItems,
   crumb = [],
-  zoneLabel = "KHU VỰC VINHOMES GRAND PARK",
-  userName = "Quản trị viên (Trưởng ca)",
-  userCode = "Mã: ADM-901 — Nhật Minh",
-  userRole = "Quản trị viên",
+  userName = "Quản trị viên",
 }: AdminLayoutProps) {
   const items = navItems ?? defaultNav;
 
@@ -152,39 +133,8 @@ export function AdminLayout({
           })}
         </nav>
 
-        {/* Footer network card */}
-        <div className="mt-auto p-4">
-          <div
-            className="rounded-2xl p-4"
-            style={{ backgroundColor: "#162130", color: "#fff" }}
-          >
-            <span
-              className="text-[11px] font-semibold uppercase tracking-wider"
-              style={{ color: "rgba(255,255,255,0.65)" }}
-            >
-              Mạng lưới xe cứu hộ
-            </span>
-            <div className="mt-2 flex items-end justify-between">
-              <div className="flex flex-col leading-tight">
-                <span className="text-xs" style={{ color: "#3d4d63" }}>
-                  Đang trực
-                </span>
-                <span className="text-base font-bold" style={accentBlue}>
-                  42/50 xe
-                </span>
-              </div>
-              <div
-                className="h-2 w-12 rounded-full"
-                style={{ backgroundColor: "rgba(255,255,255,0.15)" }}
-              >
-                <div
-                  className="h-2 rounded-full"
-                  style={{ backgroundColor: "#00a23a", width: "84%" }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* No network-capacity card: `/api/v1` exposes no online-mechanic
+            aggregate, so any "42/50 on duty" figure here would be invented. */}
       </aside>
 
       {/* ===== Header + Main ===== */}
@@ -202,23 +152,17 @@ export function AdminLayout({
               {crumb[crumb.length - 1] ?? "Tổng quan Điều hành"}
             </span>
             <span className="text-xs" style={accentGreen}>
-              {crumb.length > 0 ? crumb.join(" / ") : "Trực tiếp — Đã kết nối API thử nghiệm"}
+              {crumb.length > 1 ? crumb.join(" / ") : "Trực tiếp — Dữ liệu từ API vận hành"}
             </span>
           </div>
 
           <div className="flex items-center gap-4">
-            <span
-              className="rounded-md border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider"
-              style={{ ...accentBlue, borderColor: "#3d6dcc33", backgroundColor: "#3d6dcc14" }}
-            >
-              {zoneLabel}
-            </span>
             <div className="flex flex-col text-right leading-tight">
               <span className="text-sm font-semibold" style={ink}>
                 {userName}
               </span>
               <span className="text-[11px]" style={inkSubtle}>
-                {userCode}
+                Quản trị viên
               </span>
             </div>
             <span
@@ -226,7 +170,7 @@ export function AdminLayout({
               style={{ backgroundColor: "#00a23a", color: "#fff" }}
               aria-hidden
             >
-              NM
+              {initialsOf(userName)}
             </span>
           </div>
         </header>

@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-import { userRoles, userStatuses } from "@/features/auth/auth.types";
-import { serviceTypes } from "@/features/motorcycles/motorcycle.schemas";
+import { serviceTypes, userRoles, userStatuses } from "@careonroad/api-contract/enums";
 
 export const ADMIN_REASON_MIN_LENGTH = 10;
 export const ADMIN_REASON_MAX_LENGTH = 500;

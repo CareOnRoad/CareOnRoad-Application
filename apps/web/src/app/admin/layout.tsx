@@ -1,16 +1,14 @@
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "CareOnRoad — Điều hành",
-  description: "Trung tâm điều hành CareOnRoad — dành cho quản trị viên / trưởng ca.",
-};
-
 /**
- * Admin route group layout — không render Header/Footer của marketing site.
- * Trang admin tự chứa AdminLayout riêng (sidebar + topbar).
+ * Admin segment shell — no Header/Footer from the marketing site.
+ *
+ * Intentionally has NO auth guard. The guard lives in
+ * `(protected)/layout.tsx` so that `/admin/login` stays reachable; see the note
+ * there.
  */
 export default function AdminSegmentLayout({
-  children,
+  children
 }: {
   children: React.ReactNode;
 }) {

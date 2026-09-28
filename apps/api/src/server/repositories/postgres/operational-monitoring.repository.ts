@@ -20,11 +20,15 @@ export class PostgresOperationalMonitoringRepository implements OperationalMonit
 
   async listNeedsReviewPayments(input: OperationalPageInput): Promise<NeedsReviewPaymentItem[]> {
     const rows = await this.sql<NeedsReviewPaymentRow[]>`
-      select id, request_id, assignment_id, updated_at from payment_orders where status = 'needs_review'
-        and (${input.cursor?.createdAt ?? null}::timestamptz is null or (updated_at, id) < (${input.cursor?.createdAt ?? null}, ${input.cursor?.id ?? null}::uuid))
-      order by updated_at desc, id desc limit ${input.limit}
+      select payment.id, payment.request_id, payment.assignment_id, payment.updated_at, request.request_code
+      from payment_orders payment
+      left join service_requests request on request.id = payment.request_id
+      where payment.status = 'needs_review'
+        and (${input.cursor?.createdAt ?? null}::timestamptz is null or (payment.updated_at, payment.id) < (${input.cursor?.createdAt ?? null}, ${input.cursor?.id ?? null}::uuid))
+      order by payment.updated_at desc, payment.id desc limit ${input.limit}
     `;
-    return rows.map((r) => ({ id:r.id, requestId:r.request_id, assignmentId:r.assignment_id, status:"needs_review", updatedAt:r.updated_at }));
+    return rows.map((r) => ({ id:r.id, requestId:r.request_id, assignmentId:r.assignment_id, status:"needs_review",
+      ...(r.request_code ? {requestCode:r.request_code}:{}), updatedAt:r.updated_at }));
   }
 
   async listStuckDispatch(input: OperationalPageInput & { staleBefore: Date; now: Date }): Promise<StuckDispatchItem[]> {
@@ -58,7 +62,7 @@ export class PostgresOperationalMonitoringRepository implements OperationalMonit
 }
 
 type DeadLetterRow = { id: string; topic: string; aggregate_type: string; aggregate_id: string; attempt_count: number; last_error_code: string | null; created_at: Date };
-type NeedsReviewPaymentRow = { id: string; request_id: string; assignment_id: string; updated_at: Date };
+type NeedsReviewPaymentRow = { id: string; request_id: string; assignment_id: string; request_code: string | null; updated_at: Date };
 type StuckDispatchRow = { id: string; request_code: string; status: "dispatching" | "offered"; updated_at: Date };
 type WorkerRunRow = { id: string; worker_name: string; status: WorkerRunStatus; error_code: string | null; items_claimed: number; items_succeeded: number; items_failed: number; started_at: Date; completed_at: Date; created_at: Date };
 

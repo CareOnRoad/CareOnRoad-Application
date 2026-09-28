@@ -1,186 +1,168 @@
-/**
- * Section 2: Most Recent Background Jobs — Dashboard section #5 (figma node 253:10612).
- * Bảng 4 hàng: TÊN TIẾN TRÌNH / TRẠNG THÁI THỰC THI / SỐ MỤC XỬ LÝ / ĐỘ TRỄ / LẦN CHẠY CUỐI / NHÃN
- * Jobs: dispatch_timeout_sweeper / technician_heartbeat_sync / quote_expiry_notifier / payment_settlement_batch
- */
-const jobs = [
-  {
-    name: "dispatch_timeout_sweeper",
-    nameTone: { fg: "#162130", bg: "transparent" },
-    schedule: "CRON-2M",
-    scheduleTone: { fg: "#3d6dcc", bg: "rgba(61,109,204,0.12)" },
-    status: "Thành công (200 OK)",
-    statusTone: { fg: "#00a23a", bg: "rgba(0,162,58,0.12)" },
-    processed: "42 bản ghi",
-    delay: "1.1 giây",
-    lastRun: "Hôm nay 14:36:12",
-    label: { text: "Tự động", tone: "blue" as const },
-  },
-  {
-    name: "technician_heartbeat_sync",
-    nameTone: { fg: "#162130", bg: "transparent" },
-    schedule: "WS-PUSH",
-    scheduleTone: { fg: "#3d6dcc", bg: "rgba(61,109,204,0.12)" },
-    status: "Thành công (200 OK)",
-    statusTone: { fg: "#00a23a", bg: "rgba(0,162,58,0.12)" },
-    processed: "150 tọa độ",
-    delay: "2.4 giây",
-    lastRun: "Hôm nay 14:35:00",
-    label: { text: "Tự động", tone: "blue" as const },
-  },
-  {
-    name: "quote_expiry_notifier",
-    nameTone: { fg: "#ba1f35", bg: "rgba(186,31,53,0.10)" },
-    schedule: "KHẨN",
-    scheduleTone: { fg: "#fff", bg: "#93000a" },
-    status: "Lỗi: ERR_SMS_GATEWAY_503",
-    statusTone: { fg: "#93000a", bg: "rgba(147,0,10,0.10)" },
-    processed: "8 mục (2 bị chặn)",
-    processedTone: "#ba1f35",
-    delay: "14.2 giây (Hết giờ)",
-    delayTone: "#ba1f35",
-    lastRun: "Hôm nay 14:31:45",
-    label: { text: "Cần can thiệp", tone: "red" as const },
-    actionLabel: "Xem Log",
-  },
-  {
-    name: "payment_settlement_batch",
-    nameTone: { fg: "#162130", bg: "transparent" },
-    schedule: "HÀNG NGÀY 14H",
-    scheduleTone: { fg: "#3d6dcc", bg: "rgba(61,109,204,0.12)" },
-    status: "Thành công (200 OK)",
-    statusTone: { fg: "#00a23a", bg: "rgba(0,162,58,0.12)" },
-    processed: "89 giao dịch",
-    delay: "5.8 giây",
-    lastRun: "Hôm nay 14:00:00",
-    label: { text: "Tự động", tone: "blue" as const },
-  },
-];
+import type { OperationalQueueListResponse } from "@careonroad/api-contract/admin/operations";
 
-export function BackgroundJobsTable() {
+/**
+ * Most Recent Background Jobs — Dashboard section #5.
+ *
+ * Reads the `worker-runs` queue (`worker_run_records`). Two columns from the
+ * previous mock were removed rather than faked:
+ *
+ *  - `schedule` (`CRON-2M`, `HÀNG NGÀY 14H`): a worker run record has no
+ *    schedule. Trigger cadence lives in worker configuration, not in the row.
+ *  - `processed` ("42 bản ghi"): no such column. The record has three counters
+ *    (`items_claimed/succeeded/failed`) which are shown together instead.
+ *
+ * Duration is computed from `started_at`/`completed_at` in the browser's locale.
+ * A negative or missing span renders as a dash rather than a bogus "0.0s".
+ */
+
+type QueueResult = PromiseSettledResult<OperationalQueueListResponse>;
+
+function readString(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readNumber(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: "Asia/Ho_Chi_Minh"
+  }).format(date);
+}
+
+function formatDuration(row: Record<string, unknown>) {
+  const started = readString(row, "started_at");
+  const completed = readString(row, "completed_at");
+  if (!started || !completed) {
+    return "—";
+  }
+  const ms = new Date(completed).getTime() - new Date(started).getTime();
+  if (Number.isNaN(ms) || ms < 0) {
+    return "—";
+  }
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} giây`;
+}
+
+function formatCounters(row: Record<string, unknown>) {
+  const claimed = readNumber(row, "items_claimed");
+  const succeeded = readNumber(row, "items_succeeded");
+  const failed = readNumber(row, "items_failed");
+  if (claimed === null && succeeded === null && failed === null) {
+    return "—";
+  }
+  const parts = [`${claimed ?? 0} nhận`, `${succeeded ?? 0} xong`];
+  if (failed !== null && failed > 0) {
+    parts.push(`${failed} lỗi`);
+  }
+  return parts.join(" · ");
+}
+
+export function BackgroundJobsTable({ result }: { result: QueueResult }) {
+  const rows = result.status === "fulfilled" ? result.value.items : [];
+  const failed = result.status === "rejected";
+
   return (
     <section className="flex flex-col gap-4 rounded-2xl bg-white p-5 shadow-sm">
       <header className="flex flex-col gap-1">
-        <h2 className="text-base font-bold" style={{ color: "#162130" }}>
-          Tiến trình chạy ngầm gần nhất
-        </h2>
-        <p className="text-xs" style={{ color: "#3d4d63" }}>
-          Tiến trình định kỳ cron, luồng đồng bộ hàng loạt và hàng chờ thử lại
+        <h2 className="text-base font-bold text-ink">Tiến trình chạy ngầm gần nhất</h2>
+        <p className="text-xs text-ink-muted">
+          Lần chạy đã ghi nhận của các worker nền, mới nhất trước
         </p>
       </header>
 
-      <div className="flex items-center gap-2">
-        <span
-          className="rounded-md px-2 py-1 text-xs font-semibold"
-          style={{ backgroundColor: "rgba(61,109,204,0.14)", color: "#3d6dcc" }}
+      {failed ? (
+        <p
+          className="rounded-lg px-3 py-2 text-xs font-semibold"
+          style={{ backgroundColor: "rgba(147,0,10,0.10)", color: "#93000a" }}
         >
-          Kích hoạt: Quạt hết hơi
-        </span>
-        <span className="text-xs" style={{ color: "#3d4d63" }}>
-          Tự động — đang chạy
-        </span>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr
-              className="border-b text-left text-xs uppercase tracking-wide"
-              style={{ borderColor: "#e5e9ef", color: "#3d4d63" }}
-            >
-              <th className="py-2 pr-3">Tên tiến trình</th>
-              <th className="py-2 pr-3">Trạng thái thực thi</th>
-              <th className="py-2 pr-3">Số mục xử lý</th>
-              <th className="py-2 pr-3">Độ trễ</th>
-              <th className="py-2 pr-3">Lần chạy cuối</th>
-              <th className="py-2 text-right">Nhãn</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((j, idx) => (
+          Không tải được danh sách tiến trình.
+        </p>
+      ) : rows.length === 0 ? (
+        <p
+          className="rounded-lg px-3 py-2 text-xs font-semibold"
+          style={{ backgroundColor: "rgba(0,162,58,0.12)", color: "#00a23a" }}
+        >
+          Chưa có tiến trình nào được ghi nhận.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
               <tr
-                key={j.name}
-                className="border-b align-middle"
+                className="border-b text-left text-xs uppercase tracking-wide text-ink-muted"
                 style={{ borderColor: "#e5e9ef" }}
               >
-                <td className="py-3 pr-3">
-                  <div className="flex flex-col gap-1">
-                    <code
-                      className="rounded px-1.5 py-0.5 text-xs font-bold"
-                      style={{
-                        fontFamily: "'Liberation Mono', monospace",
-                        backgroundColor: j.nameTone.bg,
-                        color: j.nameTone.fg,
-                      }}
-                    >
-                      {j.name}
-                    </code>
-                    <span
-                      className="w-fit rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-                      style={{
-                        backgroundColor: j.scheduleTone.bg,
-                        color: j.scheduleTone.fg,
-                      }}
-                    >
-                      {j.schedule}
-                    </span>
-                  </div>
-                </td>
-                <td className="py-3 pr-3">
-                  <span
-                    className="inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold"
-                    style={{
-                      backgroundColor: j.statusTone.bg,
-                      color: j.statusTone.fg,
-                    }}
-                  >
-                    {j.status}
-                  </span>
-                </td>
-                <td className="py-3 pr-3">
-                  <span className="text-sm" style={{ color: j.processedTone ?? "#162130" }}>
-                    {j.processed}
-                  </span>
-                </td>
-                <td className="py-3 pr-3">
-                  <span className="text-sm" style={{ color: j.delayTone ?? "#3d4d63" }}>
-                    {j.delay}
-                  </span>
-                </td>
-                <td className="py-3 pr-3">
-                  <span className="text-sm" style={{ color: "#3d4d63" }}>
-                    {j.lastRun}
-                  </span>
-                </td>
-                <td className="py-3 text-right">
-                  {j.actionLabel ? (
-                    <button
-                      type="button"
-                      className="inline-flex items-center rounded-md px-3 py-1.5 text-xs font-semibold text-white"
-                      style={{ backgroundColor: "#93000a" }}
-                    >
-                      {j.actionLabel}
-                    </button>
-                  ) : (
-                    <span
-                      className="inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold"
-                      style={{
-                        backgroundColor:
-                          j.label.tone === "red"
-                            ? "rgba(147,0,10,0.10)"
-                            : "rgba(61,109,204,0.14)",
-                        color: j.label.tone === "red" ? "#93000a" : "#3d6dcc",
-                      }}
-                    >
-                      {j.label.text}
-                    </span>
-                  )}
-                </td>
+                <th className="py-2 pr-3 font-semibold">Tiến trình</th>
+                <th className="py-2 pr-3 font-semibold">Kết quả</th>
+                <th className="py-2 pr-3 font-semibold">Mã lỗi</th>
+                <th className="py-2 pr-3 font-semibold">Số mục</th>
+                <th className="py-2 pr-3 font-semibold">Thời gian chạy</th>
+                <th className="py-2 pr-3 font-semibold">Lần chạy cuối</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => {
+                const isFailed = row.status === "failed";
+                const errorCode = readString(row, "error_code");
+                return (
+                  <tr
+                    key={readString(row, "id") ?? index}
+                    className="border-b align-middle"
+                    style={{ borderColor: "#e5e9ef" }}
+                  >
+                    <td className="py-3 pr-3">
+                      <code
+                        className="rounded px-1.5 py-0.5 text-xs font-bold"
+                        style={{ backgroundColor: "#f3f5f8", color: "#162130" }}
+                      >
+                        {readString(row, "worker_name") ?? "—"}
+                      </code>
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span
+                        className="inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold"
+                        style={{
+                          backgroundColor: isFailed ? "rgba(147,0,10,0.10)" : "rgba(0,162,58,0.12)",
+                          color: isFailed ? "#93000a" : "#00a23a"
+                        }}
+                      >
+                        {isFailed ? "Thất bại" : "Thành công"}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span
+                        className="font-mono text-[11px]"
+                        style={{ color: errorCode ? "#93000a" : "#3d4d63" }}
+                      >
+                        {errorCode ?? "—"}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-3 text-sm" style={{ color: isFailed ? "#93000a" : "#162130" }}>
+                      {formatCounters(row)}
+                    </td>
+                    <td className="py-3 pr-3 text-sm text-ink-muted">{formatDuration(row)}</td>
+                    <td className="py-3 pr-3 text-sm text-ink-muted">
+                      {formatDate(readString(row, "completed_at") ?? readString(row, "created_at"))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

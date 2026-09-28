@@ -21,6 +21,7 @@
     "seed:mock:verify": "node scripts/seed-mock-data.mjs --verify-only"
   },
   "dependencies": {
+    "@careonroad/api-contract": "workspace:*",
     "jose": "^6.2.3",
     "next": "^15.0.0",
     "postgres": "^3.4.9",

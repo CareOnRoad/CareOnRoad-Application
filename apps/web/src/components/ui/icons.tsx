@@ -121,6 +121,12 @@ export const ClockIcon = wrap(
 export const WrenchIcon = wrap(
   <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-2.6-2.6 2.4-2.4z" />
 );
+export const UserIcon = wrap(
+  <>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21a8 8 0 0 1 16 0" />
+  </>
+);
 
 export const iconRegistry = {
   phone: PhoneIcon,
