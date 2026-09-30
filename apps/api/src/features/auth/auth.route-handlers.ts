@@ -9,7 +9,8 @@ import { PostgresUnitOfWork } from "@/server/repositories/postgres/postgres-unit
 import {
   bootstrapProfileSchema,
   registerDeviceSchema,
-  rotatePushTokenSchema
+  rotatePushTokenSchema,
+  type BootstrapProfileInput
 } from "./auth.schemas";
 import { AuthService } from "./auth.service";
 import type {
@@ -24,7 +25,7 @@ export type AuthRouteDependencies = {
     getCurrentActor(identity: VerifiedSupabaseIdentity): Promise<RequestActor>;
     bootstrapProfile(
       identity: VerifiedSupabaseIdentity,
-      input: { display_name?: string }
+      input: BootstrapProfileInput
     ): Promise<RequestActor>;
     registerDevice(
       identity: VerifiedSupabaseIdentity,

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import { INITIAL_MECHANIC_SERVICE_RADIUS_KM } from "@/server/repositories/contracts/mechanic.repository";
 import type { UserDevice } from "@/server/repositories/contracts/user.repository";
 
 import { requireActiveActor } from "./authorization";
@@ -46,7 +47,7 @@ export class AuthService {
     input: BootstrapProfileInput
   ): Promise<RequestActor> {
     return this.unitOfWork.execute(async (repositories) => {
-      const { audit, outbox, users } = repositories;
+      const { audit, mechanics, outbox, users } = repositories;
       const existing = await users.findActorById(identity.subject);
       if (existing) {
         const response = toRequestActor(existing);
@@ -57,12 +58,32 @@ export class AuthService {
       const now = this.options.now?.() ?? new Date();
       await users.createProfile({
         id: identity.subject,
-        displayName: input.display_name,
+        displayName: input.display_name ?? identity.displayName,
         status: "active",
         createdAt: now,
         updatedAt: now
       });
-      await users.addRole(identity.subject, "rider");
+
+      const concurrentBootstrap = await users.findActorById(identity.subject);
+      if (concurrentBootstrap?.roles.length) {
+        const response = toRequestActor(concurrentBootstrap);
+        requireActiveActor(response);
+        return response;
+      }
+
+      const accountType = input.account_type ?? "rider";
+      await users.addRole(identity.subject, accountType);
+      if (accountType === "mechanic") {
+        await mechanics.createProfile({
+          userId: identity.subject,
+          profileStatus: "pending",
+          isAvailable: false,
+          serviceRadiusKm: INITIAL_MECHANIC_SERVICE_RADIUS_KM,
+          availabilityUpdatedAt: now,
+          createdAt: now,
+          updatedAt: now
+        });
+      }
 
       const createId = this.options.createId ?? randomUUID;
       await outbox.append({
@@ -78,7 +99,7 @@ export class AuthService {
       await audit.append({
         id: createId(),
         actorId: identity.subject,
-        actorRole: "rider",
+        actorRole: accountType,
         action: "user.profile.bootstrapped",
         entityType: "app_user",
         entityId: identity.subject,

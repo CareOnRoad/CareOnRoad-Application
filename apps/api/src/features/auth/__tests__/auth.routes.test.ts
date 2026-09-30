@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { InMemoryUnitOfWork } from "@/server/repositories/testing/in-memory-unit-of-work";
+
+import { AuthService } from "../auth.service";
 import type { VerifiedSupabaseIdentity } from "../auth.types";
 import type { RequestActor } from "../auth.types";
 import { createAuthRouteHandlers } from "../auth.route-handlers";
@@ -51,6 +54,43 @@ describe("auth routes", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(actor);
+  });
+
+  it("accepts rider or mechanic account selection but rejects admin self-registration", async () => {
+    const unitOfWork = new InMemoryUnitOfWork();
+    const handlers = createAuthRouteHandlers({
+      authenticate: vi.fn(async () => identity),
+      authService: new AuthService(unitOfWork)
+    });
+    const mechanic = await handlers.bootstrapProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ account_type: "mechanic" })
+      })
+    );
+    const admin = await handlers.bootstrapProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ account_type: "admin" })
+      })
+    );
+
+    expect(mechanic.status).toBe(200);
+    await expect(mechanic.json()).resolves.toMatchObject({ roles: ["mechanic"] });
+    expect(unitOfWork.snapshot().mechanicProfiles[0]).toMatchObject({
+      profileStatus: "pending",
+      isAvailable: false
+    });
+    expect(admin.status).toBe(400);
+    await expect(admin.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
   });
 
   it("returns controlled errors for missing authentication and invalid input", async () => {

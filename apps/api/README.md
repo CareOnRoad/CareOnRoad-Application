@@ -76,6 +76,23 @@ CHATBOT_PERSISTENCE_MODE=postgres
 Use only a test/development Supabase project. Never expose the database URL or
 service-role key through a `NEXT_PUBLIC_` variable.
 
+### Google sign-in contract
+
+- Enable Google in Supabase Auth and keep the Google client secret in the
+  Google/Supabase dashboards; the API does not need a Google secret.
+- Clients send the resulting Supabase access token as `Authorization: Bearer`.
+  The API verifies it through JWKS, then `POST /api/v1/auth/profile` accepts an
+  optional `account_type` of `rider` or `mechanic`. Omission defaults to
+  `rider`; the first successful selection is immutable.
+- A mechanic selection atomically creates the `mechanic` role and an unavailable
+  `pending` mechanic profile. Dispatch and assignment acceptance require an
+  admin-approved `active` mechanic profile.
+- `admin` cannot be self-selected. Existing administrators grant that role
+  through `POST /api/v1/admin/users/{userId}/roles/grant`.
+- When `display_name` is omitted, the verified `user_metadata.full_name` or
+  `user_metadata.name` claim is used. All effective roles remain database-owned
+  and are returned by `GET /api/v1/auth/me`.
+
 Required for backend-only payOS/VietQR payments:
 
 ```env

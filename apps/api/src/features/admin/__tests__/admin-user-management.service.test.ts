@@ -102,6 +102,14 @@ describe("AdminUserManagementService", () => {
       { reason: "Approved mechanic onboarding workflow", role: "mechanic" },
       "grant-mechanic-role"
     );
+    expect(unitOfWork.snapshot().mechanicProfiles).toEqual([
+      expect.objectContaining({
+        userId: RIDER_USER_ID,
+        profileStatus: "pending",
+        isAvailable: false,
+        serviceRadiusKm: 10
+      })
+    ]);
     await service.revokeRole(
       adminIdentity,
       RIDER_USER_ID,

@@ -6,12 +6,14 @@ import { pushProviders } from "@/server/repositories/contracts/device-delivery-c
 export const verifiedIdentitySchema = z.object({
   subject: z.string().uuid(),
   issuer: z.string().url(),
-  audience: z.array(z.string().min(1)).min(1)
+  audience: z.array(z.string().min(1)).min(1),
+  displayName: z.string().trim().min(1).max(120).optional()
 });
 
 export const bootstrapProfileSchema = z
   .object({
-    display_name: z.string().trim().min(1).max(120).optional()
+    display_name: z.string().trim().min(1).max(120).optional(),
+    account_type: z.enum(["rider", "mechanic"]).optional()
   })
   .strict();
 

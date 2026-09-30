@@ -34,10 +34,12 @@ export class SupabaseJwtVerifier {
         audience: this.options.audience,
         algorithms: this.algorithms
       });
+      const displayName = extractDisplayName(result.payload.user_metadata);
       const parsed = verifiedIdentitySchema.safeParse({
         subject: result.payload.sub,
         issuer: result.payload.iss,
-        audience: normalizeAudience(result.payload.aud)
+        audience: normalizeAudience(result.payload.aud),
+        ...(displayName ? { displayName } : {})
       });
       if (!parsed.success) {
         throw new Error("Invalid verified claims.");
@@ -72,4 +74,22 @@ function normalizeAudience(audience: string | string[] | undefined): string[] {
     return audience;
   }
   return audience ? [audience] : [];
+}
+
+function extractDisplayName(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+
+  for (const key of ["full_name", "name"]) {
+    const value = (metadata as Record<string, unknown>)[key];
+    if (typeof value === "string") {
+      const normalized = value.trim();
+      if (normalized.length > 0 && normalized.length <= 120) {
+        return normalized;
+      }
+    }
+  }
+
+  return undefined;
 }

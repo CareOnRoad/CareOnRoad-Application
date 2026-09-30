@@ -10,6 +10,7 @@ export type VerifiedSupabaseIdentity = {
   subject: string;
   issuer: string;
   audience: string[];
+  displayName?: string;
 };
 
 export type RequestActor = {
