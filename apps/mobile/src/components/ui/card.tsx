@@ -9,6 +9,12 @@ interface CardProps extends ViewProps {
   children?: React.ReactNode;
 }
 
+/**
+ * Card - container bo góc 24px, viền nhẹ, đổ bóng subtle.
+ * Dùng làm khối chính cho mọi nội dung (stat, list item, banner...).
+ *
+ * Khi có onPress sẽ tự thêm active:scale-[0.98] để feedback tốt hơn.
+ */
 export function Card({ children, className, onPress, interactive, ...rest }: CardProps) {
   const merged = cn(
     'w-full rounded-3xl border border-border bg-card shadow-sm',

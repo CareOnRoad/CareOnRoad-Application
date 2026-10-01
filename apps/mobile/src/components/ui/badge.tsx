@@ -2,10 +2,10 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { cn } from '@/lib/utils';
 
-type Tone = 'neutral' | 'blue' | 'green' | 'red' | 'amber';
+export type BadgeTone = 'neutral' | 'blue' | 'green' | 'red' | 'amber';
 
 // Background color for View, text color for Text
-const toneStyles: Record<Tone, { bg: string; text: string }> = {
+const toneStyles: Record<BadgeTone, { bg: string; text: string }> = {
   neutral: { bg: 'bg-secondary', text: 'text-secondary-foreground' },
   blue: { bg: 'bg-primary/10', text: 'text-primary' },
   green: { bg: 'bg-green/10', text: 'text-green' },
@@ -13,6 +13,10 @@ const toneStyles: Record<Tone, { bg: string; text: string }> = {
   amber: { bg: 'bg-amber-500/15', text: 'text-amber-600' },
 };
 
+/**
+ * Badge - nhãn trạng thái/loại nhỏ gọn. 5 tone khớp với semantic của hệ thống:
+ *  neutral (slate), blue (primary), green (success), red (destructive), amber (warning).
+ */
 export function Badge({
   children,
   className,
@@ -20,7 +24,7 @@ export function Badge({
 }: {
   children: React.ReactNode;
   className?: string;
-  tone?: Tone;
+  tone?: BadgeTone;
 }) {
   const s = toneStyles[tone];
   return (

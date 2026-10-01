@@ -6,3 +6,12 @@ expo-env.d.ts
 # @end expo-cli
 .expo/
 dist/
+
+# Local env files (chứa Supabase keys, API URLs)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+export.log.err

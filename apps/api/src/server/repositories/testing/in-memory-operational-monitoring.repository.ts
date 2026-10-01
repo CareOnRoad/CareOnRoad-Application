@@ -27,9 +27,10 @@ export class InMemoryOperationalMonitoringRepository implements OperationalMonit
   }
 
   async listNeedsReviewPayments(input: OperationalPageInput): Promise<NeedsReviewPaymentItem[]> {
+    const requestCodes = new Map(this.state.serviceRequests.map((x) => [x.id, x.requestCode]));
     return page(this.state.paymentOrders.filter((x) => x.status === "needs_review").map((x) => ({
-      id: x.id, requestId: x.requestId, assignmentId: x.assignmentId,
-      status: "needs_review" as const, updatedAt: x.updatedAt
+      id: x.id, requestId: x.requestId, assignmentId: x.assignmentId, status: "needs_review" as const,
+      ...(requestCodes.has(x.requestId) ? { requestCode: requestCodes.get(x.requestId)! } : {}), updatedAt: x.updatedAt
     })), input, (x) => x.updatedAt);
   }
 
