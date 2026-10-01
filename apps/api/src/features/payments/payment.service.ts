@@ -11,6 +11,8 @@ import type {
   PaymentOrderStatus
 } from "@/server/repositories/contracts/payment.repository";
 import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import type { Assignment } from "@/server/repositories/contracts/assignment.repository";
+import type { Quote } from "@/server/repositories/contracts/quote.repository";
 import type { ApiErrorCode } from "@/lib/api-error";
 
 import { createPaymentOrderInputSchema, paymentOrderIdParamSchema, resolvePaymentReviewInputSchema } from "./payment.schemas";
@@ -62,10 +64,12 @@ export type PaymentSummaryResponse = {
   assignment_id: string;
   quote_id: string;
   labor_quote_id?: string;
-  payment_timing?: "labor_upfront" | "after_repair";
+  pending_quote_id?: string;
+  payment_timing?: "labor_upfront" | "after_repair" | "after_service";
   currency: "VND";
   labor_amount: number;
   parts_amount: number;
+  other_amount: number;
   total_amount: number;
   paid_amount: number;
   remaining_amount: number;
@@ -93,16 +97,21 @@ export class PaymentService {
       const actor = await loadActiveActor(repositories, identity.subject);
       const request = await repositories.serviceRequests.findByIdForUpdate(requestId);
       if (!request) throw new PaymentError("NOT_FOUND", "Service request not found.", 404);
-      const quote = await repositories.quotes.findLatestByRequest(requestId);
-      const assignment = quote ? await repositories.assignments.findById(quote.assignmentId) : undefined;
-      if (!quote || !assignment) throw new PaymentError("NOT_FOUND", "Payment workflow not found.", 404);
+      const latest = await repositories.quotes.findLatestByRequest(requestId);
+      const assignment = latest ? await repositories.assignments.findById(latest.assignmentId) : undefined;
+      if (!latest || !assignment) throw new PaymentError("NOT_FOUND", "Payment workflow not found.", 404);
       if (!actor.roles.includes("admin") && request.riderId !== actor.id && !(actor.roles.includes("mechanic") && assignment.mechanicId === actor.id)) throw new PaymentError("FORBIDDEN", "Payment summary access is not allowed.", 403);
-      const labor = assignment.rescueLaborQuoteId ? await repositories.quotes.findById(assignment.rescueLaborQuoteId) : undefined;
+      const laborId = assignment.maintenanceLaborQuoteId ?? assignment.rescueLaborQuoteId;
+      const labor = laborId ? await repositories.quotes.findById(laborId) : undefined;
+      const maintenance = Boolean(assignment.maintenanceLaborQuoteId);
+      const quote = maintenance ? (await repositories.quotes.findLatestApprovedByAssignment(assignment.id, "maintenance_work")) ?? labor ?? latest : latest;
       const paid = await repositories.payments.sumSucceededForAssignment(assignment.id);
-      const laborAmount = labor?.totalAmount ?? quote.lines.filter((line) => line.lineType === "labor").reduce((amount, line) => amount + line.lineTotalAmount, 0);
+      const laborAmount = !maintenance && labor ? labor.totalAmount : quote.lines.filter((line) => line.lineType === "labor").reduce((amount, line) => amount + line.lineTotalAmount, 0);
       return { request_id: requestId, assignment_id: assignment.id, quote_id: quote.id, labor_quote_id: labor?.id,
-        payment_timing: assignment.rescuePaymentTiming, currency: "VND", labor_amount: laborAmount,
+        pending_quote_id: maintenance && latest.status === "pending" ? latest.id : undefined,
+        payment_timing: maintenance ? "after_service" : assignment.rescuePaymentTiming, currency: "VND", labor_amount: laborAmount,
         parts_amount: quote.purpose === "rescue_final" ? quote.totalAmount - laborAmount : quote.lines.filter((line) => line.lineType === "part").reduce((amount, line) => amount + line.lineTotalAmount, 0),
+        other_amount: quote.lines.filter((line) => line.lineType === "other").reduce((amount, line) => amount + line.lineTotalAmount, 0),
         total_amount: quote.totalAmount, paid_amount: paid, remaining_amount: Math.max(0, quote.totalAmount - paid),
         quote_status: quote.status, assignment_status: assignment.status };
     });
@@ -167,12 +176,15 @@ export class PaymentService {
         throw new PaymentError("FORBIDDEN", "Only the owning rider may pay this quote.", 403);
       }
       const upfrontLabor = quote.purpose === "rescue_labor" && assignment.rescueLaborQuoteId === quote.id && assignment.rescuePaymentTiming === "labor_upfront";
+      const payable = await latestPayableQuote(repositories, assignment, latest);
       if (
-        latest.id !== quote.id ||
+        payable?.id !== quote.id ||
         quote.status !== "approved" ||
         request.status !== (upfrontLabor ? "assigned" : "awaiting_payment") ||
         assignment.status !== (upfrontLabor ? "accepted" : "awaiting_payment") ||
         (quote.purpose === "rescue_labor" && !upfrontLabor) ||
+        quote.purpose === "maintenance_labor" ||
+        (assignment.maintenanceLaborQuoteId && quote.purpose !== "maintenance_work") ||
         quote.currency !== "VND"
       ) {
         throw new PaymentError("CONFLICT", "Quote is not payable.", 409);
@@ -180,7 +192,7 @@ export class PaymentService {
       if (await repositories.payments.hasSucceededForAssignment({ assignmentId: assignment.id, requestId: request.id, quoteId: quote.id })) {
         throw new PaymentError("CONFLICT", "This quote has already been paid.", 409);
       }
-      const alreadyPaid = quote.purpose === "rescue_final" ? await repositories.payments.sumSucceededForAssignment(assignment.id) : 0;
+      const alreadyPaid = quote.purpose === "rescue_final" || quote.purpose === "maintenance_work" ? await repositories.payments.sumSucceededForAssignment(assignment.id) : 0;
       const amountDue = quote.totalAmount - alreadyPaid;
       if (amountDue <= 0 || amountDue > 999_999_999_999) throw new PaymentError("CONFLICT", "No supported outstanding amount is payable.", 409);
       const active = await repositories.payments.findActiveByQuoteForUpdate(quote.id);
@@ -405,12 +417,15 @@ export class PaymentService {
         const upfrontLabor = quote?.purpose === "rescue_labor" && assignment?.rescueLaborQuoteId === quote.id && assignment.rescuePaymentTiming === "labor_upfront";
         const active = await repositories.payments.findActiveByQuoteForUpdate(order.quoteId, order.id);
         const alreadyPaid = await repositories.payments.sumSucceededForAssignment(order.assignmentId);
-        if (verified.status !== "PAID" || paid !== order.amount || !request || !assignment || !quote || latest?.id !== quote.id || quote.status !== "approved" ||
+        const payable = assignment ? await latestPayableQuote(repositories, assignment, latest) : undefined;
+        if (verified.status !== "PAID" || paid !== order.amount || !request || !assignment || !quote || payable?.id !== quote.id || quote.status !== "approved" ||
           assignment.status !== (upfrontLabor ? "accepted" : "awaiting_payment") || request.status !== (upfrontLabor ? "assigned" : "awaiting_payment") ||
           (quote.purpose === "rescue_labor" && !upfrontLabor) ||
+          quote.purpose === "maintenance_labor" ||
+          (assignment.maintenanceLaborQuoteId && quote.purpose !== "maintenance_work") ||
           active ||
           await repositories.payments.hasSucceededForAssignment({ assignmentId: order.assignmentId, requestId: order.requestId, quoteId: order.quoteId }) ||
-          (quote.purpose === "rescue_final" ? quote.totalAmount - alreadyPaid : quote.totalAmount) !== order.amount) {
+          (quote.purpose === "rescue_final" || quote.purpose === "maintenance_work" ? quote.totalAmount - alreadyPaid : quote.totalAmount) !== order.amount) {
           throw new PaymentError("CONFLICT", "Payment cannot be credited to this job; investigate duplicate, partial or excess funds manually.", 409);
         }
       } else if (paid !== 0 || !["CANCELLED", "EXPIRED", "FAILED"].includes(verified.status)) {
@@ -675,15 +690,21 @@ async function appendPaymentAuditOutbox(
   if (input.action === "payment.succeeded") {
     const request = await repositories.serviceRequests.findById(input.order.requestId);
     const assignment = await repositories.assignments.findById(input.order.assignmentId);
-    if (request?.serviceType === "emergency_rescue" && assignment) {
+    if (request && assignment) {
       for (const userId of [request.riderId, assignment.mechanicId]) await persistNotification(repositories, {
-        userId, type: "payment.succeeded", title: "Thanh toán cứu hộ đã được xác nhận",
+        userId, type: "payment.succeeded", title: request.serviceType === "periodic_maintenance" ? "Thanh toán bảo dưỡng đã được xác nhận" : "Thanh toán đã được xác nhận",
         body: "Mở yêu cầu để xem số tiền còn lại và bước tiếp theo.",
         data: { request_id: request.id, assignment_id: assignment.id, payment_order_id: input.order.id },
         dedupeKey: `payment.succeeded:${input.order.id}:${userId}`, requestId: request.id
       }, input.now, input.createId);
     }
   }
+}
+
+async function latestPayableQuote(repositories: FoundationRepositories, assignment: Assignment, latest?: Quote): Promise<Quote | undefined> {
+  if (!assignment.maintenanceLaborQuoteId) return latest;
+  if (!latest || latest.assignmentId !== assignment.id || latest.status === "pending") return undefined;
+  return repositories.quotes.findLatestApprovedByAssignment(assignment.id, "maintenance_work");
 }
 
 function normalizeIdempotencyKey(idempotencyKey: string): string {

@@ -1,8 +1,8 @@
 # Workflow cứu hộ và thanh toán
 
 Áp dụng cho `service_type=emergency_rescue`. Backend/API đã hỗ trợ luồng này;
-mobile và web chưa được thay đổi. Các dịch vụ khác vẫn dùng báo giá tiêu chuẩn
-và thanh toán trước khi bắt đầu sửa. Phương thức thanh toán hiện có là chuyển
+mobile và web chưa được thay đổi. Bảo dưỡng mới dùng [luồng trả sau bảo dưỡng](MAINTENANCE-WORKFLOW.md);
+các dịch vụ tiêu chuẩn còn lại thanh toán trước khi bắt đầu sửa. Phương thức thanh toán hiện có là chuyển
 khoản VietQR/payOS; không có API xác nhận tiền mặt.
 
 ## Luồng nghiệp vụ
@@ -165,5 +165,6 @@ flowchart TD
 hộ bao phủ trả trước, trả sau, không phụ tùng, chặn đóng việc chưa trả đủ,
 tránh thu lặp, từ chối/recall và API/notification. `pnpm.cmd run test:db` dùng
 `TEST_DATABASE_URL` để chạy thêm PostgreSQL: lưu/khóa thỏa thuận, tính bất biến
-và hủy có timestamp. Chưa xác nhận giao dịch tiền thật hoặc triển khai DB qua
-những kiểm thử giả này.
+và hủy có timestamp. Những tests dùng provider giả không chứng minh giao dịch
+thật; kết quả chuyển khoản cứu hộ đã kiểm tra được ghi trong
+[PAYMENT-SETUP.md](PAYMENT-SETUP.md).

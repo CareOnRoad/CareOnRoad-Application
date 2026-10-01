@@ -28,8 +28,13 @@ export type Assignment = {
   requestId: string;
   mechanicId: string;
   acceptedCandidateId: string;
+  scheduledStartAt?: Date;
+  reservationStartAt?: Date;
+  reservationEndAt?: Date;
+  activatedAt?: Date;
   rescueLaborQuoteId?: string;
   rescuePaymentTiming?: RescuePaymentTiming;
+  maintenanceLaborQuoteId?: string;
   status: AssignmentStatus;
   acceptedAt: Date;
   startedAt?: Date;
@@ -55,6 +60,9 @@ export type CreateAssignment = {
   requestId: string;
   mechanicId: string;
   acceptedCandidateId: string;
+  scheduledStartAt?: Date;
+  reservationStartAt?: Date;
+  reservationEndAt?: Date;
   status?: AssignmentStatus;
   acceptedAt: Date;
   createdAt: Date;
@@ -71,6 +79,10 @@ export type MechanicActiveWorkload = {
 };
 
 export interface AssignmentRepository {
+  activate(input: { id: string; now: Date }): Promise<void>;
+  findReservationConflict(input: { mechanicId: string; start: Date; end: Date; excludeId?: string }): Promise<Assignment | undefined>;
+  listScheduledForPreparation(input: { now: Date; limit: number }): Promise<Assignment[]>;
+  setMaintenanceAgreement(input: { id: string; laborQuoteId: string; updatedAt: Date }): Promise<Assignment | undefined>;
   setRescueAgreement(input: { id: string; laborQuoteId: string; paymentTiming: RescuePaymentTiming; updatedAt: Date }): Promise<Assignment | undefined>;
   create(input: CreateAssignment): Promise<Assignment>;
   findById(id: string): Promise<Assignment | undefined>;

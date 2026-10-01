@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ApiErrorCode } from "@/lib/api-error";
-import { sanitizeAuditMetadata } from "@/features/audit/audit-sanitizer";
+import { sanitizeNotificationData } from "./notification-data";
 import {
   loadActiveActor,
   primaryAuditRole
@@ -128,7 +128,7 @@ function toInboxResponse(notification: Notification): InboxNotificationResponse 
     type: notification.type,
     title: notification.title,
     body: notification.body,
-    data: sanitizeAuditMetadata(notification.data),
+    data: sanitizeNotificationData(notification.data),
     status: notification.status,
     ...(notification.readAt ? { read_at: notification.readAt.toISOString() } : {}),
     created_at: notification.createdAt.toISOString(),

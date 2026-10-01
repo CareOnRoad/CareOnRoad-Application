@@ -90,6 +90,7 @@ export class PostgresReminderRepository implements ReminderRepository {
       set title = ${input.title},
           interval_days = ${input.intervalDays ?? null},
           next_due_at = ${input.nextDueAt},
+          snoozed_until = null,
           enabled = ${input.enabled},
           updated_at = ${input.updatedAt}
       where id = ${input.id}
@@ -228,6 +229,7 @@ export class PostgresReminderRepository implements ReminderRepository {
   async updateOccurrenceStatus(input: {
     id: string;
     status: ReminderOccurrenceStatus;
+    notificationId?: string;
     processedAt?: Date;
     retryCount?: number;
     lastErrorCode?: string;
@@ -235,6 +237,7 @@ export class PostgresReminderRepository implements ReminderRepository {
     const rows = await this.sql<ReminderOccurrenceRow[]>`
       update reminder_occurrences
       set status = ${input.status},
+          notification_id = coalesce(${input.notificationId ?? null}, notification_id),
           processed_at = ${input.processedAt ?? null},
           retry_count = coalesce(${input.retryCount ?? null}, retry_count),
           last_error_code = ${input.lastErrorCode ?? null}

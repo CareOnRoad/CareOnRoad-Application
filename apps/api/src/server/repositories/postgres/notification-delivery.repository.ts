@@ -21,12 +21,27 @@ type ReceiptRow = {
   completed_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  lease_token: string | null;
+  lease_expires_at: Date | null;
+  next_attempt_at: Date | null;
 };
 
 export class PostgresNotificationDeliveryRepository
   implements NotificationDeliveryRepository
 {
   constructor(private readonly sql: TransactionSql) {}
+
+  async claim(input: Parameters<NotificationDeliveryRepository["claim"]>[0]) {
+    const rows = await this.sql<ReceiptRow[]>`
+      update notification_delivery_receipts
+      set lease_token = ${input.token}, lease_expires_at = ${input.leaseUntil}
+      where id = ${input.id} and status in ('pending', 'retryable_failed')
+        and (lease_expires_at is null or lease_expires_at <= ${input.now})
+        and (next_attempt_at is null or next_attempt_at <= ${input.now})
+      returning *
+    `;
+    return rows[0] ? mapReceipt(rows[0]) : undefined;
+  }
 
   async createIfAbsent(
     input: Parameters<NotificationDeliveryRepository["createIfAbsent"]>[0]
@@ -65,11 +80,16 @@ export class PostgresNotificationDeliveryRepository
           last_error_code = ${input.errorCode ?? null},
           last_attempted_at = ${input.attemptedAt},
           completed_at = ${terminal ? input.attemptedAt : null},
-          updated_at = ${input.attemptedAt}
+          updated_at = ${input.attemptedAt},
+          lease_token = null, lease_expires_at = null,
+          next_attempt_at = ${input.nextAttemptAt ?? null}
       where id = ${input.id}
+        and status in ('pending', 'retryable_failed')
+        and lease_token is not distinct from ${input.leaseToken ?? null}::text
+        and (lease_expires_at is null or lease_expires_at > ${input.attemptedAt})
       returning *
     `;
-    if (!rows[0]) throw new Error("NOTIFICATION_DELIVERY_RECEIPT_NOT_FOUND");
+    if (!rows[0]) throw new Error("NOTIFICATION_DELIVERY_LEASE_LOST");
     return mapReceipt(rows[0]);
   }
 }
@@ -88,6 +108,9 @@ function mapReceipt(row: ReceiptRow): NotificationDeliveryReceipt {
     ...(row.last_attempted_at ? { lastAttemptedAt: row.last_attempted_at } : {}),
     ...(row.completed_at ? { completedAt: row.completed_at } : {}),
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    leaseToken: row.lease_token ?? undefined,
+    leaseExpiresAt: row.lease_expires_at ?? undefined,
+    nextAttemptAt: row.next_attempt_at ?? undefined
   };
 }

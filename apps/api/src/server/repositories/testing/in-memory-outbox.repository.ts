@@ -7,6 +7,14 @@ import type {
 export class InMemoryOutboxRepository implements OutboxRepository {
   constructor(private readonly events: OutboxEvent[]) {}
 
+  async renewLease(input: Parameters<OutboxRepository["renewLease"]>[0]) {
+    const event = this.events.find((item) => item.id === input.id && item.status === "processing" &&
+      item.leaseOwner === input.leaseOwner && item.leaseExpiresAt && item.leaseExpiresAt > input.now);
+    if (!event) return false;
+    event.leaseExpiresAt = input.leaseUntil;
+    return true;
+  }
+
   async append(input: AppendOutboxEvent): Promise<OutboxEvent> {
     if (await this.findByDedupeKey(input.dedupeKey)) {
       throw new Error("OUTBOX_DEDUPE_KEY_EXISTS");

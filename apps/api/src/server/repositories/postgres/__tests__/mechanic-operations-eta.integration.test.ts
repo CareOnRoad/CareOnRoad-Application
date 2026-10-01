@@ -16,7 +16,7 @@ import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
 const migrationFiles = readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-  .filter((name) => name.endsWith(".sql") && name.localeCompare("202606250018") < 0)
+  .filter((name) => name.endsWith(".sql"))
   .sort();
 
 describeDatabase("mechanic operations ETA repository integration", () => {

@@ -83,6 +83,7 @@ export interface ReminderRepository {
   updateOccurrenceStatus(input: {
     id: string;
     status: ReminderOccurrenceStatus;
+    notificationId?: string;
     processedAt?: Date;
     retryCount?: number;
     lastErrorCode?: string;

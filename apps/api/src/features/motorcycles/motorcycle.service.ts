@@ -137,11 +137,14 @@ export class MotorcycleService {
   }
 
   archiveMotorcycle(identity: VerifiedSupabaseIdentity, motorcycleId: string): Promise<void> {
-    return this.unitOfWork.execute(async ({ audit, motorcycles, outbox, users }) => {
+    return this.unitOfWork.execute(async ({ audit, motorcycles, outbox, reminders, users }) => {
       const actor = await loadRiderActor(users, identity.subject);
       await loadOwnedMotorcycle(motorcycles, motorcycleId, actor.id);
       const now = this.options.now?.() ?? new Date();
       const archived = await motorcycles.archive(motorcycleId, now);
+      for (const rule of await reminders.listRulesByRider(actor.id)) {
+        if (rule.motorcycleId === motorcycleId) await reminders.disableRule({ id: rule.id, updatedAt: now });
+      }
       if (!archived) {
         throw new MotorcycleError("NOT_FOUND", "Motorcycle not found.", 404);
       }

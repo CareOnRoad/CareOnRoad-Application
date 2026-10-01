@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
-import { appendAssignmentAuditOutbox } from "@/features/assignments/assignment.service";
+import { appendAssignmentAuditOutbox, loadActiveActor } from "@/features/assignments/assignment.service";
 import { prepareIdempotency } from "@/lib/idempotency";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@/server/repositories/contracts/assignment.repository";
 import type {
@@ -56,6 +56,7 @@ export type AssignmentCompletionChecklistResponse = {
   request_id: string;
   mechanic_id: string;
   revision: number;
+  approved_quote_id?: string;
   work_summary: string;
   safety_checklist: AssignmentCompletionChecklistInput["safety_checklist"];
   notes?: string;
@@ -67,6 +68,22 @@ export class MechanicAssignmentMetadataService {
     private readonly unitOfWork: UnitOfWork,
     private readonly options: { now?: () => Date; createId?: () => string } = {}
   ) {}
+
+  async getCompletionChecklist(identity: VerifiedSupabaseIdentity, assignmentId: string): Promise<AssignmentCompletionChecklistResponse> {
+    if (!assignmentIdParamSchema.safeParse(assignmentId).success) throw new MechanicOperationsError("INVALID_INPUT", "Assignment id must be a UUID.", 400);
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveActor(repositories, identity.subject);
+      const assignment = await repositories.assignments.findById(assignmentId);
+      const request = assignment ? await repositories.serviceRequests.findById(assignment.requestId) : undefined;
+      if (!assignment || !request) throw new MechanicOperationsError("NOT_FOUND", "Assignment not found.", 404);
+      if (!actor.roles.includes("admin") && !(actor.roles.includes("rider") && request.riderId === actor.id) && !(actor.roles.includes("mechanic") && assignment.mechanicId === actor.id)) {
+        throw new MechanicOperationsError("FORBIDDEN", "Completion checklist access is not allowed.", 403);
+      }
+      const checklist = await repositories.mechanicOperations.getLatestAssignmentCompletionChecklist(assignmentId);
+      if (!checklist) throw new MechanicOperationsError("NOT_FOUND", "Completion checklist not found.", 404);
+      return toAssignmentCompletionChecklistResponse(checklist);
+    });
+  }
 
   async updateEta(
     identity: VerifiedSupabaseIdentity,
@@ -407,11 +424,16 @@ export class MechanicAssignmentMetadataService {
         );
       }
 
+      if (assignment.maintenanceLaborQuoteId && !["in_progress", "awaiting_payment"].includes(assignment.status)) {
+        throw new MechanicOperationsError("CONFLICT", "Maintenance completion checklist requires work to have started.", 409);
+      }
+      const approved = assignment.maintenanceLaborQuoteId ? await repositories.quotes.findLatestApprovedByAssignment(assignment.id, "maintenance_work") : undefined;
       const checklist = await repositories.mechanicOperations.createAssignmentCompletionChecklist({
         id: createId(),
         assignmentId: assignment.id,
         requestId: assignment.requestId,
         mechanicId: assignment.mechanicId,
+        approvedQuoteId: approved?.id,
         workSummary: normalized.workSummary,
         safetyChecklist: normalized.safetyChecklist,
         notes: normalized.notes,
@@ -523,6 +545,7 @@ function toAssignmentCompletionChecklistResponse(
     request_id: checklist.requestId,
     mechanic_id: checklist.mechanicId,
     revision: checklist.revision,
+    approved_quote_id: checklist.approvedQuoteId,
     work_summary: checklist.workSummary,
     safety_checklist: toChecklistResponseShape(checklist.safetyChecklist),
     ...(checklist.notes ? { notes: checklist.notes } : {}),

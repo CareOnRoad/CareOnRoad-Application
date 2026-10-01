@@ -29,14 +29,17 @@ export class PostgresOperationalMonitoringRepository implements OperationalMonit
 
   async listStuckDispatch(input: OperationalPageInput & { staleBefore: Date; now: Date }): Promise<StuckDispatchItem[]> {
     const rows = await this.sql<StuckDispatchRow[]>`
-      select request.id, request.request_code, request.status, request.updated_at
+      select request.id, request.request_code, request.status, request.updated_at,
+        case when request.service_location is null then 'missing_location' else null end as reason_code
       from service_requests request
-      where request.status in ('dispatching', 'offered') and request.updated_at < ${input.staleBefore}
+      where ((request.status in ('dispatching', 'offered') and request.updated_at < ${input.staleBefore})
+        or (request.status = 'submitted' and request.service_type = 'periodic_maintenance' and request.service_location is null))
         and not exists (select 1 from dispatch_rounds round where round.request_id=request.id and round.status='active' and round.expires_at > ${input.now})
         and (${input.cursor?.createdAt ?? null}::timestamptz is null or (request.updated_at, request.id) < (${input.cursor?.createdAt ?? null}, ${input.cursor?.id ?? null}::uuid))
       order by request.updated_at desc, request.id desc limit ${input.limit}
     `;
-    return rows.map((r) => ({ id:r.id, requestCode:r.request_code, status:r.status, updatedAt:r.updated_at }));
+    return rows.map((r) => ({ id:r.id, requestCode:r.request_code, status:r.status, updatedAt:r.updated_at,
+      ...(r.reason_code ? { reasonCode: r.reason_code } : {}) }));
   }
 
   async listWorkerRuns(input: OperationalPageInput): Promise<WorkerRunRecord[]> {
@@ -59,7 +62,7 @@ export class PostgresOperationalMonitoringRepository implements OperationalMonit
 
 type DeadLetterRow = { id: string; topic: string; aggregate_type: string; aggregate_id: string; attempt_count: number; last_error_code: string | null; created_at: Date };
 type NeedsReviewPaymentRow = { id: string; request_id: string; assignment_id: string; updated_at: Date };
-type StuckDispatchRow = { id: string; request_code: string; status: "dispatching" | "offered"; updated_at: Date };
+type StuckDispatchRow = { id: string; request_code: string; status: StuckDispatchItem["status"]; updated_at: Date; reason_code: "missing_location" | null };
 type WorkerRunRow = { id: string; worker_name: string; status: WorkerRunStatus; error_code: string | null; items_claimed: number; items_succeeded: number; items_failed: number; started_at: Date; completed_at: Date; created_at: Date };
 
 function mapRun(r: WorkerRunRow): WorkerRunRecord {

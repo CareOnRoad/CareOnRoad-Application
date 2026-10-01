@@ -8,7 +8,7 @@ const TRANSITIONS: ReadonlyMap<RequestStatus, ReadonlySet<RequestStatus>> = new 
   ["mechanic_en_route", transitionSet(["submitted", "in_service"])],
   ["in_service", transitionSet(["awaiting_quote_approval", "awaiting_payment", "completed"])],
   ["awaiting_quote_approval", transitionSet(["assigned", "submitted", "in_service", "awaiting_payment"])],
-  ["awaiting_payment", transitionSet(["completed"])],
+  ["awaiting_payment", transitionSet(["in_service", "completed"])],
   ["manual_escalation", transitionSet(["submitted"])],
   ["canceled", transitionSet([])],
   ["completed", transitionSet([])]

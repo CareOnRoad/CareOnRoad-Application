@@ -23,9 +23,13 @@ export type NotificationDeliveryReceipt = {
   completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+  leaseToken?: string;
+  leaseExpiresAt?: Date;
+  nextAttemptAt?: Date;
 };
 
 export interface NotificationDeliveryRepository {
+  claim(input: { id: string; token: string; now: Date; leaseUntil: Date }): Promise<NotificationDeliveryReceipt | undefined>;
   createIfAbsent(input: {
     id: string;
     notificationId: string;
@@ -41,5 +45,7 @@ export interface NotificationDeliveryRepository {
     attemptedAt: Date;
     providerMessageId?: string;
     errorCode?: string;
+    leaseToken?: string;
+    nextAttemptAt?: Date;
   }): Promise<NotificationDeliveryReceipt>;
 }

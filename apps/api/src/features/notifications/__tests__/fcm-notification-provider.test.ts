@@ -12,6 +12,18 @@ const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 })
   .toString();
 
 describe("FcmNotificationProvider", () => {
+  it.each(["UNREGISTERED", "SENDER_ID_MISMATCH"])("prioritizes typed %s over a generic HTTP error", async (code) => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "access-value", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ error: { status: "NOT_FOUND", details: [
+        { "@type": "type.googleapis.com/google.rpc.BadRequest", errorCode: "IGNORE_THIS" },
+        { "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode: code }
+      ] } }, { status: 404 }));
+    const provider = new FcmNotificationProvider({ projectId: "test", clientEmail: "service@example.test", privateKey }, { fetch: fetchMock });
+    expect(await provider.send({ provider: "fcm", credential: "private", title: "Title", body: "Body", data: {}, deliveryId: "delivery" }))
+      .toEqual({ kind: "invalid_credential", errorCode: `FCM_${code}` });
+  });
+
   it("mints OAuth access once and sends a sanitized FCM v1 request", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

@@ -20,7 +20,7 @@ describe("NotificationService", () => {
       title: "Đến hạn bảo dưỡng",
       body: "Bạn có một lịch bảo dưỡng đến hạn.",
       data: {
-        resource_id: "reminder-1",
+        resource_id: "33333333-3333-4333-8333-333333333333",
         status: "due",
         authorization: "Bearer secret",
         diagnosis_text: "full diagnosis"
@@ -35,7 +35,7 @@ describe("NotificationService", () => {
       notification: {
         id: "notification-1",
         status: "pending",
-        data: { resource_id: "reminder-1", status: "due" }
+        data: { resource_id: "33333333-3333-4333-8333-333333333333", status: "due" }
       }
     });
     await expect(service.createNotification(input)).resolves.toMatchObject({

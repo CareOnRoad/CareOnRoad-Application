@@ -88,7 +88,10 @@
      verified payment before work starts. Emergency rescue quotes labor before
      travel, fixes approved labor, and supports `labor_upfront` or `after_repair`;
      approved parts and full payment are required before closing the rescue job.
-     See `apps/api/RESCUE-WORKFLOW.md` for the API and state workflow.
+     New periodic maintenance approves fixed labor before travel, materials before
+     work and additions separately, then collects after a quote-bound completion
+     checklist. Full verified payment is required before closing maintenance.
+     See `apps/api/RESCUE-WORKFLOW.md` and `apps/api/MAINTENANCE-WORKFLOW.md`.
 
 ## Backend MVP Status
 
@@ -135,8 +138,12 @@
 - Emergency rescue quote/payment workflow is implemented through migration 033,
   including rejected-mechanic recall, remaining-balance collection, and rescue
   inbox/outbox notifications. Mobile and web clients are unchanged.
+- Periodic maintenance quote/payment workflow is implemented through migration 034:
+  fixed pre-travel labor, approved materials and cumulative additions, completion
+  checklist bound to approved work, and payment after service. Existing `standard`
+  maintenance quotes retain prepayment behavior; mobile/web clients are unchanged.
 - Migrations `202606250001_enable_extensions.sql` through
-  `202606250033_rescue_quote_payment_workflow.sql` must be applied and verified on
+  `202606250034_maintenance_quote_payment_workflow.sql` must be applied and verified on
   hosted/dev before enabling the corresponding APIs or seeding mock data.
 
 ## Hosted Supabase Mock Data
@@ -221,10 +228,12 @@
   - Assigned mechanic submits field media metadata references for an active
     assignment. Requires `X-Idempotency-Key`; rejects raw media/base64/provider
     payloads and appends sanitized audit/outbox.
-- `POST /api/v1/assignments/[assignmentId]/completion-checklist`
+- `GET/POST /api/v1/assignments/[assignmentId]/completion-checklist`
   - Assigned mechanic submits append-only work-summary and safety-checklist
     revisions for an active assignment. Requires `X-Idempotency-Key`; does not
-    complete or otherwise bypass the assignment state machine.
+    complete or otherwise bypass the assignment state machine. GET exposes the
+    latest revision to the owning rider, assigned mechanic or admin. New maintenance
+    requires a checklist bound to its latest approved quote before collecting.
 - `POST /api/v1/assignments/[assignmentId]/diagnoses`
   - Assigned-mechanic/admin mechanic diagnosis creation and revision.
 - `GET/POST /api/v1/service-requests/[requestId]/quotes`, `POST /api/v1/quotes/[quoteId]/approve`, `POST /api/v1/quotes/[quoteId]/reject`

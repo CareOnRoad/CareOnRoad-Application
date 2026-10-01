@@ -5,6 +5,7 @@ import {
   type ProcessClaimedDispatchRoundResult
 } from "@/features/dispatch/dispatch.service";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import { persistNotification } from "@/features/notifications/notification.service";
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_LEASE_MS = 60_000;
@@ -36,6 +37,7 @@ export class DispatchWorker {
   async processBatch(): Promise<DispatchWorkerResult> {
     const now = this.options.now?.() ?? new Date();
     const workerId = this.options.workerId ?? `dispatch-worker-${randomUUID()}`;
+    const preparationFailures = await this.notifyScheduledAppointments(now);
     const leaseUntil = new Date(now.getTime() + (this.options.leaseMs ?? DEFAULT_LEASE_MS));
     const rounds = await this.unitOfWork.execute(({ dispatch }) =>
       dispatch.claimExpiredRounds({
@@ -50,7 +52,7 @@ export class DispatchWorker {
       advanced: 0,
       escalated: 0,
       skipped: 0,
-      failed: 0
+      failed: preparationFailures
     };
     const processRound =
       this.options.processRound ??
@@ -73,6 +75,29 @@ export class DispatchWorker {
       }
     }
     return result;
+  }
+
+  private async notifyScheduledAppointments(now: Date) {
+    let failed = 0;
+    const due = await this.unitOfWork.execute(({ assignments }) => assignments.listScheduledForPreparation({
+      now, limit: this.options.batchSize ?? DEFAULT_BATCH_SIZE
+    }));
+    for (const item of due) try { await this.unitOfWork.execute(async (repositories) => {
+      const request = await repositories.serviceRequests.findByIdForUpdate(item.requestId);
+      const assignment = await repositories.assignments.findByIdForUpdate(item.id);
+      if (!request || request.status === "canceled" || !assignment || assignment.activatedAt ||
+        ["completed", "canceled", "recovery_canceled"].includes(assignment.status)) return;
+      const createId = this.options.createId ?? randomUUID;
+      for (const [audience, userId] of [["rider", request.riderId], ["mechanic", assignment.mechanicId]] as const) {
+        await persistNotification(repositories, {
+          userId, type: "maintenance.appointment.prepare", title: "Sắp đến lịch bảo dưỡng",
+          body: "Lịch bảo dưỡng đã vào thời gian chuẩn bị. Mở yêu cầu để xem tiến trình.",
+          data: { request_id: request.id, assignment_id: assignment.id, scheduled_start_at: assignment.scheduledStartAt!.toISOString() },
+          dedupeKey: `maintenance.prepare:${assignment.id}:${audience}`, requestId: request.id
+        }, now, createId);
+      }
+    }); } catch { failed++; }
+    return failed;
   }
 
   private release(roundId: string, workerId: string): Promise<boolean> {

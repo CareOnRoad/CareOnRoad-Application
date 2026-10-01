@@ -64,6 +64,7 @@ type AssignmentRow = {
   request_id: string;
   mechanic_id: string;
   accepted_candidate_id: string;
+  maintenance_labor_quote_id: string | null;
   status: AssignmentStatus;
   accepted_at: Date;
   started_at: Date | null;
@@ -104,6 +105,7 @@ type AssignmentCompletionChecklistRow = {
   request_id: string;
   mechanic_id: string;
   revision: number;
+  approved_quote_id: string | null;
   work_summary: string;
   safety_checklist: AssignmentSafetyChecklistJson;
   notes: string | null;
@@ -484,6 +486,7 @@ export class PostgresMechanicOperationsRepository implements MechanicOperationsR
       insert into assignment_completion_checklists (
         id, assignment_id, request_id, mechanic_id, revision, work_summary,
         safety_checklist, notes, created_by, created_at
+        ${input.approvedQuoteId ? this.sql`, approved_quote_id` : this.sql``}
       )
       values (
         ${input.id}, ${input.assignmentId}, ${input.requestId}, ${input.mechanicId},
@@ -494,6 +497,7 @@ export class PostgresMechanicOperationsRepository implements MechanicOperationsR
         ),
         ${input.workSummary}, ${this.sql.json(toSafetyChecklistJson(input.safetyChecklist))},
         ${input.notes ?? null}, ${input.createdBy}, ${input.createdAt}
+        ${input.approvedQuoteId ? this.sql`, ${input.approvedQuoteId}` : this.sql``}
       )
       returning *
     `;
@@ -574,6 +578,7 @@ export class PostgresMechanicOperationsRepository implements MechanicOperationsR
       ) latest_quote on true
       where assignment.mechanic_id = ${mechanicId}
         and assignment.status in ${this.sql([...ACTIVE_ASSIGNMENT_STATUSES])}
+        and (assignment.scheduled_start_at is null or assignment.activated_at is not null)
       order by assignment.created_at desc, assignment.id desc
       limit 1
     `;
@@ -587,6 +592,7 @@ function mapAssignment(row: AssignmentRow): Assignment {
     requestId: row.request_id,
     mechanicId: row.mechanic_id,
     acceptedCandidateId: row.accepted_candidate_id,
+    maintenanceLaborQuoteId: row.maintenance_labor_quote_id ?? undefined,
     status: row.status,
     acceptedAt: row.accepted_at,
     startedAt: row.started_at ?? undefined,
@@ -635,6 +641,7 @@ function mapAssignmentCompletionChecklist(
     requestId: row.request_id,
     mechanicId: row.mechanic_id,
     revision: row.revision,
+    approvedQuoteId: row.approved_quote_id ?? undefined,
     workSummary: row.work_summary,
     safetyChecklist: fromSafetyChecklistJson(row.safety_checklist),
     notes: row.notes ?? undefined,

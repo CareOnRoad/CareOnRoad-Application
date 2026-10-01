@@ -16,7 +16,7 @@ export type NotificationProviderOutcome =
   | { kind: "permanent_failure"; errorCode: string }
   | { kind: "throttled"; errorCode: string; retryAfter?: Date }
   | { kind: "timeout"; errorCode: string }
-  | { kind: "temporary_failure"; errorCode: string };
+  | { kind: "temporary_failure"; errorCode: string; retryAfter?: Date };
 
 export interface NotificationProvider {
   send(input: NotificationProviderInput): Promise<NotificationProviderOutcome>;
@@ -25,7 +25,7 @@ export interface NotificationProvider {
 export class NotificationDeliveryError extends Error {
   readonly errorCode: string;
 
-  constructor(errorCode: string) {
+  constructor(errorCode: string, public readonly retryAfter?: Date) {
     super("Notification delivery could not be completed.");
     this.name = "NotificationDeliveryError";
     this.errorCode = errorCode;

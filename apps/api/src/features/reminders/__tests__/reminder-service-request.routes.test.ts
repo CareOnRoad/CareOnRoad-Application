@@ -20,6 +20,7 @@ describe("reminder-originated service request route behavior", () => {
         {
           motorcycle_id: motorcycleId,
           service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 },
           problem_description: "Bao duong tu reminder",
           reminder_id: reminderId,
           reminder_context_id: occurrenceId
@@ -41,6 +42,7 @@ describe("reminder-originated service request route behavior", () => {
         {
           motorcycle_id: motorcycleId,
           service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 },
           problem_description: "Bao duong tu reminder",
           reminder_id: reminderId,
           reminder_context_id: occurrenceId

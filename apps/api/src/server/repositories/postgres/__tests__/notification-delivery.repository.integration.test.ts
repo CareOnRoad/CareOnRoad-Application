@@ -117,4 +117,23 @@ describeDatabase("notification delivery repository integration", () => {
     const stored = await sql`select * from notification_delivery_receipts where id = ${first.id}`;
     expect(JSON.stringify(stored)).not.toMatch(/encrypted-only|iv-only|tag-only/);
   }, 30_000);
+
+  it("allows only one receipt lease and rejects stale writers", async () => {
+    const uow = new PostgresUnitOfWork(sql);
+    const [notification] = await sql`insert into notifications (user_id, type, title, body, dedupe_key)
+      values (${userId}, 'test', 'Title', 'Body', ${randomUUID()}) returning id`;
+    const receipt = await uow.execute(({ notificationDeliveries }) => notificationDeliveries.createIfAbsent({
+      id: randomUUID(), notificationId: notification!.id, credentialId, credentialVersion: 1, provider: "fcm", createdAt: now
+    }));
+    const claims = await Promise.all(["a", "b"].map((token) => uow.execute(({ notificationDeliveries }) =>
+      notificationDeliveries.claim({ id: receipt.id, token, now, leaseUntil: new Date(now.getTime() + 1000) }))));
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    const later = new Date(now.getTime() + 1001);
+    await uow.execute(({ notificationDeliveries }) => notificationDeliveries.claim({ id: receipt.id, token: "new", now: later,
+      leaseUntil: new Date(later.getTime() + 1000) }));
+    await expect(uow.execute(({ notificationDeliveries }) => notificationDeliveries.recordOutcome({
+      id: receipt.id, leaseToken: claims.find(Boolean)!.leaseToken, status: "sent", attemptedAt: later
+    }))).rejects.toThrow("NOTIFICATION_DELIVERY_LEASE_LOST");
+  });
+
 });

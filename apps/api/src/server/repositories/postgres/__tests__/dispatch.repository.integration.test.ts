@@ -369,12 +369,8 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
 }
 
 function legacyCompatibleMigrationFiles(): string[] {
-  const legacy = readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
-    .sort();
-  return [...legacy, "202606250021_dispatch_round_leases.sql"];
+  return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
+    .filter((name) => name.endsWith(".sql")).sort();
 }
 
 function identity(subject: string): VerifiedSupabaseIdentity {

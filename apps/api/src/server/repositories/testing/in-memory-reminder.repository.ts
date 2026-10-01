@@ -48,6 +48,7 @@ export class InMemoryReminderRepository implements ReminderRepository {
     rule.title = input.title;
     rule.intervalDays = input.intervalDays;
     rule.nextDueAt = input.nextDueAt;
+    rule.snoozedUntil = undefined;
     rule.enabled = input.enabled;
     rule.updatedAt = input.updatedAt;
     return cloneRule(rule);
@@ -165,6 +166,7 @@ export class InMemoryReminderRepository implements ReminderRepository {
   async updateOccurrenceStatus(input: {
     id: string;
     status: ReminderOccurrenceStatus;
+    notificationId?: string;
     processedAt?: Date;
     retryCount?: number;
     lastErrorCode?: string;
@@ -174,6 +176,7 @@ export class InMemoryReminderRepository implements ReminderRepository {
       return undefined;
     }
     occurrence.status = input.status;
+    occurrence.notificationId = input.notificationId ?? occurrence.notificationId;
     occurrence.processedAt = input.processedAt;
     occurrence.retryCount = input.retryCount ?? occurrence.retryCount;
     occurrence.lastErrorCode = input.lastErrorCode;

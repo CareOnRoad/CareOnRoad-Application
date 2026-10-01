@@ -1,6 +1,6 @@
 export type QuoteStatus = "pending" | "approved" | "rejected" | "superseded" | "expired";
 export type QuoteLineType = "labor" | "part" | "other";
-export type QuotePurpose = "standard" | "rescue_labor" | "rescue_final";
+export type QuotePurpose = "standard" | "rescue_labor" | "rescue_final" | "maintenance_labor" | "maintenance_work";
 export type RescuePaymentTiming = "labor_upfront" | "after_repair";
 export type RescueLaborPricing = {
   base_amount: number;
@@ -56,6 +56,7 @@ export interface QuoteRepository {
   findByIdForUpdate(id: string): Promise<Quote | undefined>;
   findLatestByRequest(requestId: string): Promise<Quote | undefined>;
   findLatestByRequestForUpdate(requestId: string): Promise<Quote | undefined>;
+  findLatestApprovedByAssignment(assignmentId: string, purpose: QuotePurpose): Promise<Quote | undefined>;
   listByRequest(requestId: string): Promise<Quote[]>;
   hasAnyByDiagnosis(diagnosisId: string): Promise<boolean>;
   updateStatus(input: {

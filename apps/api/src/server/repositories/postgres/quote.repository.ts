@@ -120,6 +120,14 @@ export class PostgresQuoteRepository implements QuoteRepository {
     return Promise.all(rows.map((row) => this.withLines(mapQuote(row))));
   }
 
+  async findLatestApprovedByAssignment(assignmentId: string, purpose: QuotePurpose): Promise<Quote | undefined> {
+    const rows = await this.sql<QuoteRow[]>`
+      select * from quotes where assignment_id = ${assignmentId} and purpose = ${purpose} and status = 'approved'
+      order by version desc limit 1
+    `;
+    return rows[0] ? this.withLines(mapQuote(rows[0])) : undefined;
+  }
+
   async hasAnyByDiagnosis(diagnosisId: string): Promise<boolean> {
     const rows = await this.sql<{ exists: boolean }[]>`
       select exists(select 1 from quotes where diagnosis_id = ${diagnosisId}) as exists

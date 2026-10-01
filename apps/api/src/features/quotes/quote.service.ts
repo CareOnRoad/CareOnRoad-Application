@@ -115,9 +115,15 @@ export class QuoteService {
       const latest = await repositories.quotes.findLatestByRequestForUpdate(requestId);
       const firstVersion = !latest || latest.assignmentId !== assignment.id || (latest.purpose ?? "standard") !== parsed.data.purpose;
       const rescue = request.serviceType === "emergency_rescue";
-      if (rescue === (parsed.data.purpose === "standard")) {
-        throw new QuoteError("INVALID_INPUT", "Emergency rescue requires a labor or final quote; other services require a standard quote.", 400);
+      const maintenance = request.serviceType === "periodic_maintenance";
+      const maintenanceQuote = parsed.data.purpose === "maintenance_labor" || parsed.data.purpose === "maintenance_work";
+      const legacyMaintenance = maintenance && !assignment.maintenanceLaborQuoteId && latest?.assignmentId === assignment.id && (latest.purpose ?? "standard") === "standard";
+      if (rescue ? !["rescue_labor", "rescue_final"].includes(parsed.data.purpose)
+        : maintenance ? !(maintenanceQuote || (legacyMaintenance && parsed.data.purpose === "standard")) : parsed.data.purpose !== "standard") {
+        throw new QuoteError("INVALID_INPUT", "Quote purpose does not match the service workflow.", 400);
       }
+      const preTravelLabor = parsed.data.purpose === "rescue_labor" || parsed.data.purpose === "maintenance_labor";
+      const maintenanceAddition = maintenance && parsed.data.purpose === "maintenance_work" && assignment.status === "in_progress";
       const now = this.options.now?.() ?? new Date();
       let laborPricing: RescueLaborPricing | undefined;
       if (parsed.data.purpose === "rescue_labor") {
@@ -146,9 +152,32 @@ export class QuoteService {
           ...parsed.data.lines
         ], 0);
       }
+      if (parsed.data.purpose === "maintenance_labor") {
+        if (assignment.maintenanceLaborQuoteId) throw new QuoteError("CONFLICT", "Maintenance labor is already agreed and cannot change.", 409);
+        if (!calculated.lines.some((line) => line.line_type === "labor" && line.line_total_amount > 0)) throw new QuoteError("INVALID_INPUT", "Maintenance labor must have a positive total.", 400);
+      }
+      if (parsed.data.purpose === "maintenance_work") {
+        const labor = assignment.maintenanceLaborQuoteId ? await repositories.quotes.findById(assignment.maintenanceLaborQuoteId) : undefined;
+        if (!labor || labor.status !== "approved" || labor.assignmentId !== assignment.id || labor.purpose !== "maintenance_labor") {
+          throw new QuoteError("CONFLICT", "An approved maintenance labor agreement is required.", 409);
+        }
+        let basis = labor;
+        if (maintenanceAddition) {
+          const approved = await repositories.quotes.findLatestApprovedByAssignment(assignment.id, "maintenance_work");
+          if (!approved || parsed.data.basis_quote_id !== approved.id) throw new QuoteError("CONFLICT", "Additions must reference the latest approved maintenance work quote.", 409);
+          if (!parsed.data.lines.length || calculated.total_amount <= 0) throw new QuoteError("INVALID_INPUT", "A maintenance addition must contain new payable items.", 400);
+          basis = approved;
+        } else if (parsed.data.basis_quote_id || parsed.data.lines.some((line) => line.line_type !== "part")) {
+          throw new QuoteError("INVALID_INPUT", "Before maintenance starts, submit parts only; agreed labor is added by the server.", 400);
+        }
+        calculated = calculateValidatedQuote([
+          ...basis.lines.map((line) => ({ line_type: line.lineType, description: line.description, quantity: line.quantity, unit_amount: line.unitAmount })),
+          ...parsed.data.lines
+        ], 0);
+      }
       if (
-        firstVersion
-          ? assignment.status !== (parsed.data.purpose === "rescue_labor" ? "accepted" : "diagnosis") || request.status !== (parsed.data.purpose === "rescue_labor" ? "assigned" : "in_service")
+        maintenanceAddition ? request.status !== "in_service" : firstVersion
+          ? assignment.status !== (preTravelLabor ? "accepted" : "diagnosis") || request.status !== (preTravelLabor ? "assigned" : "in_service")
           : assignment.status !== "quoted" ||
             request.status !== "awaiting_quote_approval"
       ) {
@@ -204,7 +233,7 @@ export class QuoteService {
         }))
       });
 
-      if (firstVersion) {
+      if (firstVersion && !maintenanceAddition) {
         await transitionWorkflow(repositories, {
           assignment,
           request,
@@ -309,10 +338,8 @@ export class QuoteService {
           409
         );
       }
-      if (
-        assignment.status !== "quoted" ||
-        request.status !== "awaiting_quote_approval"
-      ) {
+      const maintenanceAddition = quote.purpose === "maintenance_work" && assignment.status === "in_progress" && request.status === "in_service";
+      if (!maintenanceAddition && (assignment.status !== "quoted" || request.status !== "awaiting_quote_approval")) {
         throw new QuoteError("CONFLICT", "Quote workflow state is not valid.", 409);
       }
 
@@ -338,11 +365,15 @@ export class QuoteService {
           const agreed = await repositories.assignments.setRescueAgreement({ id: assignment.id, laborQuoteId: quote.id, paymentTiming: parsed.data.payment_timing!, updatedAt: now });
           if (!agreed) throw new QuoteError("CONFLICT", "Rescue labor has already been agreed.", 409);
         }
-        await transitionWorkflow(repositories, {
+        if (quote.purpose === "maintenance_labor") {
+          const agreed = await repositories.assignments.setMaintenanceAgreement({ id: assignment.id, laborQuoteId: quote.id, updatedAt: now });
+          if (!agreed) throw new QuoteError("CONFLICT", "Maintenance labor has already been agreed.", 409);
+        }
+        if (!maintenanceAddition) await transitionWorkflow(repositories, {
           assignment,
           request,
-          assignmentStatus: rescueLabor ? "accepted" : quote.purpose === "rescue_final" ? "diagnosis" : "awaiting_payment",
-          requestStatus: rescueLabor ? "assigned" : quote.purpose === "rescue_final" ? "in_service" : "awaiting_payment",
+          assignmentStatus: rescueLabor || quote.purpose === "maintenance_labor" ? "accepted" : quote.purpose === "rescue_final" || quote.purpose === "maintenance_work" ? "diagnosis" : "awaiting_payment",
+          requestStatus: rescueLabor || quote.purpose === "maintenance_labor" ? "assigned" : quote.purpose === "rescue_final" || quote.purpose === "maintenance_work" ? "in_service" : "awaiting_payment",
           actorId: actor.id,
           actorRole: "rider",
           now,
@@ -500,13 +531,13 @@ async function appendQuoteAuditOutbox(
     metadata: payload,
     createdAt: input.now
   });
-  if (input.quote.purpose === "rescue_labor" || input.quote.purpose === "rescue_final") {
+  if (["quote.created", "quote.approved", "quote.rejected"].includes(input.action)) {
     const request = await repositories.serviceRequests.findById(input.quote.requestId);
     const assignment = await repositories.assignments.findById(input.quote.assignmentId);
     const created = input.action === "quote.created";
     if (request && assignment) await persistNotification(repositories, {
       userId: created ? request.riderId : assignment.mechanicId, type: input.action,
-      title: created ? "Có báo giá cứu hộ cần duyệt" : input.action === "quote.approved" ? "Khách đã đồng ý báo giá" : "Khách đã từ chối báo giá",
+      title: created ? (request.serviceType === "periodic_maintenance" ? "Có báo giá bảo dưỡng cần duyệt" : request.serviceType === "emergency_rescue" ? "Có báo giá cứu hộ cần duyệt" : "Có báo giá cần duyệt") : input.action === "quote.approved" ? "Khách đã đồng ý báo giá" : "Khách đã từ chối báo giá",
       body: created ? "Xem các khoản phí và xác nhận trước khi thợ thực hiện bước tiếp theo." : "Mở yêu cầu để xem báo giá và trạng thái thanh toán hiện tại.",
       data: payload, dedupeKey: `${input.action}:${input.quote.id}`, requestId: request.id
     }, input.now, input.createId);

@@ -38,6 +38,7 @@ export type AppendOutboxEvent = Pick<
   >;
 
 export interface OutboxRepository {
+  renewLease(input: { id: string; leaseOwner: string; now: Date; leaseUntil: Date }): Promise<boolean>;
   append(event: AppendOutboxEvent): Promise<OutboxEvent>;
   findByDedupeKey(dedupeKey: string): Promise<OutboxEvent | undefined>;
   claim(input: {

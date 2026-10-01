@@ -4,8 +4,9 @@ Cập nhật và đối chiếu tài liệu chính thức ngày **01/10/2026**. 
 cho Windows/PowerShell, backend `apps/api` và Supabase dev/test. Các API,
 trạng thái và tên biến bên dưới đã đối chiếu với code hiện tại của repo.
 
-Backend hỗ trợ payOS/VietQR, tiền công trả trước hoặc toàn bộ trả sau sửa,
-thu khoản còn lại, webhook có chữ ký, worker đối soát và admin xử lý review.
+Backend hỗ trợ payOS/VietQR: cứu hộ trả công trước hoặc toàn bộ sau sửa;
+bảo dưỡng mới thanh toán sau khi hoàn thành công việc/checklist. Có thu khoản
+còn lại, webhook có chữ ký, worker đối soát và admin xử lý review.
 Mobile/web chưa tích hợp workflow mới. Hoàn thành hướng dẫn này giúp kiểm
 thử thanh toán qua API; để khách/thợ sử dụng trong app vẫn cần nối client
 khi phạm vi đó được mở lại.
@@ -140,8 +141,8 @@ có. Hướng dẫn chỉ yêu cầu chỉnh các biến được liệt kê ở
 thay toàn bộ file bằng các block mẫu.
 
 Nếu chạy trên một project Supabase dev/test **mới**, cần áp dụng migrations
-001–033 theo [hướng dẫn migration trong repo](../../AGENTS.md). Không cần
-chạy lại migration 033 chỉ vì sửa key payOS. DB test riêng ở bước 6 không
+001–034 theo [hướng dẫn migration trong repo](../../AGENTS.md). Không cần
+chạy lại migration đã áp dụng chỉ vì sửa key payOS. DB test riêng ở bước 6 không
 phải DB mà API phục vụ khách/thợ sử dụng.
 
 ## 1. Tạo kênh thu payOS và lấy key
@@ -732,6 +733,32 @@ POST /api/v1/service-requests/<requestId>/quotes
 Không cần cố ý tạo chuyển khoản thiếu/thừa để kiểm thử đầu tiên. Các nhánh
 lỗi có unit tests; với khoản thật đã phát sinh, giữ review và đối chiếu.
 
+### 7.7. Thanh toán bảo dưỡng mới
+
+Làm theo [MAINTENANCE-WORKFLOW.md](MAINTENANCE-WORKFLOW.md): duyệt
+`maintenance_labor` trước khi đi, duyệt `maintenance_work` trước khi làm,
+duyệt phát sinh riêng bằng `basis_quote_id`, gửi checklist rồi mới thu tiền.
+Không gửi `payment_timing` khi duyệt quote bảo dưỡng; summary trả
+`payment_timing: after_service`.
+
+Nếu phát sinh bị từ chối, lấy `quote_id` từ payment-summary để thanh toán
+phạm vi đã duyệt; bản mới nhất bị từ chối không phải khoản cần thu. GET
+`/api/v1/assignments/<assignmentId>/completion-checklist` cho khách đọc
+checklist mới nhất. Chưa có checklist gắn đúng phạm vi được duyệt thì chưa
+được báo làm xong; chưa nhận đủ tiền thì chưa được `completed`.
+
+Migration 034 đã áp dụng và kiểm tra cột/trigger trên Supabase dev/test ngày
+01/10/2026. Unit/static/route: **549 tests đạt** lúc 18:06 ngày 01/10/2026;
+9 tests riêng bảo dưỡng đạt. TypeScript, lint và build API/web đạt. API local
+được khởi động lại bằng bản production build, readiness HTTP 200.
+
+Chưa chuyển khoản thật cho bảo dưỡng. Smoke API với payOS còn chờ migration
+035 của phần giữ lịch/thông báo đang được cập nhật trong cùng workspace;
+database hiện đã áp dụng đến 034. Chạy lại smoke theo tài liệu workflow sau
+khi migration giữ lịch được kiểm tra/áp dụng và API dùng bản build mới nhất.
+DB integration suite vẫn cần project test riêng. Không coi giao dịch cứu hộ
+đã chuyển khoản là bằng chứng giao dịch bảo dưỡng.
+
 ## 8. Firebase push — làm khi cần kiểm chứng thông báo trên thiết bị
 
 Notification inbox backend hoạt động độc lập với push. Chưa có FCM không
@@ -853,7 +880,7 @@ phạm vi hiện tại.
 | Confirm webhook 5xx | Kiểm tra API/DB, payments đã bật và restart; gọi liveness public trước |
 | GET webhook trả 405 | Webhook chỉ nhận POST; dùng confirm-webhook để kiểm chứng |
 | Tạo order 401/403 | JWT còn hạn, đúng project, đúng actor; chỉ chủ yêu cầu tạo khoản thanh toán |
-| Tạo order 409 | Quote phải là bản mới nhất đã duyệt, đúng giai đoạn thu, có số dư; kiểm tra review/đơn active và idempotency |
+| Tạo order 409 | Quote phải là bản cần thu theo payment-summary, đúng giai đoạn thu, có số dư; kiểm tra review/đơn active và idempotency |
 | Đã chuyển tiền nhưng order pending | Đối chiếu mã/số tiền ở payOS; kiểm tra webhook, giữ API/worker chạy, chờ đủ ngưỡng stale rồi reconciliation |
 | Worker HTTP 401 | API/worker phải đọc cùng INTERNAL_WORKER_SECRET; kiểm tra env ưu tiên và restart |
 | Worker `worker_request_failed` | API/port/base URL có thể sai hoặc request timeout; chạy liveness local rồi thử một lượt lại |

@@ -9,7 +9,8 @@ export type NeedsReviewPaymentItem = {
   id: string; requestId: string; assignmentId: string; status: "needs_review"; updatedAt: Date;
 };
 export type StuckDispatchItem = {
-  id: string; requestCode: string; status: "dispatching" | "offered"; updatedAt: Date;
+  id: string; requestCode: string; status: "submitted" | "dispatching" | "offered"; updatedAt: Date;
+  reasonCode?: "missing_location";
 };
 export type WorkerRunStatus = "succeeded" | "failed";
 export type WorkerRunRecord = {

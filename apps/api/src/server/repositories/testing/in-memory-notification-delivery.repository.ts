@@ -8,6 +8,16 @@ export class InMemoryNotificationDeliveryRepository
 {
   constructor(private readonly receipts: NotificationDeliveryReceipt[]) {}
 
+  async claim(input: Parameters<NotificationDeliveryRepository["claim"]>[0]) {
+    const receipt = this.receipts.find((item) => item.id === input.id);
+    if (!receipt || !["pending", "retryable_failed"].includes(receipt.status) ||
+      (receipt.leaseExpiresAt && receipt.leaseExpiresAt > input.now) ||
+      (receipt.nextAttemptAt && receipt.nextAttemptAt > input.now)) return undefined;
+    receipt.leaseToken = input.token;
+    receipt.leaseExpiresAt = input.leaseUntil;
+    return { ...receipt };
+  }
+
   async createIfAbsent(
     input: Parameters<NotificationDeliveryRepository["createIfAbsent"]>[0]
   ) {
@@ -35,6 +45,13 @@ export class InMemoryNotificationDeliveryRepository
   async recordOutcome(input: Parameters<NotificationDeliveryRepository["recordOutcome"]>[0]) {
     const receipt = this.receipts.find((item) => item.id === input.id);
     if (!receipt) throw new Error("NOTIFICATION_DELIVERY_RECEIPT_NOT_FOUND");
+    if (!["pending", "retryable_failed"].includes(receipt.status) || receipt.leaseToken !== input.leaseToken ||
+      (receipt.leaseExpiresAt && receipt.leaseExpiresAt <= input.attemptedAt)) {
+      throw new Error("NOTIFICATION_DELIVERY_LEASE_LOST");
+    }
+    receipt.leaseToken = undefined;
+    receipt.leaseExpiresAt = undefined;
+    receipt.nextAttemptAt = input.nextAttemptAt;
     receipt.status = input.status;
     receipt.attemptCount += 1;
     receipt.lastAttemptedAt = input.attemptedAt;

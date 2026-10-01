@@ -42,6 +42,11 @@ export type DispatchCandidateResponse = {
   distance_m?: number;
   status: DispatchCandidate["status"];
   expires_at?: string;
+  service_type?: ServiceRequest["serviceType"];
+  scheduled_start_at?: string;
+  problem_description?: string;
+  address_text?: string;
+  location?: ServiceRequest["serviceLocation"];
 };
 
 export type ProcessClaimedDispatchRoundResult = "advanced" | "escalated" | "skipped";
@@ -259,7 +264,17 @@ export class DispatchService {
         actor.id,
         nowOf(this.options)
       );
-      return { items: offers.map(toCandidateResponse) };
+      const requests = new Map<string, ServiceRequest | undefined>();
+      const items: DispatchCandidateResponse[] = [];
+      for (const offer of offers) {
+        if (!requests.has(offer.requestId)) requests.set(offer.requestId, await repositories.serviceRequests.findById(offer.requestId));
+        const request = requests.get(offer.requestId);
+        items.push({ ...toCandidateResponse(offer), ...(request ? {
+          service_type: request.serviceType, scheduled_start_at: request.scheduledStartAt?.toISOString(),
+          problem_description: request.problemDescription, address_text: request.addressText, location: request.serviceLocation
+        } : {}) });
+      }
+      return { items };
     });
   }
 
@@ -424,7 +439,7 @@ export class DispatchService {
       return false;
     }
     assertRequestStatusTransition(input.fromStatus, "manual_escalation");
-    await repositories.serviceRequests.updateStatus({
+    const updated = await repositories.serviceRequests.updateStatus({
       id: input.requestId,
       status: "manual_escalation",
       updatedAt: input.now,
@@ -439,6 +454,12 @@ export class DispatchService {
       reason: input.reason,
       createdAt: input.now
     });
+    if (updated?.serviceType === "periodic_maintenance") await persistNotification(repositories, {
+      userId: updated.riderId, type: "maintenance.booking.needs_support", title: "Chưa tìm được thợ bảo dưỡng",
+      body: "Yêu cầu chưa được xác nhận. Mở yêu cầu để kiểm tra và liên hệ hỗ trợ.",
+      data: { request_id: updated.id, status: "manual_escalation" },
+      dedupeKey: `maintenance.booking.needs_support:${updated.id}`, requestId: updated.id
+    }, input.now, this.options.createId ?? randomUUID);
     return true;
   }
 }
@@ -489,7 +510,8 @@ async function createDispatchRound(
   );
   const ranked = rankDispatchCandidates(
     newMechanics,
-    workloads,
+    input.request.serviceType === "periodic_maintenance" && input.request.scheduledStartAt &&
+      input.request.scheduledStartAt.getTime() > input.now.getTime() + 30 * 60_000 ? new Map() : workloads,
     DISPATCH_CANDIDATE_BATCH_SIZE
   );
   if (input.targetMechanicId && !ranked.length) throw new DispatchError("CONFLICT", "The recalled mechanic is unavailable, busy, outside the radius, or has a stale location.", 409);
@@ -569,11 +591,15 @@ async function createDispatchRound(
     now: input.now,
     createId: input.createId
   });
-  if (input.request.serviceType === "emergency_rescue") {
+  if (["emergency_rescue", "periodic_maintenance"].includes(input.request.serviceType)) {
     for (const candidate of result.candidates) await persistNotification(repositories, {
-      userId: candidate.mechanicId, type: "rescue.offer", title: "Có yêu cầu cứu hộ gần bạn",
+      userId: candidate.mechanicId,
+      type: input.request.serviceType === "periodic_maintenance" ? "maintenance.offer" : "rescue.offer",
+      title: input.request.serviceType === "periodic_maintenance" ? "Có lịch bảo dưỡng cần thợ" : "Có yêu cầu cứu hộ gần bạn",
       body: "Xem yêu cầu, nhận lời mời và gửi báo giá tiền công trước khi di chuyển.",
-      data: { request_id: input.request.id, candidate_id: candidate.id }, dedupeKey: `rescue.offer:${candidate.id}`, requestId: input.request.id
+      data: { request_id: input.request.id, candidate_id: candidate.id,
+        ...(input.request.scheduledStartAt ? { scheduled_start_at: input.request.scheduledStartAt.toISOString() } : {}) },
+      dedupeKey: `dispatch.offer:${candidate.id}`, requestId: input.request.id
     }, input.now, input.createId);
   }
   return toRoundResponse(result.round, result.candidates);

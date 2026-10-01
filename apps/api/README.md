@@ -32,6 +32,11 @@ metadata, and completion checklist metadata.
 - Emergency rescue uses a pre-travel labor agreement with either upfront labor
   payment or labor plus parts payment after repair. Approved labor is fixed;
   parts require a separate approval. See [the rescue API workflow](RESCUE-WORKFLOW.md).
+- New periodic maintenance agrees labor before travel, approves materials before
+  work and additions separately, then collects payment after a completion checklist.
+  Full verified payment is required before closing the job. Existing `standard`
+  maintenance quotes retain their previous payment behavior. See
+  [the maintenance API workflow](MAINTENANCE-WORKFLOW.md); apply migrations through 034.
 
 ## Local Setup
 

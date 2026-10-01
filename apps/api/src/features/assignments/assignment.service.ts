@@ -22,8 +22,14 @@ export type AssignmentResponse = {
   request_id: string;
   mechanic_id: string;
   accepted_candidate_id: string;
+  scheduled_start_at?: string;
+  reservation_start_at?: string;
+  reservation_end_at?: string;
+  activated_at?: string;
+  appointment_status?: "confirmed" | "active" | "completed" | "canceled";
   rescue_labor_quote_id?: string;
   rescue_payment_timing?: RescuePaymentTiming;
+  maintenance_labor_quote_id?: string;
   status: AssignmentStatus;
   accepted_at: string;
   started_at?: string;
@@ -73,6 +79,10 @@ export class AssignmentService {
       const snapshot = await repositories.assignments.findById(assignmentId);
       if (!snapshot) throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
       const request = await repositories.serviceRequests.findByIdForUpdate(snapshot.requestId);
+      // Keep the mechanic lock before assignment locks, matching offer acceptance.
+      if (parsed.data.status === "en_route" && snapshot.scheduledStartAt) {
+        await repositories.mechanics.findProfileByUserIdForUpdate(snapshot.mechanicId);
+      }
       const assignment = await repositories.assignments.findByIdForUpdate(assignmentId);
       if (!assignment) {
         throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
@@ -86,6 +96,13 @@ export class AssignmentService {
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
       const rescue = request?.serviceType === "emergency_rescue";
+      const maintenance = request?.serviceType === "periodic_maintenance" && Boolean(assignment.maintenanceLaborQuoteId);
+      if (request?.serviceType === "periodic_maintenance" && parsed.data.status === "en_route") {
+        const labor = assignment.maintenanceLaborQuoteId ? await repositories.quotes.findById(assignment.maintenanceLaborQuoteId) : undefined;
+        if (!labor || labor.status !== "approved" || labor.purpose !== "maintenance_labor") {
+          throw new AssignmentError("CONFLICT", "Rider must approve maintenance labor before travel.", 409);
+        }
+      }
       if (rescue && parsed.data.status === "en_route") {
         const labor = assignment.rescueLaborQuoteId ? await repositories.quotes.findById(assignment.rescueLaborQuoteId) : undefined;
         if (!labor || labor.status !== "approved" || !assignment.rescuePaymentTiming) {
@@ -106,18 +123,32 @@ export class AssignmentService {
           throw new AssignmentError("CONFLICT", "Agreed labor and parts must be fully paid before closing rescue work.", 409);
         }
       }
+      if (maintenance && ["in_progress", "awaiting_payment", "completed"].includes(parsed.data.status)) {
+        const latest = await repositories.quotes.findLatestByRequestForUpdate(assignment.requestId);
+        const approved = await repositories.quotes.findLatestApprovedByAssignment(assignment.id, "maintenance_work");
+        if (!approved || latest?.status === "pending") throw new AssignmentError("CONFLICT", "Approved maintenance work with no pending additions is required.", 409);
+        const source = parsed.data.status === "in_progress" ? "diagnosis" : parsed.data.status === "awaiting_payment" ? "in_progress" : "awaiting_payment";
+        if (assignment.status !== source) throw new AssignmentError("CONFLICT", "Maintenance work/payment steps must be completed in order.", 409);
+        if (parsed.data.status === "awaiting_payment") {
+          const checklist = await repositories.mechanicOperations.getLatestAssignmentCompletionChecklist(assignment.id);
+          if (!checklist || checklist.approvedQuoteId !== approved.id) throw new AssignmentError("CONFLICT", "Submit a completion checklist for the latest approved maintenance work.", 409);
+        }
+        if (parsed.data.status === "completed" && await repositories.payments.sumSucceededForAssignment(assignment.id) < approved.totalAmount) {
+          throw new AssignmentError("CONFLICT", "Approved maintenance work must be fully paid before closing.", 409);
+        }
+      }
 
-      if (parsed.data.status === "quoted" || parsed.data.status === "accepted" || (assignment.status === "quoted" && parsed.data.status === "diagnosis") || (parsed.data.status === "awaiting_payment" && !rescue)) {
+      if (parsed.data.status === "quoted" || parsed.data.status === "accepted" || (assignment.status === "quoted" && parsed.data.status === "diagnosis") || (parsed.data.status === "awaiting_payment" && !rescue && !maintenance)) {
         throw new AssignmentError(
           "CONFLICT",
           "This assignment transition requires its authorized quote or payment workflow.",
           409
         );
       }
-      if (!rescue && parsed.data.status === "completed" && assignment.status !== "in_progress") {
+      if (!rescue && !maintenance && parsed.data.status === "completed" && assignment.status !== "in_progress") {
         throw new AssignmentError("CONFLICT", "Standard work must start before completion.", 409);
       }
-      if (parsed.data.status === "in_progress" && !rescue) {
+      if (parsed.data.status === "in_progress" && !rescue && !maintenance) {
         if (assignment.status !== "awaiting_payment") {
           throw new AssignmentError(
             "CONFLICT",
@@ -146,6 +177,20 @@ export class AssignmentService {
         throw new AssignmentError("CONFLICT", "Assignment status transition is not allowed.", 409);
       }
 
+      if (assignment.scheduledStartAt && !assignment.activatedAt && !["canceled", "en_route"].includes(parsed.data.status)) {
+        throw new AssignmentError("CONFLICT", "Scheduled work must begin with travel in its preparation window.", 409);
+      }
+      if (parsed.data.status === "en_route" && assignment.scheduledStartAt && !assignment.activatedAt) {
+        if (!assignment.reservationStartAt || now < assignment.reservationStartAt) {
+          throw new AssignmentError("CONFLICT", "The appointment preparation window has not started.", 409);
+        }
+        const mechanic = await repositories.mechanics.findProfileByUserIdForUpdate(assignment.mechanicId);
+        if (!mechanic || mechanic.profileStatus !== "active") throw new AssignmentError("CONFLICT", "Mechanic is not active.", 409);
+        if (await repositories.assignments.findActiveByMechanicForUpdate(assignment.mechanicId)) {
+          throw new AssignmentError("CONFLICT", "Finish the current job before starting this appointment.", 409);
+        }
+        await repositories.assignments.activate({ id: assignment.id, now });
+      }
       const updated = await repositories.assignments.updateStatus({
         id: assignment.id,
         status: parsed.data.status,
@@ -191,11 +236,29 @@ export class AssignmentService {
           to_status: parsed.data.status
         }
       });
+      if (request && ["en_route", "canceled"].includes(updated.status)) await persistNotification(repositories, {
+        userId: request.riderId, type: `assignment.${updated.status}`,
+        title: updated.status === "en_route" ? "Thợ đang đến" : "Công việc đã bị hủy",
+        body: updated.status === "en_route" ? "Thợ đã bắt đầu di chuyển đến vị trí phục vụ." : "Mở yêu cầu để xem trạng thái và liên hệ hỗ trợ.",
+        data: { request_id: request.id, assignment_id: updated.id },
+        dedupeKey: `assignment.${updated.status}:${updated.id}`, requestId: request.id
+      }, now, createId);
       if (rescue && request && ["awaiting_payment", "completed"].includes(updated.status)) await persistNotification(repositories, {
         userId: request.riderId, type: `rescue.${updated.status}`,
         title: updated.status === "awaiting_payment" ? "Thợ đã sửa xong" : "Yêu cầu cứu hộ đã hoàn tất",
         body: updated.status === "awaiting_payment" ? "Kiểm tra tổng phí và thanh toán khoản còn lại nếu có." : "Bạn có thể đánh giá thợ cho yêu cầu này.",
         data: { request_id: request.id, assignment_id: updated.id }, dedupeKey: `rescue.${updated.status}:${updated.id}`, requestId: request.id
+      }, now, createId);
+      if (maintenance && request && ["awaiting_payment", "completed"].includes(updated.status)) await persistNotification(repositories, {
+        userId: request.riderId, type: `maintenance.${updated.status}`,
+        title: updated.status === "awaiting_payment" ? "Bảo dưỡng đã thực hiện xong" : "Yêu cầu bảo dưỡng đã hoàn tất",
+        body: updated.status === "awaiting_payment" ? "Xem checklist và thanh toán tổng phí đã duyệt." : "Bạn có thể đánh giá thợ cho yêu cầu này.",
+        data: { request_id: request.id, assignment_id: updated.id }, dedupeKey: `maintenance.${updated.status}:${updated.id}`, requestId: request.id
+      }, now, createId);
+      if (!rescue && !maintenance && request && updated.status === "completed") await persistNotification(repositories, {
+        userId: request.riderId, type: "assignment.completed", title: "Yêu cầu đã hoàn tất",
+        body: "Bạn có thể đánh giá thợ cho yêu cầu này.", data: { request_id: request.id, assignment_id: updated.id },
+        dedupeKey: `assignment.completed:${updated.id}`, requestId: request.id
       }, now, createId);
       return toAssignmentResponse(updated);
     });
@@ -330,8 +393,16 @@ export function toAssignmentResponse(assignment: Assignment): AssignmentResponse
     request_id: assignment.requestId,
     mechanic_id: assignment.mechanicId,
     accepted_candidate_id: assignment.acceptedCandidateId,
+    scheduled_start_at: assignment.scheduledStartAt?.toISOString(),
+    reservation_start_at: assignment.reservationStartAt?.toISOString(),
+    reservation_end_at: assignment.reservationEndAt?.toISOString(),
+    activated_at: assignment.activatedAt?.toISOString(),
+    ...(assignment.scheduledStartAt ? { appointment_status: assignment.status === "completed" ? "completed" as const
+      : ["canceled", "recovery_canceled"].includes(assignment.status) ? "canceled" as const
+      : assignment.activatedAt ? "active" as const : "confirmed" as const } : {}),
     rescue_labor_quote_id: assignment.rescueLaborQuoteId,
     rescue_payment_timing: assignment.rescuePaymentTiming,
+    maintenance_labor_quote_id: assignment.maintenanceLaborQuoteId,
     status: assignment.status,
     accepted_at: assignment.acceptedAt.toISOString(),
     ...(assignment.startedAt ? { started_at: assignment.startedAt.toISOString() } : {}),
@@ -347,6 +418,7 @@ function requestStatusForAssignmentStatus(status: AssignmentStatus): RequestStat
     case "en_route":
       return "mechanic_en_route";
     case "on_site":
+    case "in_progress":
       return "in_service";
     case "quoted":
       return "awaiting_quote_approval";

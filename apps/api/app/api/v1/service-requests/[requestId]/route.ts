@@ -10,3 +10,8 @@ export async function GET(request: Request, context: ServiceRequestRouteContext)
   const { requestId } = await context.params;
   return createDefaultServiceRequestRouteHandlers().getServiceRequest(request, requestId);
 }
+
+export async function PATCH(request: Request, context: ServiceRequestRouteContext) {
+  const { requestId } = await context.params;
+  return createDefaultServiceRequestRouteHandlers().updateAppointment(request, requestId);
+}

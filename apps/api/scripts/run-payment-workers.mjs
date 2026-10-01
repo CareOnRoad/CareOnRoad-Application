@@ -24,25 +24,25 @@ if (check) {
   console.log(JSON.stringify({ worker_secret_configured: true, payments_enabled: paymentsEnabled,
     payment_configuration_complete: missing.length === 0 }));
 } else {
-  do {
-    let failed = false;
-    for (const route of ["outbox/run", "dispatch/run", ...(paymentsEnabled ? ["payments/reconcile?limit=1"] : [])]) {
-      try {
-        const response = await fetch(new URL(`/api/v1/internal/workers/${route}`, origin), {
-          method: "POST", headers: { "X-Worker-Secret": process.env.INTERNAL_WORKER_SECRET }, signal: AbortSignal.timeout(300_000)
-        });
-        const result = await response.json().catch(() => ({}));
-        const counts = Object.fromEntries(Object.entries(result).filter(([key, value]) =>
-          ["claimed", "processed", "retried", "deadLettered", "succeeded", "needs_review", "still_pending", "failed"].includes(key) && Number.isSafeInteger(value)));
-        const ok = response.ok && !(counts.failed > 0 || counts.deadLettered > 0 || counts.retried > 0);
-        failed ||= !ok;
-        console.log(JSON.stringify({ worker: route.split("?")[0], http_status: response.status, ok, ...counts }));
-      } catch {
-        failed = true;
-        console.error(JSON.stringify({ worker: route.split("?")[0], ok: false, error: "worker_request_failed" }));
-      }
-    }
-    if (!watch) { process.exitCode = failed ? 1 : 0; break; }
-    await setTimeout(30_000);
-  } while (watch);
+  await Promise.all(["reminders/run", "outbox/run", "dispatch/run", ...(paymentsEnabled ? ["payments/reconcile?limit=1"] : [])]
+    .map(async (route) => {
+      do {
+        try {
+          const response = await fetch(new URL(`/api/v1/internal/workers/${route}`, origin), {
+            method: "POST", headers: { "X-Worker-Secret": process.env.INTERNAL_WORKER_SECRET }, signal: AbortSignal.timeout(300_000)
+          });
+          const result = await response.json().catch(() => ({}));
+          const counts = Object.fromEntries(Object.entries(result).filter(([key, value]) =>
+            ["claimed", "generated", "queued", "processed", "retried", "deadLettered", "leaseLost", "succeeded", "needs_review", "still_pending", "failed"].includes(key) && Number.isSafeInteger(value)));
+          const ok = response.ok && !(counts.failed > 0 || counts.deadLettered > 0 || counts.retried > 0 || counts.leaseLost > 0);
+          if (!ok && !watch) process.exitCode = 1;
+          console.log(JSON.stringify({ worker: route.split("?")[0], http_status: response.status, ok, ...counts }));
+        } catch {
+          if (!watch) process.exitCode = 1;
+          console.error(JSON.stringify({ worker: route.split("?")[0], ok: false, error: "worker_request_failed" }));
+        }
+        if (!watch) break;
+        await setTimeout(30_000);
+      } while (watch);
+    }));
 }

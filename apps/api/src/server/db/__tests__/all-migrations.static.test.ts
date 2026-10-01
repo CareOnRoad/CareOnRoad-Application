@@ -37,7 +37,9 @@ const expectedMigrations = [
   "202606250030_chatbot_session_ownership.sql",
   "202606250031_data_retention_worker.sql",
   "202606250032_live_location_tracking.sql",
-  "202606250033_rescue_quote_payment_workflow.sql"
+  "202606250033_rescue_quote_payment_workflow.sql",
+  "202606250034_maintenance_quote_payment_workflow.sql",
+  "202606250035_maintenance_reservations_notification_leases.sql"
 ] as const;
 
 const migrationSql = expectedMigrations

@@ -127,7 +127,7 @@ export function createDefaultReminderRouteHandlers() {
       const worker = new ReminderWorker(unitOfWork, { workerId: authority.workerId });
       return { processDueReminders: () => recordWorkerRun({
         unitOfWork, workerName: "reminders", run: () => worker.processDueReminders(),
-        summarize: (result) => ({ claimed: result.claimed, succeeded: result.sent, failed: result.failed })
+        summarize: (result) => ({ claimed: result.claimed, succeeded: result.queued, failed: result.failed })
       }) };
     }
   });

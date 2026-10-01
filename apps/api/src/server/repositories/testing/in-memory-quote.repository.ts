@@ -5,6 +5,7 @@ import type {
   QuoteRepository,
   QuoteStatus
 } from "../contracts/quote.repository";
+import type { QuotePurpose } from "../contracts/quote.repository";
 
 export class InMemoryQuoteRepository implements QuoteRepository {
   constructor(
@@ -65,6 +66,12 @@ export class InMemoryQuoteRepository implements QuoteRepository {
       .filter((quote) => quote.requestId === requestId)
       .sort((left, right) => right.version - left.version)
       .map((quote) => this.withLines(quote));
+  }
+
+  async findLatestApprovedByAssignment(assignmentId: string, purpose: QuotePurpose): Promise<Quote | undefined> {
+    const quote = this.quotes.filter((item) => item.assignmentId === assignmentId && item.purpose === purpose && item.status === "approved")
+      .sort((left, right) => right.version - left.version)[0];
+    return quote ? this.withLines(quote) : undefined;
   }
 
   async hasAnyByDiagnosis(diagnosisId: string): Promise<boolean> {

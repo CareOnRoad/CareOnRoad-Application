@@ -204,6 +204,7 @@ export class PostgresMechanicRepository implements MechanicRepository {
           from assignments assignment
           where assignment.mechanic_id = profile.user_id
             and assignment.status in ${this.sql(activeStatuses)}
+            and (assignment.scheduled_start_at is null or assignment.activated_at is not null)
         ) as has_active_assignment
       from mechanic_profiles profile
       left join mechanic_skills skills on skills.mechanic_id = profile.user_id
@@ -248,6 +249,7 @@ export class PostgresMechanicRepository implements MechanicRepository {
               select 1 from assignments assignment
               where assignment.mechanic_id = profile.user_id
                 and assignment.status in ${this.sql(activeStatuses)}
+            and (assignment.scheduled_start_at is null or assignment.activated_at is not null)
             )
           )
           or (
@@ -256,6 +258,7 @@ export class PostgresMechanicRepository implements MechanicRepository {
               select 1 from assignments assignment
               where assignment.mechanic_id = profile.user_id
                 and assignment.status in ${this.sql(activeStatuses)}
+            and (assignment.scheduled_start_at is null or assignment.activated_at is not null)
             )
           )
         )
@@ -341,6 +344,7 @@ export class PostgresMechanicRepository implements MechanicRepository {
         count(assignment.id)::integer as total_assignments,
         count(assignment.id) filter (
           where assignment.status in ${this.sql([...ACTIVE_ASSIGNMENT_STATUSES])}
+            and (assignment.scheduled_start_at is null or assignment.activated_at is not null)
         )::integer as active_assignments,
         count(assignment.id) filter (
           where assignment.status = 'completed'

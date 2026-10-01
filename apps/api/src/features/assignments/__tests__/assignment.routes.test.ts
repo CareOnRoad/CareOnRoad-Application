@@ -289,8 +289,9 @@ function identity(subject: string): VerifiedSupabaseIdentity {
 }
 
 function sequentialIds(ids: string[]): () => string {
+  let extraId = 1000;
   return () => {
-    const id = ids.shift();
+    const id = ids.shift() ?? `aaaaaaaa-0000-4000-8000-${String(extraId++).padStart(12, "0")}`;
     if (!id) {
       throw new Error("Test ID sequence exhausted.");
     }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { sanitizeAuditMetadata } from "@/features/audit/audit-sanitizer";
+import { sanitizeNotificationData } from "./notification-data";
 import type { AuditActorRole } from "@/server/repositories/contracts/audit.repository";
 import type { JsonObject } from "@/server/repositories/contracts/idempotency.repository";
 import type { Notification } from "@/server/repositories/contracts/notification.repository";
@@ -86,7 +86,7 @@ export async function persistNotification(
   validateInput(input);
   const result = await notifications.createIfAbsent({
     id: createId(), userId: input.userId, type: input.type, title: input.title, body: input.body,
-    data: sanitizeAuditMetadata(input.data ?? {}), dedupeKey: input.dedupeKey, createdAt: now
+    data: sanitizeNotificationData(input.data ?? {}), dedupeKey: input.dedupeKey, createdAt: now
   });
   if (!result.created) return result;
   const payload = { resource_id: result.notification.id, actor_id: input.actorId ?? input.userId, event_type: input.type, status: "pending" };

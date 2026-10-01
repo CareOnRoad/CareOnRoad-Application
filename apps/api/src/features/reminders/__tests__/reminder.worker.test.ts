@@ -8,7 +8,40 @@ const motorcycleId = "44444444-4444-4444-8444-444444444444";
 const now = new Date("2026-06-25T03:00:00Z");
 
 describe("ReminderWorker", () => {
-  it("claims due rules, creates one sent occurrence, writes audit/outbox, and advances recurrence", async () => {
+  it("rolls back one failed rule without losing its recurrence or stopping other rules", async () => {
+    const first = uuid(100); const second = uuid(101);
+    const uow = createUnitOfWork({ reminderRules: [dueRule(first, { nextDueAt: now, intervalDays: 30 }), dueRule(second, { nextDueAt: now })] });
+    let ids = 0;
+    const result = await new ReminderWorker(uow, { now: () => now, createId: () => {
+      if (++ids === 3) throw new Error("outbox unavailable");
+      return uuid(200 + ids);
+    } }).processDueReminders();
+    expect(result).toMatchObject({ failed: 1, queued: 1, generated: 1 });
+    expect(uow.snapshot().reminderRules.find((r) => r.id === first)).toMatchObject({ nextDueAt: now, enabled: true, failureCount: 1 });
+    expect(uow.snapshot().reminderOccurrences.map((o) => o.ruleId)).toEqual([second]);
+    await new ReminderWorker(uow, { now: () => now }).processDueReminders();
+    expect(uow.snapshot().notifications).toHaveLength(2);
+    expect(uow.snapshot().reminderRules.find((r) => r.id === first)?.nextDueAt).toEqual(new Date("2026-07-25T03:00:00Z"));
+  });
+
+  it("preserves actionable context in inbox without any device and disables archived-motorcycle rules", async () => {
+    const ruleId = uuid(100);
+    const uow = createUnitOfWork({ reminderRules: [dueRule(ruleId, { nextDueAt: now })] });
+    const worker = new ReminderWorker(uow, { now: () => now });
+    await worker.processDueReminders(); await worker.processDueReminders();
+    const state = uow.snapshot();
+    expect(state.notifications).toHaveLength(1);
+    expect(state.notifications[0]?.data).toMatchObject({ reminder_id: ruleId,
+      reminder_context_id: state.reminderOccurrences[0]!.id, motorcycle_id: motorcycleId });
+    expect(state.reminderOccurrences[0]?.notificationId).toBe(state.notifications[0]?.id);
+    const archived = createUnitOfWork({ reminderRules: [dueRule(ruleId, { nextDueAt: now })],
+      motorcycles: [{ id: motorcycleId, riderId, brandText: "Honda", modelText: "Wave", archivedAt: now, createdAt: now, updatedAt: now }] });
+    await new ReminderWorker(archived, { now: () => now }).processDueReminders();
+    expect(archived.snapshot().notifications).toHaveLength(0);
+    expect(archived.snapshot().reminderRules[0]?.enabled).toBe(false);
+  });
+
+  it("claims due rules, creates one queued occurrence, writes audit/outbox, and advances recurrence", async () => {
     const unitOfWork = createUnitOfWork({
       reminderRules: [
         dueRule("66666666-6666-4666-8666-666666666666", {
@@ -25,24 +58,22 @@ describe("ReminderWorker", () => {
     await expect(worker.processDueReminders()).resolves.toEqual({
       claimed: 1,
       generated: 1,
-      sent: 1,
+      sent: 0, queued: 1,
       failed: 0
     });
 
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.reminderOccurrences).toHaveLength(1);
-    expect(snapshot.reminderOccurrences[0]).toMatchObject({ status: "sent", retryCount: 0 });
+    expect(snapshot.reminderOccurrences[0]).toMatchObject({ status: "queued", retryCount: 0 });
     expect(snapshot.reminderRules[0]).toMatchObject({
       nextDueAt: new Date("2026-07-24T03:00:00Z"),
       enabled: true
     });
     expect(snapshot.outboxEvents.map((event) => event.topic)).toEqual([
-      "reminder.job.generated",
-      "reminder.job.sent"
+      "notification.created"
     ]);
     expect(snapshot.auditLogs.map((log) => log.action)).toEqual([
-      "reminder.job.generated",
-      "reminder.job.sent"
+      "notification.created"
     ]);
   });
 
@@ -95,12 +126,12 @@ describe("ReminderWorker", () => {
 
     await expect(
       createWorker(unitOfWork, [uuid(20), uuid(21), uuid(22)]).processDueReminders()
-    ).resolves.toMatchObject({ claimed: 1, generated: 0, sent: 1, failed: 0 });
+    ).resolves.toMatchObject({ claimed: 1, generated: 0, sent: 0, queued: 1, failed: 0 });
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.reminderOccurrences).toHaveLength(1);
     expect(snapshot.reminderOccurrences[0]).toMatchObject({
       id: occurrenceId,
-      status: "sent",
+      status: "queued",
       retryCount: 2
     });
   });
@@ -177,8 +208,9 @@ function activeUser(id: string) {
 }
 
 function sequentialIds(ids: string[]): () => string {
+  let extraId = 1000;
   return () => {
-    const id = ids.shift();
+    const id = ids.shift() ?? `aaaaaaaa-0000-4000-8000-${String(extraId++).padStart(12, "0")}`;
     if (!id) {
       throw new Error("Test ID sequence exhausted.");
     }

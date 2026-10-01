@@ -11,13 +11,48 @@ import { ACTIVE_ASSIGNMENT_STATUSES } from "../contracts/assignment.repository";
 import type { AuditActorRole } from "../contracts/audit.repository";
 import type { RescuePaymentTiming } from "../contracts/quote.repository";
 import type { ServiceRequest } from "../contracts/service-request.repository";
+import type { Notification } from "../contracts/notification.repository";
 
 export class InMemoryAssignmentRepository implements AssignmentRepository {
   constructor(
     private readonly assignments: Assignment[],
     private readonly history: AssignmentStatusHistory[],
-    private readonly serviceRequests: ServiceRequest[]
+    private readonly serviceRequests: ServiceRequest[],
+    private readonly notifications: Notification[] = []
   ) {}
+
+  async activate(input: { id: string; now: Date }) {
+    const assignment = this.assignments.find((item) => item.id === input.id);
+    if (assignment) {
+      if (this.assignments.some((item) => item.id !== assignment.id && item.mechanicId === assignment.mechanicId && isCurrent(item))) {
+        throw new Error("ASSIGNMENT_ACTIVE_MECHANIC_EXISTS");
+      }
+      assignment.activatedAt ??= input.now;
+    }
+  }
+
+  async findReservationConflict(input: Parameters<AssignmentRepository["findReservationConflict"]>[0]) {
+    const found = this.assignments.find((item) => item.mechanicId === input.mechanicId && item.id !== input.excludeId &&
+      isActiveStatus(item.status) && (item.reservationStartAt ?? item.acceptedAt) < input.end &&
+      (item.reservationEndAt ?? new Date(input.start.getTime() + 120 * 60_000)) > input.start);
+    return found ? cloneAssignment(found) : undefined;
+  }
+
+  async listScheduledForPreparation(input: { now: Date; limit: number }) {
+    return this.assignments.filter((item) => item.scheduledStartAt && item.reservationStartAt &&
+      item.reservationStartAt <= input.now && !item.activatedAt && isActiveStatus(item.status) &&
+      !this.notifications.some((notification) => notification.dedupeKey === `maintenance.prepare:${item.id}:rider`))
+      .sort((a, b) => a.scheduledStartAt!.getTime() - b.scheduledStartAt!.getTime())
+      .slice(0, input.limit).map(cloneAssignment);
+  }
+
+  async setMaintenanceAgreement(input: { id: string; laborQuoteId: string; updatedAt: Date }): Promise<Assignment | undefined> {
+    const assignment = this.assignments.find((item) => item.id === input.id && !item.maintenanceLaborQuoteId);
+    if (!assignment) return undefined;
+    assignment.maintenanceLaborQuoteId = input.laborQuoteId;
+    assignment.updatedAt = input.updatedAt;
+    return cloneAssignment(assignment);
+  }
 
   async setRescueAgreement(input: { id: string; laborQuoteId: string; paymentTiming: RescuePaymentTiming; updatedAt: Date }): Promise<Assignment | undefined> {
     const assignment = this.assignments.find((item) => item.id === input.id && !item.rescueLaborQuoteId);
@@ -40,7 +75,7 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
     if (
       this.assignments.some(
         (assignment) =>
-          assignment.mechanicId === input.mechanicId && isActiveStatus(assignment.status)
+          assignment.mechanicId === input.mechanicId && isCurrent(assignment) && !input.scheduledStartAt
       )
     ) {
       throw new Error("ASSIGNMENT_ACTIVE_MECHANIC_EXISTS");
@@ -52,6 +87,9 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
     ) {
       throw new Error("ASSIGNMENT_CANDIDATE_EXISTS");
     }
+    if (input.reservationStartAt && input.reservationEndAt && await this.findReservationConflict({
+      mechanicId: input.mechanicId, start: input.reservationStartAt, end: input.reservationEndAt
+    })) throw new Error("ASSIGNMENT_RESERVATION_OVERLAP");
     const assignment: Assignment = {
       ...input,
       status: input.status ?? "accepted"
@@ -85,7 +123,7 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
 
   async findActiveByMechanicForUpdate(mechanicId: string): Promise<Assignment | undefined> {
     const assignment = this.assignments.find(
-      (item) => item.mechanicId === mechanicId && isActiveStatus(item.status)
+      (item) => item.mechanicId === mechanicId && isCurrent(item)
     );
     return assignment ? cloneAssignment(assignment) : undefined;
   }
@@ -99,7 +137,7 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
     }
     const counts = new Map<string, number>();
     for (const assignment of this.assignments) {
-      if (requestedIds.has(assignment.mechanicId) && isActiveStatus(assignment.status)) {
+      if (requestedIds.has(assignment.mechanicId) && isCurrent(assignment)) {
         counts.set(assignment.mechanicId, (counts.get(assignment.mechanicId) ?? 0) + 1);
       }
     }
@@ -174,6 +212,10 @@ function isActiveStatus(status: AssignmentStatus): boolean {
   return ACTIVE_ASSIGNMENT_STATUSES.includes(
     status as (typeof ACTIVE_ASSIGNMENT_STATUSES)[number]
   );
+}
+
+function isCurrent(assignment: Assignment): boolean {
+  return isActiveStatus(assignment.status) && (!assignment.scheduledStartAt || Boolean(assignment.activatedAt));
 }
 
 function sortNewestFirst(left: Assignment, right: Assignment): number {
