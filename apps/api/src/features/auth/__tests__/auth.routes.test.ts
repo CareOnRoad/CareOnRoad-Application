@@ -25,7 +25,7 @@ const device = {
 
 describe("auth routes", () => {
   it("returns the current actor for GET /api/v1/auth/me", async () => {
-    const handlers = createHandlers();
+    const { handlers } = createHandlers();
     const response = await handlers.getMe(
       new Request("http://localhost/api/v1/auth/me", {
         headers: { authorization: "Bearer valid-token" }
@@ -37,7 +37,7 @@ describe("auth routes", () => {
   });
 
   it("bootstraps a profile for POST /api/v1/auth/profile", async () => {
-    const handlers = createHandlers();
+    const { handlers } = createHandlers();
     const response = await handlers.bootstrapProfile(
       new Request("http://localhost/api/v1/auth/profile", {
         method: "POST",
@@ -53,8 +53,52 @@ describe("auth routes", () => {
     await expect(response.json()).resolves.toEqual(actor);
   });
 
+  it("updates editable profile fields for PATCH /api/v1/auth/profile", async () => {
+    const { handlers, deps } = createHandlers();
+    const response = await handlers.updateProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          display_name: "Rider Updated",
+          phone: "+84 90 555 1234",
+          address: "124 Nguyễn Văn Cừ, Quận 5",
+          avatar_url: "https://i.pravatar.cc/200?img=15"
+        })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(actor);
+    expect(deps.authService.updateProfile).toHaveBeenCalledWith(identity, {
+      display_name: "Rider Updated",
+      phone: "+84 90 555 1234",
+      address: "124 Nguyễn Văn Cừ, Quận 5",
+      avatar_url: "https://i.pravatar.cc/200?img=15"
+    });
+  });
+
+  it("rejects invalid phone when patching profile", async () => {
+    const { handlers } = createHandlers();
+    const response = await handlers.updateProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "PATCH",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ phone: "abc" })
+      })
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
+  });
+
   it("returns controlled errors for missing authentication and invalid input", async () => {
-    const handlers = createHandlers();
+    const { handlers } = createHandlers();
     const unauthorized = await handlers.getMe(new Request("http://localhost/api/v1/auth/me"));
     expect(unauthorized.status).toBe(401);
     await expect(unauthorized.json()).resolves.toMatchObject({ error_code: "UNAUTHORIZED" });
@@ -74,7 +118,7 @@ describe("auth routes", () => {
   });
 
   it("registers validated device metadata for POST /api/v1/auth/devices", async () => {
-    const handlers = createHandlers();
+    const { handlers } = createHandlers();
     const response = await handlers.registerDevice(
       new Request("http://localhost/api/v1/auth/devices", {
         method: "POST",
@@ -94,7 +138,7 @@ describe("auth routes", () => {
   });
 
   it("rejects invalid device registration input", async () => {
-    const handlers = createHandlers();
+    const { handlers } = createHandlers();
     const response = await handlers.registerDevice(
       new Request("http://localhost/api/v1/auth/devices", {
         method: "POST",
@@ -111,7 +155,7 @@ describe("auth routes", () => {
   });
 
   it("rotates and revokes an owned push token with redacted responses", async () => {
-    const handlers = createHandlers();
+    const { handlers } = createHandlers();
     const raw = "private-provider-token-route-123456";
     const rotated = await handlers.rotatePushToken(
       new Request("http://localhost/api/v1/auth/devices/device/push-token", {
@@ -139,7 +183,7 @@ describe("auth routes", () => {
   });
 
   it("requires paired provider/token fields during device registration", async () => {
-    const handlers = createHandlers();
+    const { handlers } = createHandlers();
     const response = await handlers.registerDevice(
       new Request("http://localhost/api/v1/auth/devices", {
         method: "POST",
@@ -161,7 +205,7 @@ describe("auth routes", () => {
 });
 
 function createHandlers() {
-  return createAuthRouteHandlers({
+  const deps = {
     authenticate: vi.fn(async (request: Request) => {
       if (!request.headers.get("authorization")) {
         const error = new Error("Authentication is required.") as Error & {
@@ -177,9 +221,12 @@ function createHandlers() {
     authService: {
       getCurrentActor: vi.fn(async () => actor),
       bootstrapProfile: vi.fn(async () => actor),
+      updateProfile: vi.fn(async () => actor),
       registerDevice: vi.fn(async () => device),
       rotatePushToken: vi.fn(async () => device),
       revokePushToken: vi.fn(async () => device)
     }
-  });
+  };
+  const handlers = createAuthRouteHandlers(deps);
+  return { handlers, deps };
 }

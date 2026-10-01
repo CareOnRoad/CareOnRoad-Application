@@ -5,3 +5,7 @@ export const runtime = "nodejs";
 export function POST(request: Request) {
   return createDefaultAuthRouteHandlers().bootstrapProfile(request);
 }
+
+export function PATCH(request: Request) {
+  return createDefaultAuthRouteHandlers().updateProfile(request);
+}

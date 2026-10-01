@@ -7,6 +7,7 @@ import { useMechanicApp } from '@/contexts/mechanic-app-context';
 import { AppHeader } from '@/components/ui/app-header';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { JobCard } from '@/components/mechanic/cards/job-card';
 import { cn } from '@/lib/utils';
 import type { MechanicJobStatus } from '@/lib/mechanic-types';
@@ -99,11 +100,7 @@ export default function MechanicJobsScreen() {
           ))}
         </ScrollView>
       </View>
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {filtered.length === 0 ? (
           <EmptyState
             icon={Inbox}
@@ -130,7 +127,7 @@ export default function MechanicJobsScreen() {
             ))}
           </View>
         )}
-      </ScrollView>
+      </ScreenScroll>
     </View>
   );
 }

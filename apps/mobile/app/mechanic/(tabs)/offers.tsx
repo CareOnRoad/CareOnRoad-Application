@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Clock, MapPin, RefreshCw, Tag, Wrench } from 'lucide-react-native';
 
@@ -9,6 +9,7 @@ import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ActionButton } from '@/components/ui/action-button';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
 import {
   acceptOffer,
@@ -144,11 +145,7 @@ export default function MechanicOffersScreen() {
           </Pressable>
         }
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {error && (
           <View className="mb-4">
             <Banner tone="error" description={error} />
@@ -186,7 +183,7 @@ export default function MechanicOffersScreen() {
             ))}
           </View>
         )}
-      </ScrollView>
+      </ScreenScroll>
     </View>
   );
 }

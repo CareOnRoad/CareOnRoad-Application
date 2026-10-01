@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import { RefreshControl, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Bike, Plus } from 'lucide-react-native';
 
@@ -9,6 +9,7 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { VehicleCard } from '@/components/vehicle-card';
 
 /**
@@ -23,10 +24,7 @@ export default function VehiclesScreen() {
   return (
     <View className="flex-1 bg-background">
       <AppHeader title="Xe của tôi" subtitle={`${vehicles.length} xe đã đăng ký`} />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
+      <ScreenScroll
         refreshControl={
           <RefreshControl
             refreshing={vehiclesLoading}
@@ -93,7 +91,7 @@ export default function VehiclesScreen() {
             mới danh sách. Cập nhật số km hàng tháng để nhận nhắc bảo dưỡng chính xác.
           </Text>
         </Card>
-      </ScrollView>
+      </ScreenScroll>
     </View>
   );
 }

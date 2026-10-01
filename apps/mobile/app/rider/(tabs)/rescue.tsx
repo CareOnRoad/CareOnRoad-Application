@@ -1,5 +1,12 @@
-import React, { useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Linking,
+  Pressable,
+  Text,
+  View,
+} from 'react-native';
 import { router } from 'expo-router';
 import {
   BatteryWarning,
@@ -12,8 +19,7 @@ import {
   MapPin,
   Navigation,
   PhoneCall,
-  RotateCcw,
-  Save,
+  RefreshCcw,
   Siren,
   TriangleAlert,
 } from 'lucide-react-native';
@@ -27,9 +33,15 @@ import { Badge } from '@/components/ui/badge';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { Field, FormTextInput } from '@/components/ui/form';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
 import { formatVnd } from '@/lib/quotes-service';
-import { issueCategories } from '@/lib/mock-data';
+import { issueCategories } from '@/lib/ui-catalog';
+import {
+  captureCurrentLocation,
+  LocationCaptureError,
+  type CapturedLocation,
+} from '@/lib/location-service';
 
 const iconMap: Record<string, LucideIcon> = {
   Cog,
@@ -63,61 +75,87 @@ const DEFAULT_ADDRESS = '124 Nguyễn Văn Cừ, Quận 5, TP.HCM';
  *  - canceled:  đã huỷ
  */
 export default function RescueScreen() {
-  const { vehicles, addEmergencyCall } = useApp();
+  const { vehicles } = useApp();
   const sr = useServiceRequests();
   const [issue, setIssue] = useState<string | null>(null);
-  const [address, setAddress] = useState(DEFAULT_ADDRESS);
-  const [damageDesc, setDamageDesc] = useState('');
-  const [repairs, setRepairs] = useState('');
-  const [price, setPrice] = useState('');
-  const [saved, setSaved] = useState(false);
+  const [address, setAddress] = useState('');
+  const [captured, setCaptured] = useState<CapturedLocation | null>(null);
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  // Tự động lấy vị trí hiện tại 1 lần khi mở màn hình.
+  // Nếu thất bại → vẫn cho phép user nhập tay.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLocationBusy(true);
+      setLocationError(null);
+      try {
+        const loc = await captureCurrentLocation();
+        if (cancelled) return;
+        setCaptured(loc);
+        // Autofill chỉ khi user chưa sửa gì
+        setAddress((prev) => (prev.trim() ? prev : loc.address));
+      } catch (err) {
+        if (cancelled) return;
+        setLocationError(
+          err instanceof LocationCaptureError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Không lấy được vị trí hiện tại.',
+        );
+      } finally {
+        if (!cancelled) setLocationBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const issueLabel = issueCategories.find((i) => i.id === issue)?.label;
   const vehicle = vehicles[0];
   const vehicleName = vehicle?.name ?? 'Vehicle';
   const phase = sr.active.phase;
 
+  const refreshLocation = async () => {
+    setLocationBusy(true);
+    setLocationError(null);
+    try {
+      const loc = await captureCurrentLocation();
+      setCaptured(loc);
+      setAddress(loc.address);
+    } catch (err) {
+      setLocationError(
+        err instanceof LocationCaptureError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Không lấy được vị trí hiện tại.',
+      );
+    } finally {
+      setLocationBusy(false);
+    }
+  };
+
   const submitRescue = async () => {
     if (!issue || !vehicle) return;
     await sr.startRescue({
       motorcycleId: vehicle.id,
-      problemDescription: `${ISSUE_TO_PROBLEM[issue] ?? 'Cần hỗ trợ'} (${address})`,
+      problemDescription: `${ISSUE_TO_PROBLEM[issue] ?? 'Cần hỗ trợ'} (${address || 'Vị trí hiện tại'})`,
       addressText: address,
+      ...(captured ? { location: { latitude: captured.latitude, longitude: captured.longitude } } : {}),
     });
   };
 
   const handleCancel = async () => {
     await sr.cancel('Người dùng huỷ từ app');
-    setSaved(false);
   };
 
   const handleReset = () => {
     sr.reset();
     setIssue(null);
-    setSaved(false);
-  };
-
-  const handleSave = async () => {
-    if (!sr.active.request) return;
-    // Lưu nhanh vào local history (mock — Phase 4 sẽ lưu vào DB qua media metadata).
-    const now = new Date();
-    addEmergencyCall({
-      vehicleName,
-      issue: issueLabel ?? 'Khẩn cấp',
-      damageDescription:
-        damageDesc.trim() ||
-        sr.active.request.problem_description ||
-        'Chi tiết hư hại chưa được ghi nhận.',
-      repairs:
-        repairs.trim() ||
-        'Thợ đã hỗ trợ khắc phục sự cố tại chỗ và đảm bảo xe vận hành tạm ổn.',
-      date: now.toISOString().slice(0, 10),
-      time: now.toTimeString().slice(0, 5),
-      mechanicName: 'Thợ CareOnRoad',
-      price: Number(price) > 0 ? Number(price) : sr.active.quote?.total_amount ?? 250000,
-      status: 'completed',
-    });
-    setSaved(true);
   };
 
   // Searching state
@@ -188,11 +226,7 @@ export default function RescueScreen() {
     return (
       <View className="flex-1 bg-background">
         <AppHeader title="Theo dõi thợ" subtitle={issueLabel} onBack={handleReset} />
-        <ScrollView
-          className="flex-1"
-          contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScreenScroll>
           {/* Map hero */}
           <Card className="relative h-44 overflow-hidden">
             <Image
@@ -373,6 +407,10 @@ export default function RescueScreen() {
                       Thanh toán ngay
                     </Text>
                   </ActionButton>
+                  <Text className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                    Bạn sẽ được chuyển sang màn hình thanh toán PayOS. Vui lòng hoàn tất
+                    trong thời gian đơn hàng còn hiệu lực.
+                  </Text>
                 </Card>
               )}
 
@@ -401,67 +439,6 @@ export default function RescueScreen() {
             </Card>
           )}
 
-          {phase === 'completed' && (
-            <Card className="mt-4 gap-3 p-4">
-              <Text className="text-sm font-semibold text-foreground">Tóm tắt dịch vụ</Text>
-              <Field label="Mô tả hư hại" hint="Không bắt buộc - dùng để theo dõi bảo hành">
-                <FormTextInput
-                  multiline
-                  numberOfLines={3}
-                  value={damageDesc}
-                  onChangeText={setDamageDesc}
-                  placeholder="Ví dụ: Lốp trước bị đâm đinh, xẹp hoàn toàn..."
-                  className="min-h-[80px] py-2.5"
-                />
-              </Field>
-              <Field label="Nội dung đã sửa chữa">
-                <FormTextInput
-                  multiline
-                  numberOfLines={3}
-                  value={repairs}
-                  onChangeText={setRepairs}
-                  placeholder="Ví dụ: Thay lốp mới, cân bằng bánh trước..."
-                  className="min-h-[80px] py-2.5"
-                />
-              </Field>
-              <Field label="Chi phí (VND)">
-                <FormTextInput
-                  keyboardType="numeric"
-                  value={price}
-                  onChangeText={setPrice}
-                  placeholder="250000"
-                />
-              </Field>
-              {saved ? (
-                <View className="rounded-2xl border border-green/30 bg-green/5 p-4">
-                  <Text className="text-center text-sm font-semibold text-green">
-                    Đã lưu vào lịch sử cứu hộ
-                  </Text>
-                </View>
-              ) : (
-                <ActionButton
-                  fullWidth
-                  onPress={handleSave}
-                  accessibilityLabel="Lưu vào lịch sử cứu hộ"
-                >
-                  <Save size={16} color="#ffffff" />
-                  <Text className="text-sm font-semibold text-primary-foreground">
-                    Lưu vào lịch sử cứu hộ
-                  </Text>
-                </ActionButton>
-              )}
-              <ActionButton
-                fullWidth
-                variant="outline"
-                onPress={handleReset}
-                accessibilityLabel="Tạo yêu cầu mới"
-              >
-                <RotateCcw size={16} color="#16202f" />
-                <Text className="text-sm font-semibold text-foreground">Yêu cầu mới</Text>
-              </ActionButton>
-            </Card>
-          )}
-
           {sr.active.lastError && (
             <View className="mt-3">
               <Banner tone="error" description={sr.active.lastError} />
@@ -484,7 +461,7 @@ export default function RescueScreen() {
           <View className="mt-4">
             <AiChatbox />
           </View>
-        </ScrollView>
+        </ScreenScroll>
       </View>
     );
   }
@@ -527,11 +504,7 @@ export default function RescueScreen() {
   return (
     <View className="flex-1 bg-background">
       <AppHeader title="Cứu hộ khẩn cấp" variant="navy" />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero destructive */}
         <Card className="overflow-hidden border-0 bg-destructive">
           <View className="flex-row items-center gap-4 p-5">
@@ -590,23 +563,60 @@ export default function RescueScreen() {
 
         {/* Vehicle + Location */}
         <Card className="mt-5 p-4">
-          <View className="flex-row items-center gap-3">
+          <View className="flex-row items-start gap-3">
             <View className="size-10 items-center justify-center rounded-xl bg-primary/10">
               <MapPin size={20} color="#1974f7" />
             </View>
             <View className="flex-1">
-              <Text className="text-xs text-muted-foreground">Vị trí & xe</Text>
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs text-muted-foreground">Vị trí & xe</Text>
+                {captured && (
+                  <View className="flex-row items-center gap-1 rounded-full bg-green/10 px-2 py-0.5">
+                    <Navigation size={10} color="#145413" />
+                    <Text className="text-[10px] font-semibold text-green">
+                      GPS · ±{Math.round(captured.accuracy ?? 0)}m
+                    </Text>
+                  </View>
+                )}
+              </View>
               <Text className="text-sm font-semibold text-foreground">{vehicleName}</Text>
-              <Text className="mt-1 text-xs text-muted-foreground">{address}</Text>
+              <Text className="mt-1 text-xs text-muted-foreground" numberOfLines={2}>
+                {address || (locationBusy ? 'Đang xác định vị trí…' : 'Chưa có địa chỉ')}
+              </Text>
             </View>
+            <Pressable
+              onPress={refreshLocation}
+              disabled={locationBusy}
+              accessibilityLabel="Cập nhật vị trí hiện tại"
+              className={cn(
+                'size-9 items-center justify-center rounded-full border border-border bg-secondary active:scale-95',
+                locationBusy && 'opacity-50',
+              )}
+            >
+              {locationBusy ? (
+                <ActivityIndicator size="small" color="#1974f7" />
+              ) : (
+                <RefreshCcw size={14} color="#16202f" />
+              )}
+            </Pressable>
           </View>
+          {locationError && (
+            <View className="mt-3">
+              <Banner
+                tone="warning"
+                title="Không lấy được vị trí"
+                description={`${locationError} Bạn có thể nhập tay bên dưới.`}
+              />
+            </View>
+          )}
           <View className="mt-3">
-            <Field label="Địa chỉ chi tiết" hint="Để trống nếu dùng vị trí GPS">
+            <Field label="Địa chỉ chi tiết" hint="Có thể chỉnh sửa nếu GPS chưa chính xác">
               <FormTextInput
                 value={address}
                 onChangeText={setAddress}
                 accessibilityLabel="Địa chỉ"
-                placeholder={DEFAULT_ADDRESS}
+                placeholder={captured ? captured.address : DEFAULT_ADDRESS}
+                multiline
               />
             </Field>
           </View>
@@ -644,7 +654,7 @@ export default function RescueScreen() {
         <View className="mt-6">
           <AiChatbox />
         </View>
-      </ScrollView>
+      </ScreenScroll>
     </View>
   );
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   ArrowRight,
@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Circle,
   Clock,
-  LucideIcon,
   Star,
   Wrench,
 } from 'lucide-react-native';
@@ -18,7 +17,11 @@ import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { HeroCard } from '@/components/ui/hero-card';
+import { NotificationBell } from '@/components/ui/notification-bell';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { SectionHeader } from '@/components/ui/form';
+import { StatTile } from '@/components/ui/stat-tile';
 import { EarningsCard } from '@/components/mechanic/cards/earnings-card';
 import { JobCard } from '@/components/mechanic/cards/job-card';
 /**
@@ -60,13 +63,9 @@ export default function MechanicDashboardScreen() {
         subtitle={greeting()}
         right={
           <View className="flex-row items-center gap-2">
-            <Pressable
-              accessibilityLabel="Mở thông báo"
+            <NotificationBell
               onPress={() => router.push('/mechanic/notifications' as never)}
-              className="size-9 items-center justify-center rounded-full bg-secondary active:opacity-70"
-            >
-              <Bell size={16} color="#16202f" />
-            </Pressable>
+            />
             <View className="size-9 overflow-hidden rounded-full bg-secondary">
               {displayAvatar ? (
                 <Image source={{ uri: displayAvatar }} className="size-full" resizeMode="cover" />
@@ -81,42 +80,36 @@ export default function MechanicDashboardScreen() {
           </View>
         }
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero */}
-        <Card className="overflow-hidden border-0 bg-navy">
-          <View className="p-5">
-            <View className="flex-row items-center justify-between">
-              <View className="flex-1">
-                <Text className="text-sm text-white/70">Xin chào,</Text>
-                <Text className="mt-0.5 text-2xl font-bold text-white">{displayName}</Text>
-                <View className="mt-1 flex-row items-center gap-1.5">
-                  <Wrench size={12} color="#a9ffad" />
-                  <Text className="text-xs text-white/70">{garage.name}</Text>
-                </View>
-              </View>
-              <View className="items-end gap-2">
-                <View className="flex-row items-center gap-1 rounded-full bg-white/10 px-2.5 py-1">
-                  <Star size={12} color="#a9ffad" fill="#a9ffad" />
-                  <Text className="text-xs font-bold text-white">{mechanic.rating}</Text>
-                </View>
-                <View className="flex-row items-center gap-1.5 rounded-full bg-green/20 px-2.5 py-1">
-                  <View className="size-1.5 rounded-full bg-green" />
-                  <Text className="text-xs font-semibold text-white">Đang nhận việc</Text>
-                </View>
+        <HeroCard>
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1">
+              <Text className="text-sm text-white/70">Xin chào,</Text>
+              <Text className="mt-0.5 text-2xl font-bold text-white">{displayName}</Text>
+              <View className="mt-1 flex-row items-center gap-1.5">
+                <Wrench size={12} color="#a9ffad" />
+                <Text className="text-xs text-white/70">{garage.name}</Text>
               </View>
             </View>
-            <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5">
-              <Bell size={16} color="#a9ffad" />
-              <Text className="text-xs font-medium text-white">
-                {pendingCount + inProgressCount} công việc đang hoạt động hôm nay
-              </Text>
+            <View className="items-end gap-2">
+              <View className="flex-row items-center gap-1 rounded-full bg-white/10 px-2.5 py-1">
+                <Star size={12} color="#a9ffad" fill="#a9ffad" />
+                <Text className="text-xs font-bold text-white">{mechanic.rating}</Text>
+              </View>
+              <View className="flex-row items-center gap-1.5 rounded-full bg-green/20 px-2.5 py-1">
+                <View className="size-1.5 rounded-full bg-green" />
+                <Text className="text-xs font-semibold text-white">Đang nhận việc</Text>
+              </View>
             </View>
           </View>
-        </Card>
+          <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5">
+            <Bell size={16} color="#a9ffad" />
+            <Text className="text-xs font-medium text-white">
+              {pendingCount + inProgressCount} công việc đang hoạt động hôm nay
+            </Text>
+          </View>
+        </HeroCard>
 
         {/* Today stats */}
         <View className="mt-5">
@@ -155,11 +148,11 @@ export default function MechanicDashboardScreen() {
               </View>
               <ActionButton
                 variant="mint"
-                className="px-3 py-2"
+                size="sm"
                 onPress={handleStartNext}
                 accessibilityLabel={`Bắt đầu công việc ${nextJob.type}`}
               >
-                <Text className="text-sm font-semibold text-green">Bắt đầu</Text>
+                <Text className="text-xs font-semibold text-green">Bắt đầu</Text>
                 <ArrowRight size={16} color="#145413" />
               </ActionButton>
             </View>
@@ -195,39 +188,8 @@ export default function MechanicDashboardScreen() {
             </View>
           )}
         </View>
-      </ScrollView>
+      </ScreenScroll>
     </View>
-  );
-}
-
-function StatTile({
-  icon: Icon,
-  tone,
-  label,
-  value,
-}: {
-  icon: LucideIcon;
-  tone: 'amber' | 'blue' | 'green';
-  label: string;
-  value: number;
-}) {
-  const toneStyles = {
-    amber: { bg: 'bg-amber-500/15', fg: '#d97706' },
-    blue: { bg: 'bg-primary/10', fg: '#1974f7' },
-    green: { bg: 'bg-green/10', fg: '#145413' },
-  } as const;
-  const s = toneStyles[tone];
-  return (
-    <Card className="flex-1 p-3">
-      <View
-        className="mb-2 size-9 items-center justify-center rounded-xl"
-        style={{ backgroundColor: `${s.fg}1a` }}
-      >
-        <Icon size={16} color={s.fg} />
-      </View>
-      <Text className="text-xl font-bold text-foreground">{value}</Text>
-      <Text className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{label}</Text>
-    </Card>
   );
 }
 

@@ -25,12 +25,14 @@ import {
   signIn as authSignIn,
   signOut as authSignOut,
   signUp as authSignUp,
+  updateProfile as authUpdateProfile,
   type AppActor,
 } from '@/lib/auth-service';
 import { isAuthConfigured } from '@/lib/config';
 import type { AuthRole, PublicAuthUser, StoredAuthSession } from '@/lib/auth-types';
 import { toPublicUser } from '@/lib/auth-types';
 import { getSupabase } from '@/lib/supabase-client';
+import { setAccessTokenProvider } from '@/lib/api';
 
 type AuthStatus = 'loading' | 'unauthenticated' | 'authenticated';
 
@@ -57,6 +59,17 @@ interface AuthState {
   login: (input: LoginInput) => Promise<PublicAuthUser>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Cập nhật các trường profile editable. Khi backend đã cấu hình sẽ gọi
+   * PATCH /api/v1/auth/profile rồi cập nhật state. Trong demo mode chỉ ghi
+   * vào local storage.
+   */
+  updateProfile: (input: {
+    name?: string;
+    phone?: string;
+    address?: string;
+    avatar?: string;
+  }) => Promise<PublicAuthUser>;
   /** Đổi vai trò demo - chỉ hoạt động trong demo mode. */
   switchRoleDemo: () => Promise<void>;
   /**
@@ -75,14 +88,18 @@ function actorToPublic(actor: AppActor, fallbackEmail: string): PublicAuthUser {
     : actor.roles.includes('mechanic')
       ? 'mechanic'
       : 'rider';
-  return {
+  const result: PublicAuthUser = {
     id: actor.id,
     role,
     name: actor.display_name ?? '',
     email: fallbackEmail,
-    phone: '',
-    avatar: '',
+    phone: actor.phone ?? '',
+    avatar: actor.avatar_url ?? '',
   };
+  if (actor.address) {
+    result.address = actor.address;
+  }
+  return result;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -318,6 +335,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   // =========================================================
+  // Update profile
+  //
+  // Khi backend ready → PATCH /api/v1/auth/profile rồi refresh actor.
+  // Trong demo mode → ghi đè session user hiện tại với data mới.
+  // =========================================================
+  const updateProfile = useCallback(
+    async (input: {
+      name?: string;
+      phone?: string;
+      address?: string;
+      avatar?: string;
+    }): Promise<PublicAuthUser> => {
+      if (backendReady) {
+        const client = getSupabase();
+        if (!client) throw new Error('Supabase chưa được cấu hình.');
+        setAccessTokenProvider(() =>
+          client.auth.getSession().then((s) => s.data.session?.access_token ?? null),
+        );
+        await authUpdateProfile(input);
+        const actor = await fetchCurrentActor();
+        if (!actor) {
+          throw new Error('Không lấy được hồ sơ sau khi cập nhật.');
+        }
+        const nextUser = actorToPublic(actor, user?.email ?? '');
+        setUser(nextUser);
+        setRole(nextUser.role);
+        return nextUser;
+      }
+      // Demo mode: cập nhật user local trong session
+      if (!demoSession || !user) {
+        throw new Error('Chưa đăng nhập.');
+      }
+      const nextUser: PublicAuthUser = {
+        ...user,
+        name: input.name ?? user.name,
+        phone: input.phone ?? user.phone,
+        avatar: input.avatar ?? user.avatar,
+      };
+      if (input.address !== undefined) {
+        nextUser.address = input.address;
+      } else if (user.address !== undefined) {
+        nextUser.address = user.address;
+      }
+      const nextSession: StoredAuthSession = {
+        ...demoSession,
+        user: nextUser,
+      };
+      await saveDemoSession(nextSession);
+      setDemoSession(nextSession);
+      setUser(nextUser);
+      return nextUser;
+    },
+    [backendReady, demoSession, user],
+  );
+
+  // =========================================================
   // Logout
   //
   // Luôn reset state local về 'unauthenticated' dù Supabase có lỗi.
@@ -419,11 +492,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isBackendConfigured: backendReady,
       login,
       register,
+      updateProfile,
       logout,
       switchRoleDemo,
       bypassLoginAs,
     }),
-    [status, user, role, backendReady, login, register, logout, switchRoleDemo, bypassLoginAs],
+    [status, user, role, backendReady, login, register, updateProfile, logout, switchRoleDemo, bypassLoginAs],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

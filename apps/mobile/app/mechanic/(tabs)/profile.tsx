@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   Award,
@@ -28,9 +28,13 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { EditProfileSheet } from '@/components/ui/edit-profile-sheet';
+import { HeroCard } from '@/components/ui/hero-card';
 import { NavRow, RowIcon, ToggleRow } from '@/components/ui/toggle-row';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { SectionHeader } from '@/components/ui/form';
+import { StatTile } from '@/components/ui/stat-tile';
 import { cn } from '@/lib/utils';
-import { formatVND } from '@/lib/mock-data';
+import { formatVND } from '@/lib/format';
 import { loadProfile, type LocalProfile } from '@/lib/profile-service';
 
 const languageCopy = { EN: 'English', VI: 'Tiếng Việt' } as const;
@@ -44,7 +48,12 @@ const languageCopy = { EN: 'English', VI: 'Tiếng Việt' } as const;
  */
 export default function MechanicProfileScreen() {
   const { mechanic, garage, earnings, darkMode, toggleDarkMode } = useMechanicApp();
-  const { user: authUser, logout, switchRoleDemo, isBackendConfigured } = useAuth();
+  const {
+    user: authUser,
+    logout,
+    switchRoleDemo,
+    isBackendConfigured,
+  } = useAuth();
   const [notifications, setNotifications] = useState(true);
   const [language, setLanguage] = useState<'EN' | 'VI'>('VI');
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
@@ -109,6 +118,7 @@ export default function MechanicProfileScreen() {
   const displayPhone = localProfile?.phone ?? authUser?.phone ?? garage.phone;
   const displayEmail =
     localProfile?.email ?? authUser?.email ?? 'quan@quansgarage.vn';
+  const displayAddress = localProfile?.address ?? authUser?.address ?? '';
   const handleProfileSaved = (profile: LocalProfile) => {
     setLocalProfile(profile);
   };
@@ -120,57 +130,51 @@ export default function MechanicProfileScreen() {
   return (
     <View className="flex-1 bg-background">
       <AppHeader title="Hồ sơ" />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero */}
-        <Card className="overflow-hidden border-0 bg-navy">
-          <View className="p-5">
-            <View className="flex-row items-center gap-4">
-              <View className="size-16 overflow-hidden rounded-full border-2 border-white/20">
-                <Image
-                  source={{ uri: displayAvatar }}
-                  className="size-full"
-                  resizeMode="cover"
-                />
-              </View>
-              <View className="flex-1">
-                <Text className="text-lg font-bold text-white">{displayName}</Text>
-                <Text className="text-xs text-white/70">{mechanic.specialty}</Text>
-                <View className="mt-1.5 flex-row items-center gap-1.5">
-                  <Badge tone="green">
-                    <Text className="text-[10px] font-semibold text-white">Mechanic</Text>
-                  </Badge>
-                </View>
-                <View className="mt-1 flex-row items-center gap-1">
-                  <Star size={14} color="#a9ffad" fill="#a9ffad" />
-                  <Text className="text-xs font-bold text-white">{mechanic.rating}</Text>
-                  <Text className="text-xs text-white/60">· {mechanic.totalJobs} công việc</Text>
-                </View>
-                <View className="mt-1 flex-row items-center gap-1">
-                  <Phone size={11} color="#ffffff" className="opacity-70" />
-                  <Text className="text-[11px] text-white/70">{displayPhone}</Text>
-                </View>
-              </View>
-              <Pressable
-                onPress={() => setEditProfileOpen(true)}
-                accessibilityLabel="Sửa hồ sơ"
-                accessibilityRole="button"
-                className="size-9 items-center justify-center rounded-full bg-white/10 active:scale-95"
-              >
-                <Pencil size={14} color="#ffffff" />
-              </Pressable>
+        <HeroCard>
+          <View className="flex-row items-center gap-4">
+            <View className="size-16 overflow-hidden rounded-full border-2 border-white/20">
+              <Image
+                source={{ uri: displayAvatar }}
+                className="size-full"
+                resizeMode="cover"
+              />
             </View>
-            <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
-              <ShieldCheck size={16} color="#a9ffad" />
-              <Text className="text-xs text-white">
-                {garage.name} · {mechanic.experienceYears} năm kinh nghiệm
-              </Text>
+            <View className="flex-1">
+              <Text className="text-lg font-bold text-white">{displayName}</Text>
+              <Text className="text-xs text-white/70">{mechanic.specialty}</Text>
+              <View className="mt-1.5 flex-row items-center gap-1.5">
+                <Badge tone="green">
+                  <Text className="text-[10px] font-semibold text-white">Mechanic</Text>
+                </Badge>
+              </View>
+              <View className="mt-1 flex-row items-center gap-1">
+                <Star size={14} color="#a9ffad" fill="#a9ffad" />
+                <Text className="text-xs font-bold text-white">{mechanic.rating}</Text>
+                <Text className="text-xs text-white/60">· {mechanic.totalJobs} công việc</Text>
+              </View>
+              <View className="mt-1 flex-row items-center gap-1">
+                <Phone size={11} color="#ffffff" className="opacity-70" />
+                <Text className="text-[11px] text-white/70">{displayPhone}</Text>
+              </View>
             </View>
+            <Pressable
+              onPress={() => setEditProfileOpen(true)}
+              accessibilityLabel="Sửa hồ sơ"
+              accessibilityRole="button"
+              className="size-9 items-center justify-center rounded-full bg-white/10 active:scale-95"
+            >
+              <Pencil size={14} color="#ffffff" />
+            </Pressable>
           </View>
-        </Card>
+          <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
+            <ShieldCheck size={16} color="#a9ffad" />
+            <Text className="text-xs text-white">
+              {garage.name} · {mechanic.experienceYears} năm kinh nghiệm
+            </Text>
+          </View>
+        </HeroCard>
 
         {/* Stats */}
         <View className="mt-5 flex-row gap-3">
@@ -219,21 +223,21 @@ export default function MechanicProfileScreen() {
 
         {/* Garage info */}
         <View className="mt-6">
-          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Garage
-          </Text>
+          <SectionHeader title="Garage" />
           <Card className="divide-y divide-border">
-            <Row icon={MapPin} label="Địa chỉ" value={garage.address} />
-            <Row icon={Phone} label="Hotline" value={garage.phone} />
+            <Row
+              icon={MapPin}
+              label="Địa chỉ"
+              value={displayAddress || garage.address || 'Chưa cập nhật'}
+            />
+            <Row icon={Phone} label="Hotline" value={garage.phone || displayPhone} />
             <Row icon={Mail} label="Email liên hệ" value={displayEmail} />
           </Card>
         </View>
 
         {/* Certifications */}
         <View className="mt-6">
-          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Chứng chỉ
-          </Text>
+          <SectionHeader title="Chứng chỉ" />
           <View className="gap-2">
             {mechanic.certifications.map((c) => (
               <Card key={c} className="flex-row items-center gap-3 p-3">
@@ -246,9 +250,7 @@ export default function MechanicProfileScreen() {
 
         {/* Settings */}
         <View className="mt-6">
-          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Cài đặt
-          </Text>
+          <SectionHeader title="Cài đặt" />
           <Card className="divide-y divide-border">
             <ToggleRow
               icon={Bell}
@@ -303,7 +305,7 @@ export default function MechanicProfileScreen() {
         <Text className="mt-6 text-center text-xs text-muted-foreground">
           CareOnRoad Mechanic · Prototype v1.0
         </Text>
-      </ScrollView>
+      </ScreenScroll>
 
       <ConfirmDialog
         visible={logoutDialogOpen}
@@ -323,10 +325,10 @@ export default function MechanicProfileScreen() {
 
       <EditProfileSheet
         visible={editProfileOpen}
-        userId={authUser?.id ?? ''}
         initialName={displayName}
         initialEmail={displayEmail}
         initialPhone={displayPhone}
+        initialAddress={displayAddress}
         initialAvatar={displayAvatar}
         onClose={() => setEditProfileOpen(false)}
         onSaved={handleProfileSaved}
@@ -370,40 +372,5 @@ function Row({
         <Text className="truncate text-sm font-medium text-foreground">{value}</Text>
       </View>
     </View>
-  );
-}
-
-function StatTile({
-  icon: Icon,
-  tone,
-  label,
-  value,
-  small,
-}: {
-  icon: LucideIcon;
-  tone: 'blue' | 'green' | 'amber';
-  label: string;
-  value: string;
-  small?: boolean;
-}) {
-  const toneStyles = {
-    blue: { bg: 'bg-primary/10', fg: '#1974f7' },
-    green: { bg: 'bg-green/10', fg: '#145413' },
-    amber: { bg: 'bg-amber-500/15', fg: '#d97706' },
-  } as const;
-  const s = toneStyles[tone];
-  return (
-    <Card className="flex-1 items-center p-3">
-      <View
-        className="mb-2 size-9 items-center justify-center rounded-xl"
-        style={{ backgroundColor: `${s.fg}1a` }}
-      >
-        <Icon size={16} color={s.fg} />
-      </View>
-      <Text className={cn('font-bold text-foreground', small ? 'text-sm leading-tight' : 'text-xl')}>
-        {value}
-      </Text>
-      <Text className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{label}</Text>
-    </Card>
   );
 }

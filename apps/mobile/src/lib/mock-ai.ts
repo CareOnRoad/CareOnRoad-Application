@@ -1,4 +1,4 @@
-import { formatVND } from './mock-data';
+import { formatVND } from '@/lib/format';
 
 interface Diagnosis {
   cause: string;

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   AlarmClock,
@@ -19,6 +19,7 @@ import {
 
 import { useApp } from '@/contexts/app-context';
 import { useServiceRequests } from '@/hooks/use-service-requests';
+import { useAuth } from '@/contexts/auth-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
@@ -26,12 +27,15 @@ import { Banner } from '@/components/ui/banner';
 import { CancelAppointmentModal } from '@/components/cancel-appointment-modal';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
-import { formatVND } from '@/lib/mock-data';
+import { DateTimePickerField } from '@/components/ui/datetime-picker-field';
+import { formatDdMmYyyyHHmm, isPastDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { updateReminder, snoozeReminder } from '@/lib/reminders-service';
 import type { Appointment, CanceledAppointment } from '@/lib/types';
 import type { ServiceRequestResponse } from '@/lib/service-requests-service';
 import {
+  deriveStatus,
+  intervalDaysToRecurrence,
   listReminders,
   recurrenceLabel,
   type Reminder,
@@ -106,9 +110,9 @@ function requestToCanceled(req: ServiceRequestResponse, vehicleName: string): Ca
  * Mỗi filter có EmptyState riêng để hướng dẫn user.
  */
 export default function ScheduleScreen() {
-  const { vehicles, canceledAppointments, emergencyCalls, services, cancelAppointmentLocal } =
-    useApp();
+  const { vehicles } = useApp();
   const sr = useServiceRequests();
+  const { status: authStatus, isBackendConfigured } = useAuth();
   const [tab, setTab] = useState<HistoryTab>('maintenance');
   const [maintenanceFilter, setMaintenanceFilter] = useState<MaintenanceFilter>('upcoming');
   const [cancelling, setCancelling] = useState<Appointment | null>(null);
@@ -118,6 +122,10 @@ export default function ScheduleScreen() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [remindersLoading, setRemindersLoading] = useState(false);
   const [remindersError, setRemindersError] = useState<string | null>(null);
+
+  // Guard: nếu chưa authenticated hoặc BE chưa cấu hình → render sớm.
+  // Tránh flash EmptyState vì lý do auth.
+  const authed = authStatus === 'authenticated' && isBackendConfigured;
 
   const reloadReminders = async () => {
     setRemindersLoading(true);
@@ -133,13 +141,19 @@ export default function ScheduleScreen() {
   };
 
   useEffect(() => {
+    if (!authed) return;
     if (tab === 'reminders') {
       void reloadReminders();
     }
     if (tab === 'maintenance') {
       void sr.reloadList();
     }
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Chỉ phụ thuộc vào `reloadReminders` + `sr.reloadList` (cả 2 là useCallback
+    // với deps rỗng → ref ổn định). KHÔNG đặt cả object `sr` trong deps vì
+    // `useServiceRequests` trả về useMemo; identity đổi mỗi khi `list` thay đổi
+    // → sẽ khiến effect re-fire vô hạn, spam `GET /api/v1/service-requests`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, authed, sr.reloadList, reloadReminders]);
 
   // =========================================================
   // Maintenance từ BE: filter theo service_type === periodic_maintenance.
@@ -158,24 +172,27 @@ export default function ScheduleScreen() {
     .map((r) => requestToAppointment(r, vehicleNameById.get(r.motorcycle_id) ?? 'Xe'))
     .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
 
-  const canceledMaintenance: CanceledAppointment[] = [
-    ...maintenanceFromBE
-      .filter((r) => r.status === 'canceled')
-      .map((r) => requestToCanceled(r, vehicleNameById.get(r.motorcycle_id) ?? 'Xe')),
-    ...canceledAppointments,
-  ];
+  const canceledMaintenance: CanceledAppointment[] = maintenanceFromBE
+    .filter((r) => r.status === 'canceled')
+    .map((r) => requestToCanceled(r, vehicleNameById.get(r.motorcycle_id) ?? 'Xe'));
 
-  const completedCount = services.length + maintenanceFromBE.filter((r) => r.status === 'completed').length;
-  const activeReminders = reminders.filter((r) => r.status === 'active' || r.status === 'snoozed');
+  const completedCount = maintenanceFromBE.filter((r) => r.status === 'completed').length;
+  const activeReminders = reminders.filter((r) => {
+    const s = deriveStatus(r);
+    return s === 'active' || s === 'snoozed';
+  });
   const totalMaintenance = upcomingMaintenance.length + canceledMaintenance.length;
-  const totalEmergency = emergencyCalls.length;
+  // Tab "Cứu hộ" lấy trực tiếp từ BE service-requests (service_type=emergency_rescue,
+  // status=completed). Không dùng mock data.
+  const completedEmergencyCount = sr.list.filter(
+    (r) => r.service_type === 'emergency_rescue' && r.status === 'completed',
+  ).length;
 
   const handleCancelMaintenance = async (reason: string) => {
     if (!cancelling) return;
     setCancelError(null);
     try {
       await sr.cancelById(cancelling.id, reason);
-      cancelAppointmentLocal(cancelling.id, reason);
       setCancelling(null);
     } catch (e) {
       setCancelError(e instanceof Error ? e.message : 'Không thể huỷ lịch');
@@ -196,7 +213,8 @@ export default function ScheduleScreen() {
             count={totalMaintenance}
             tone="primary"
             onPress={() => setTab('maintenance')}
-          />          <TabButton
+          />
+          <TabButton
             active={tab === 'reminders'}
             icon={AlarmClock}
             label="Nhắc nhở"
@@ -208,7 +226,7 @@ export default function ScheduleScreen() {
             active={tab === 'emergency'}
             icon={Wrench}
             label="Cứu hộ"
-            count={totalEmergency}
+            count={completedEmergencyCount}
             tone="destructive"
             onPress={() => setTab('emergency')}
           />
@@ -220,6 +238,16 @@ export default function ScheduleScreen() {
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
       >
+        {!authed && (
+          <View className="mb-3">
+            <Banner
+              tone="warning"
+              title="Đang chờ đăng nhập"
+              description="Lịch bảo dưỡng và nhắc nhở sẽ hiển thị sau khi bạn đăng nhập."
+            />
+          </View>
+        )}
+
         {tab === 'maintenance' && (
           <>
             <ActionButton
@@ -284,7 +312,7 @@ export default function ScheduleScreen() {
                           active ? 'text-primary' : 'text-muted-foreground',
                         )}
                       >
-                        {f.count}
+                        {String(f.count ?? 0)}
                       </Text>
                     </View>
                   </Pressable>
@@ -335,7 +363,7 @@ export default function ScheduleScreen() {
 
             {maintenanceFilter === 'completed' && (
               <View className="gap-3">
-                {services.length === 0 && maintenanceFromBE.filter((r) => r.status === 'completed').length === 0 ? (
+                {maintenanceFromBE.filter((r) => r.status === 'completed').length === 0 ? (
                   <EmptyState
                     icon={Check}
                     tone="success"
@@ -343,47 +371,15 @@ export default function ScheduleScreen() {
                     description="Các lần bảo dưỡng đã hoàn thành sẽ hiển thị tại đây."
                   />
                 ) : (
-                  <>
-                    {maintenanceFromBE
-                      .filter((r) => r.status === 'completed')
-                      .map((r) => (
-                        <CompletedMaintenanceCard
-                          key={r.id}
-                          request={r}
-                          vehicleName={vehicleNameById.get(r.motorcycle_id) ?? 'Xe'}
-                        />
-                      ))}
-                    {services.map((s) => (
-                      <Card key={s.id} className="p-4">
-                        <View className="flex-row items-center gap-3">
-                          <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
-                            <Wrench size={20} color="#1974f7" />
-                          </View>
-                          <View className="min-w-0 flex-1">
-                            <View className="flex-row items-center justify-between gap-2">
-                              <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
-                                {s.type}
-                              </Text>
-                              <Text className="shrink-0 text-sm font-bold text-foreground">
-                                {formatVND(s.price)}
-                              </Text>
-                            </View>
-                            <Text className="truncate text-xs text-muted-foreground">
-                              {s.vehicleName} · {s.mechanic}
-                            </Text>
-                            <Text className="mt-1 text-xs text-muted-foreground">{s.date}</Text>
-                          </View>
-                        </View>
-                        {s.notes && (
-                          <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
-                            <Text className="text-xs text-muted-foreground" numberOfLines={2}>
-                              {s.notes}
-                            </Text>
-                          </View>
-                        )}
-                      </Card>
-                    ))}
-                  </>
+                  maintenanceFromBE
+                    .filter((r) => r.status === 'completed')
+                    .map((r) => (
+                      <CompletedMaintenanceCard
+                        key={r.id}
+                        request={r}
+                        vehicleName={vehicleNameById.get(r.motorcycle_id) ?? 'Xe'}
+                      />
+                    ))
                 )}
               </View>
             )}
@@ -433,12 +429,12 @@ export default function ScheduleScreen() {
 
         {tab === 'emergency' && (
           <View className="gap-3">
-            {emergencyCalls.length === 0 ? (
+            {completedEmergencyCount === 0 ? (
               <EmptyState
                 icon={Wrench}
                 tone="destructive"
                 title="Chưa có lịch sử cứu hộ"
-                description="Các yêu cầu cứu hộ đã hoàn thành kèm chi tiết hư hại/sửa chữa sẽ hiển thị tại đây."
+                description="Các yêu cầu cứu hộ đã hoàn thành sẽ hiển thị tại đây."
                 action={
                   <ActionButton
                     variant="destructive"
@@ -451,7 +447,15 @@ export default function ScheduleScreen() {
                 }
               />
             ) : (
-              emergencyCalls.map((call) => <EmergencyHistoryCard key={call.id} call={call} />)
+              sr.list
+                .filter((r) => r.service_type === 'emergency_rescue' && r.status === 'completed')
+                .map((req) => (
+                  <EmergencyHistoryCard
+                    key={req.id}
+                    request={req}
+                    vehicleName={vehicleNameById.get(req.motorcycle_id) ?? 'Xe'}
+                  />
+                ))
             )}
             <Card className="border-dashed bg-secondary/40 p-4">
               <Text className="text-center text-xs text-muted-foreground">
@@ -519,7 +523,7 @@ function TabButton({
           active ? 'text-foreground' : 'text-muted-foreground',
         )}
       >
-        {label}
+        {label ?? ''}
       </Text>
       <View
         className={cn(
@@ -532,12 +536,12 @@ function TabButton({
             'text-[10px] font-bold',
             active
               ? tone === 'primary'
-                ? 'text-primary'
-                : 'text-destructive'
+                  ? 'text-primary'
+                  : 'text-destructive'
               : 'text-muted-foreground',
           )}
         >
-          {count}
+          {String(count ?? 0)}
         </Text>
       </View>
     </Pressable>
@@ -710,13 +714,36 @@ function CompletedMaintenanceCard({
 }
 
 function isWithinDays(isoDate: string, days: number): boolean {
-  const target = new Date(isoDate).getTime();
-  const today = Date.now();
-  const diffDays = (target - today) / (1000 * 60 * 60 * 24);
+  const target = new Date(isoDate);
+  if (Number.isNaN(target.getTime())) return false;
+  // Normalize về đầu ngày để so sánh công bằng với hôm nay.
+  const targetStart = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate(),
+  ).getTime();
+  const now = new Date();
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const diffDays = (targetStart - todayStart) / (1000 * 60 * 60 * 24);
   return diffDays >= 0 && diffDays <= days;
 }
 
-function EmergencyHistoryCard({ call }: { call: import('@/lib/types').EmergencyCall }) {
+function EmergencyHistoryCard({
+  request,
+  vehicleName,
+}: {
+  request: ServiceRequestResponse;
+  vehicleName: string;
+}) {
+  const dt = request.scheduled_start_at
+    ? new Date(request.scheduled_start_at)
+    : new Date(request.created_at);
+  const date = dt.toISOString().slice(0, 10);
+  const time = dt.toTimeString().slice(0, 5);
   return (
     <Card className="p-4">
       <View className="flex-row items-center gap-3">
@@ -726,25 +753,31 @@ function EmergencyHistoryCard({ call }: { call: import('@/lib/types').EmergencyC
         <View className="min-w-0 flex-1">
           <View className="flex-row items-center justify-between gap-2">
             <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
-              {call.issue}
+              {request.request_code}
             </Text>
-            <Text className="shrink-0 text-sm font-bold text-foreground">{formatVND(call.price)}</Text>
-          </View>
-          <Text className="truncate text-xs text-muted-foreground">
-            {call.vehicleName} · {call.mechanicName}
-          </Text>
-          <View className="mt-1.5 flex-row items-center gap-2">
-            <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
-              <CalendarClock size={12} color="#64748b" />
-              <Text className="text-xs font-semibold text-secondary-foreground">
-                {call.date} · {call.time}
-              </Text>
-            </View>
             <View className="flex-row items-center gap-1 rounded-full bg-green/10 px-2.5 py-1">
               <Check size={12} color="#145413" />
               <Text className="text-xs font-semibold text-green">Hoàn tất</Text>
             </View>
           </View>
+          <Text className="truncate text-xs text-muted-foreground">
+            {vehicleName}
+          </Text>
+          <View className="mt-1.5 flex-row items-center gap-2">
+            <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
+              <CalendarClock size={12} color="#64748b" />
+              <Text className="text-xs font-semibold text-secondary-foreground">
+                {date} · {time}
+              </Text>
+            </View>
+          </View>
+          {request.problem_description && (
+            <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
+              <Text className="text-xs text-muted-foreground" numberOfLines={2}>
+                {request.problem_description}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
     </Card>
@@ -759,11 +792,12 @@ function ReminderCard({
   onChanged: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const status = deriveStatus(reminder);
   const togglePause = async () => {
     setBusy(true);
     try {
       await updateReminder(reminder.id, {
-        status: reminder.status === 'disabled' ? 'active' : 'disabled',
+        enabled: status === 'disabled',
       });
       await onChanged();
     } finally {
@@ -771,57 +805,37 @@ function ReminderCard({
     }
   };
   /**
-   * Mở Alert chọn 1 trong 4 mốc: 15 phút / 1 giờ / tới sáng / 1 ngày.
+   * Mở modal mini chọn 1 trong 5 mốc: +15 phút / +1 giờ / tới sáng mai / +1 ngày / Tuỳ chỉnh.
    * BE nhận ISO datetime, mình set offset tương ứng từ now().
    */
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [customUntil, setCustomUntil] = useState<Date | null>(null);
   const handleSnooze = () => {
-    const options: { label: string; ms: number }[] = [
-      { label: '15 phút', ms: 15 * 60 * 1000 },
-      { label: '1 giờ', ms: 60 * 60 * 1000 },
-      { label: 'Tới sáng mai (08:00)', ms: 0 }, // calculated dynamically
-      { label: '1 ngày', ms: 24 * 60 * 60 * 1000 },
-    ];
-    Alert.alert(
-      'Tạm hoãn nhắc nhở',
-      'Chọn khoảng thời gian bạn muốn nhắc lại:',
-      [
-        ...options.map((opt) => {
-          const until = new Date(
-            opt.ms === 0
-              ? (() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() + 1);
-                  d.setHours(8, 0, 0, 0);
-                  return d.getTime();
-                })()
-              : Date.now() + opt.ms,
-          );
-          const labelWithTime = `${opt.label} (${until.toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })})`;
-          return {
-            text: labelWithTime,
-            onPress: async () => {
-              setBusy(true);
-              try {
-                await snoozeReminder(reminder.id, until.toISOString());
-                await onChanged();
-              } finally {
-                setBusy(false);
-              }
-            },
-          } as const;
-        }),
-        {
-          text: 'Huỷ',
-          style: 'cancel' as const,
-        },
-      ],
-    );
+    setCustomUntil(new Date(Date.now() + 60 * 60 * 1000));
+    setSnoozeOpen(true);
   };
-  const fireDate = new Date(reminder.scheduled_at);
+  const confirmSnooze = async (until: Date) => {
+    if (isPastDateTime(until)) return;
+    setBusy(true);
+    setSnoozeOpen(false);
+    try {
+      await snoozeReminder(reminder.id, until.toISOString());
+      await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const buildUntil = (ms: number): Date => new Date(Date.now() + ms);
+  const buildTomorrowMorning = (): Date => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(8, 0, 0, 0);
+    return d;
+  };
+  const fireDate = new Date(reminder.next_due_at);
+  const recurrence = intervalDaysToRecurrence(reminder.interval_days);
   return (
+    <>
     <Card className="p-4">
       <View className="flex-row items-center justify-between">
         <View className="flex-1 pr-2">
@@ -834,11 +848,11 @@ function ReminderCard({
             </Text>
           )}
         </View>
-        <Badge tone={reminder.status === 'active' ? 'blue' : reminder.status === 'snoozed' ? 'amber' : 'neutral'}>
+        <Badge tone={status === 'active' ? 'blue' : status === 'snoozed' ? 'amber' : 'neutral'}>
           <Text className="text-xs font-semibold">
-            {reminder.status === 'active'
+            {status === 'active'
               ? 'Đang bật'
-              : reminder.status === 'snoozed'
+              : status === 'snoozed'
                 ? 'Tạm hoãn'
                 : 'Tắt'}
           </Text>
@@ -848,18 +862,17 @@ function ReminderCard({
         <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
           <CalendarClock size={12} color="#64748b" />
           <Text className="text-xs font-semibold text-secondary-foreground">
-            {fireDate.toLocaleDateString('vi-VN')} ·{' '}
-            {fireDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+            {formatDdMmYyyyHHmm(fireDate)}
           </Text>
         </View>
         <View className="flex-row items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1">
           <Text className="text-xs font-semibold text-primary">
-            {recurrenceLabel(reminder.recurrence as ReminderRecurrence)}
+            {recurrenceLabel(recurrence as ReminderRecurrence)}
           </Text>
         </View>
       </View>
       <View className="mt-3 flex-row gap-2">
-        {reminder.status !== 'disabled' && (
+        {status !== 'disabled' && (
           <ActionButton
             variant="secondary"
             fullWidth
@@ -876,9 +889,9 @@ function ReminderCard({
           fullWidth
           onPress={togglePause}
           disabled={busy}
-          accessibilityLabel={reminder.status === 'disabled' ? 'Bật nhắc nhở' : 'Tắt nhắc nhở'}
+          accessibilityLabel={status === 'disabled' ? 'Bật nhắc nhở' : 'Tắt nhắc nhở'}
         >
-          {reminder.status === 'disabled' ? (
+          {status === 'disabled' ? (
             <>
               <Play size={14} color="#16202f" />
               <Text className="text-sm font-semibold text-foreground">Bật</Text>
@@ -892,5 +905,124 @@ function ReminderCard({
         </ActionButton>
       </View>
     </Card>
+    {/* Snooze modal */}
+    <Modal
+      visible={snoozeOpen}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setSnoozeOpen(false)}
+    >
+      <View className="flex-1 items-center justify-center bg-black/40 px-5">
+        <Pressable
+          className="absolute inset-0"
+          onPress={() => setSnoozeOpen(false)}
+        />
+        <View className="w-full max-w-sm rounded-3xl bg-card p-5">
+          <View className="mb-1 flex-row items-center gap-2">
+            <Bell size={18} color="#1974f7" />
+            <Text className="text-base font-bold text-foreground">
+              Tạm hoãn nhắc nhở
+            </Text>
+          </View>
+          <Text className="mb-3 text-xs text-muted-foreground">
+            Chọn khoảng thời gian bạn muốn nhắc lại.
+          </Text>
+          <View className="gap-2">
+            <SnoozeOption
+              label="+15 phút"
+              until={buildUntil(15 * 60 * 1000)}
+              onPress={confirmSnooze}
+            />
+            <SnoozeOption
+              label="+1 giờ"
+              until={buildUntil(60 * 60 * 1000)}
+              onPress={confirmSnooze}
+            />
+            <SnoozeOption
+              label="Tới sáng mai (08:00)"
+              until={buildTomorrowMorning()}
+              onPress={confirmSnooze}
+            />
+            <SnoozeOption
+              label="+1 ngày"
+              until={buildUntil(24 * 60 * 60 * 1000)}
+              onPress={confirmSnooze}
+            />
+            <View className="mt-2 rounded-2xl border border-dashed border-border p-3">
+              <Text className="mb-1 text-xs font-semibold text-foreground">
+                Tuỳ chỉnh
+              </Text>
+              <DateTimePickerField
+                mode="datetime"
+                value={customUntil}
+                onChange={setCustomUntil}
+                minimumDate={new Date()}
+                placeholder="Chọn ngày giờ cụ thể"
+                minuteInterval={5}
+                accessibilityLabel="Chọn ngày giờ tuỳ chỉnh để tạm hoãn"
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={
+                  !customUntil ||
+                  isPastDateTime(customUntil) ||
+                  busy
+                }
+                onPress={() => customUntil && confirmSnooze(customUntil)}
+                className={cn(
+                  'mt-2 items-center rounded-xl py-2.5',
+                  !customUntil || isPastDateTime(customUntil) || busy
+                    ? 'bg-secondary'
+                    : 'bg-primary active:scale-95',
+                )}
+              >
+                <Text
+                  className={cn(
+                    'text-sm font-semibold',
+                    !customUntil || isPastDateTime(customUntil) || busy
+                      ? 'text-muted-foreground'
+                      : 'text-primary-foreground',
+                  )}
+                >
+                  Xác nhận tạm hoãn
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setSnoozeOpen(false)}
+            className="mt-4 items-center rounded-xl border border-border py-2.5 active:scale-95"
+          >
+            <Text className="text-sm font-semibold text-foreground">Đóng</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+    </>
+  );
+}
+
+function SnoozeOption({
+  label,
+  until,
+  onPress,
+}: {
+  label: string;
+  until: Date;
+  onPress: (d: Date) => void | Promise<void>;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, đến ${formatDdMmYyyyHHmm(until)}`}
+      onPress={() => onPress(until)}
+      className="flex-row items-center justify-between rounded-xl border border-border bg-background px-4 py-2.5 active:scale-[0.98]"
+    >
+      <Text className="text-sm font-semibold text-foreground">{label}</Text>
+      <Text className="text-xs text-muted-foreground">
+        {formatDdMmYyyyHHmm(until)}
+      </Text>
+    </Pressable>
   );
 }

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View,
@@ -15,6 +14,7 @@ import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { createReview, listAssignments } from '@/lib/assignments-service';
 import { getServiceRequest, type ServiceRequestResponse } from '@/lib/service-requests-service';
 
@@ -110,12 +110,7 @@ export default function ReviewScreen() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader title="Đánh giá thợ" onBack={() => router.back()} />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {request && (
           <Card className="mb-4 p-4">
             <Text className="text-xs text-muted-foreground">Yêu cầu</Text>
@@ -207,7 +202,7 @@ export default function ReviewScreen() {
         >
           <Text className="text-sm font-semibold text-foreground">Để sau</Text>
         </ActionButton>
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }

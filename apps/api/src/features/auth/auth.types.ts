@@ -17,6 +17,9 @@ export type VerifiedSupabaseIdentity = {
 export type RequestActor = {
   id: string;
   display_name?: string;
+  phone?: string;
+  address?: string;
+  avatar_url?: string;
   roles: UserRole[];
   status: UserStatus;
 };

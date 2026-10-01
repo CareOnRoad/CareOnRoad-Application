@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
-import { ActivityIndicator, Image, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Calendar,
@@ -18,8 +18,9 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Banner } from '@/components/ui/banner';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { ApiError } from '@/lib/api';
-import { formatDate } from '@/lib/mock-data';
+import { formatDate } from '@/lib/format';
 
 /**
  * VehicleDetailScreen - chi tiết một xe đã đăng ký.
@@ -85,11 +86,7 @@ export default function VehicleDetailScreen() {
         subtitle={`${vehicle.brand} · ${vehicle.year}`}
         onBack={() => router.back()}
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero */}
         <Card className="overflow-hidden">
           <Image
@@ -177,7 +174,7 @@ export default function VehicleDetailScreen() {
         <Text className="mt-6 text-center text-xs text-muted-foreground">
           Mã xe: {vehicle.id}
         </Text>
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }

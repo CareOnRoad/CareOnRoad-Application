@@ -3,6 +3,8 @@ import { z } from "zod";
 import { userRoles, userStatuses } from "./auth.types";
 import { pushProviders } from "@/server/repositories/contracts/device-delivery-credential.repository";
 
+const phoneRegex = /^\+?[0-9 .\-()]{9,20}$/;
+
 export const verifiedIdentitySchema = z.object({
   subject: z.string().uuid(),
   issuer: z.string().url(),
@@ -11,7 +13,53 @@ export const verifiedIdentitySchema = z.object({
 
 export const bootstrapProfileSchema = z
   .object({
-    display_name: z.string().trim().min(1).max(120).optional()
+    display_name: z.string().trim().min(1).max(120).optional(),
+    phone: z
+      .string()
+      .trim()
+      .max(20)
+      .regex(phoneRegex, "Số điện thoại không hợp lệ.")
+      .optional()
+      .or(z.literal("").transform(() => undefined)),
+    address: z
+      .string()
+      .trim()
+      .max(500)
+      .optional()
+      .or(z.literal("").transform(() => undefined)),
+    avatar_url: z
+      .string()
+      .trim()
+      .url("URL ảnh đại diện không hợp lệ.")
+      .max(2048)
+      .optional()
+      .or(z.literal("").transform(() => undefined))
+  })
+  .strict();
+
+export const updateProfileSchema = z
+  .object({
+    display_name: z.string().trim().min(1).max(120).optional(),
+    phone: z
+      .string()
+      .trim()
+      .max(20)
+      .regex(phoneRegex, "Số điện thoại không hợp lệ.")
+      .optional()
+      .or(z.literal("").transform(() => undefined)),
+    address: z
+      .string()
+      .trim()
+      .max(500)
+      .optional()
+      .or(z.literal("").transform(() => undefined)),
+    avatar_url: z
+      .string()
+      .trim()
+      .url("URL ảnh đại diện không hợp lệ.")
+      .max(2048)
+      .optional()
+      .or(z.literal("").transform(() => undefined))
   })
   .strict();
 
@@ -49,6 +97,9 @@ export const rotatePushTokenSchema = z
 export const requestActorSchema = z.object({
   id: z.string().uuid(),
   display_name: z.string().min(1).max(120).optional(),
+  phone: z.string().min(9).max(20).optional(),
+  address: z.string().min(1).max(500).optional(),
+  avatar_url: z.string().url().max(2048).optional(),
   roles: z.array(z.enum(userRoles)),
   status: z.enum(userStatuses)
 });
@@ -56,3 +107,4 @@ export const requestActorSchema = z.object({
 export type BootstrapProfileInput = z.infer<typeof bootstrapProfileSchema>;
 export type RegisterDeviceInput = z.infer<typeof registerDeviceSchema>;
 export type RotatePushTokenInput = z.infer<typeof rotatePushTokenSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

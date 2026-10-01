@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Bike, Calendar, FileText, History, LucideIcon, Receipt, Wrench } from 'lucide-react-native';
@@ -9,6 +9,8 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { HeroCard } from '@/components/ui/hero-card';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { useServiceRequests } from '@/hooks/use-service-requests';
 import { statusLabel, type ServiceRequestResponse } from '@/lib/service-requests-service';
 
@@ -38,11 +40,7 @@ export default function HistoryScreen() {
           subtitle={selected.request_code}
           onBack={() => setSelected(null)}
         />
-        <ScrollView
-          className="flex-1"
-          contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScreenScroll>
           <Card className="p-5">
             <View className="flex-row items-center gap-3">
               <View className="size-12 items-center justify-center rounded-2xl bg-primary/10">
@@ -97,7 +95,7 @@ export default function HistoryScreen() {
               Hoá đơn sẽ được tạo tự động sau khi thanh toán thành công.
             </Text>
           </Card>
-        </ScrollView>
+        </ScreenScroll>
       </SafeAreaView>
     );
   }
@@ -105,14 +103,10 @@ export default function HistoryScreen() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader title="Lịch sử dịch vụ" onBack={() => router.back()} />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero */}
-        <Card className="overflow-hidden border-0 bg-navy">
-          <View className="flex-row items-center justify-between p-5">
+        <HeroCard>
+          <View className="flex-row items-center justify-between">
             <View className="flex-1">
               <Text className="text-xs text-white/70">Tổng dịch vụ</Text>
               <Text className="mt-1 text-2xl font-bold text-white">{completed.length}</Text>
@@ -126,7 +120,7 @@ export default function HistoryScreen() {
               </Text>
             </View>
           </View>
-        </Card>
+        </HeroCard>
 
         {sr.listLoading ? (
           <View className="items-center py-8">
@@ -152,7 +146,7 @@ export default function HistoryScreen() {
             ))}
           </View>
         )}
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }

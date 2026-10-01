@@ -32,7 +32,6 @@ import type {
   MechanicEarnings,
   JobUpdatePayload,
 } from '@/lib/mechanic-types';
-import { mockGarage, mockScheduleSlots, mockMechanicJobs } from '@/lib/mechanic-mock-data';
 
 interface MechanicState {
   mechanic: MechanicProfile;
@@ -164,7 +163,7 @@ function dashboardToEarnings(d: MechanicDashboardResponse | null): MechanicEarni
 
 export function MechanicAppProvider({ children }: { children: React.ReactNode }) {
   const { user: authUser, isBackendConfigured, status: authStatus } = useAuth();
-  const [jobs, setJobs] = useState<MechanicJob[]>(mockMechanicJobs);
+  const [jobs, setJobs] = useState<MechanicJob[]>([]);
   const [mechanic, setMechanic] = useState<MechanicProfile>({
     id: '',
     name: authUser?.name ?? '',
@@ -223,22 +222,21 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       }
       if (dash) setDashboard(dash);
       const list = (jobsPage?.items ?? []) as (AssignmentResponse & { request?: unknown })[];
+      // BE wire: chỉ dùng jobs từ assignments. Nếu rỗng → EmptyState, KHÔNG fallback mock.
       setJobs(
-        list.length > 0
-          ? list.map((a) =>
-              assignmentToJob(
-                a as AssignmentResponse & {
-                  request?: {
-                    request_code: string;
-                    service_type: string;
-                    scheduled_start_at?: string;
-                    created_at: string;
-                  };
-                  latest_quote_status?: string;
-                },
-              ),
-            )
-          : mockMechanicJobs,
+        list.map((a) =>
+          assignmentToJob(
+            a as AssignmentResponse & {
+              request?: {
+                request_code: string;
+                service_type: string;
+                scheduled_start_at?: string;
+                created_at: string;
+              };
+              latest_quote_status?: string;
+            },
+          ),
+        ),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không thể tải dữ liệu thợ');
@@ -370,10 +368,38 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
   const getJob = useCallback((id: string) => jobs.find((j) => j.id === id), [jobs]);
 
   // Helper bổ sung: submit ETA từ UI mechanic.
+
+  // Garage: BE không có endpoint garage cho thợ → trả rỗng để UI không hiển thị
+  // dữ liệu giả. Garage profile sẽ được bổ sung qua /mechanics/me/profile khi BE có.
+  const garage: GarageInfo = useMemo(
+    () => ({ id: '', name: '', address: '', phone: '' }),
+    [],
+  );
+
+  // Schedule slots: derive rỗng từ jobs (BE chưa có schedule read endpoint).
+  // UI sẽ hiển thị EmptyState thay vì lịch giả.
+  const scheduleSlots: ScheduleSlot[] = useMemo(() => {
+    if (jobs.length === 0) return [];
+    const slots: ScheduleSlot[] = [];
+    const seen = new Set<string>();
+    for (const j of jobs) {
+      const key = `${j.scheduledDate}T${j.scheduledTime}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      slots.push({
+        date: j.scheduledDate,
+        time: j.scheduledTime,
+        status: j.status === 'completed' ? 'working' : 'working',
+        ...(j.id ? { jobId: j.id } : {}),
+      });
+    }
+    return slots;
+  }, [jobs]);
+
   const value = useMemo<MechanicState>(
     () => ({
       mechanic,
-      garage: mockGarage,
+      garage,
       jobs,
       todayJobs,
       upcomingTodayJobs,
@@ -381,7 +407,7 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       updateJobStatus,
       completeJob,
       toggleAvailability,
-      scheduleSlots: mockScheduleSlots,
+      scheduleSlots,
       earnings: dashboardToEarnings(dashboard),
       dashboard,
       loading,
@@ -392,6 +418,7 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
     }),
     [
       mechanic,
+      garage,
       jobs,
       todayJobs,
       upcomingTodayJobs,
@@ -399,6 +426,7 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       updateJobStatus,
       completeJob,
       toggleAvailability,
+      scheduleSlots,
       dashboard,
       loading,
       error,

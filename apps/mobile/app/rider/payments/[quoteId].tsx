@@ -4,7 +4,6 @@ import {
   Image,
   Linking,
   Pressable,
-  ScrollView,
   Share,
   Text,
   View,
@@ -17,7 +16,9 @@ import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
+import { formatDdMmYyyyHHmm } from '@/lib/format';
 import {
   cancelPaymentOrder,
   createPaymentOrder,
@@ -225,11 +226,7 @@ export default function PaymentScreen() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader title="Thanh toán" subtitle={statusLabel(order.status)} onBack={() => router.back()} />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         <PendingPaymentCard order={order} timeLeft={timeLeft} onOpenCheckout={handleOpenCheckout} />
         {error && (
           <View className="mt-4">
@@ -246,7 +243,7 @@ export default function PaymentScreen() {
           <XCircle size={16} color="#ed3f3a" />
           <Text className="text-sm font-semibold text-destructive">Huỷ đơn thanh toán</Text>
         </ActionButton>
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }
@@ -366,7 +363,7 @@ function PaymentSuccess({
           {order.paid_at && (
             <RowLine
               label="Thời gian"
-              value={new Date(order.paid_at).toLocaleString('vi-VN')}
+              value={formatDdMmYyyyHHmm(order.paid_at)}
             />
           )}
         </Card>

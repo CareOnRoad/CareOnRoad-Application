@@ -10,6 +10,7 @@ export interface AuthUser {
   name: string;
   email: string;
   phone: string;
+  address?: string;
   avatar: string;
   password: string;
 }
@@ -20,6 +21,7 @@ export interface PublicAuthUser {
   name: string;
   email: string;
   phone: string;
+  address?: string;
   avatar: string;
 }
 
@@ -30,7 +32,7 @@ export interface StoredAuthSession {
 }
 
 export function toPublicUser(user: AuthUser): PublicAuthUser {
-  return {
+  const result: PublicAuthUser = {
     id: user.id,
     role: user.role,
     name: user.name,
@@ -38,4 +40,8 @@ export function toPublicUser(user: AuthUser): PublicAuthUser {
     phone: user.phone,
     avatar: user.avatar,
   };
+  if (user.address) {
+    result.address = user.address;
+  }
+  return result;
 }

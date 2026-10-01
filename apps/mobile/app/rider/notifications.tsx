@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Pressable,
   RefreshControl,
-  ScrollView,
   Text,
   View,
 } from 'react-native';
@@ -23,6 +22,7 @@ import {
 import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
 import {
   categoryIcon,
@@ -145,10 +145,8 @@ export default function NotificationsScreen() {
           />
         </View>
       ) : (
-        <ScrollView
-          className="flex-1"
-          contentContainerStyle={{ padding: 20, paddingBottom: 32, gap: 12 }}
-          showsVerticalScrollIndicator={false}
+        <ScreenScroll
+          contentContainerStyle={{ gap: 12 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
           {items.map((n) => (
@@ -160,7 +158,7 @@ export default function NotificationsScreen() {
               }}
             />
           ))}
-        </ScrollView>
+        </ScreenScroll>
       )}
     </SafeAreaView>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Check, MapPin, Wrench } from 'lucide-react-native';
@@ -9,7 +9,9 @@ import { Banner } from '@/components/ui/banner';
 import { AppHeader } from '@/components/ui/app-header';
 import { Card } from '@/components/ui/card';
 import { Field, FormTextInput } from '@/components/ui/form';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { getServiceRequest, type ServiceRequestResponse } from '@/lib/service-requests-service';
+import { formatDdMmYyyyHHmm } from '@/lib/format';
 
 /**
  * ConfirmedScreen - thông báo đặt lịch thành công (BE-wired).
@@ -61,11 +63,7 @@ export default function ConfirmedScreen() {
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader title="Đặt lịch thành công" />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero success */}
         <View className="mb-6 items-center gap-4 pt-6">
           <View className="size-24 items-center justify-center">
@@ -123,7 +121,7 @@ export default function ConfirmedScreen() {
               <View className="mt-3">
                 <Field label="Ngày giờ hẹn">
                   <FormTextInput
-                    value={new Date(request.scheduled_start_at).toLocaleString('vi-VN')}
+                    value={formatDdMmYyyyHHmm(request.scheduled_start_at)}
                     editable={false}
                   />
                 </Field>
@@ -173,7 +171,7 @@ export default function ConfirmedScreen() {
             <Text className="text-sm font-semibold text-primary-foreground">Đặt dịch vụ khác</Text>
           </ActionButton>
         </View>
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }

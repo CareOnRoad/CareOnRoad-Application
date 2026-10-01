@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLocalSearchParams, router } from 'expo-router';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check } from 'lucide-react-native';
 
@@ -8,7 +8,8 @@ import { useApp } from '@/contexts/app-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
-import { Field, FormTextInput } from '@/components/ui/form';
+import { Field, FormTextInput, SectionHeader } from '@/components/ui/form';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { ApiError } from '@/lib/api';
 
 /**
@@ -35,10 +36,24 @@ export default function VehicleFormScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const valid = form.brand.trim() && form.model.trim() && form.plate.trim();
+  const currentYear = new Date().getFullYear();
+  const yearTrimmed = form.year.trim();
+  const yearNumber = yearTrimmed ? Number(yearTrimmed) : NaN;
+  const yearValid =
+    !yearTrimmed || (Number.isInteger(yearNumber) && yearNumber >= 1950 && yearNumber <= currentYear + 1);
+  const yearError = yearTrimmed && !yearValid
+    ? `Năm sản xuất phải từ 1950 đến ${currentYear + 1}.`
+    : undefined;
+
+  const valid =
+    form.brand.trim() && form.model.trim() && form.plate.trim() && yearValid;
 
   const handleSubmit = async () => {
     if (!valid) {
+      if (yearError) {
+        setError(yearError);
+        return;
+      }
       setError('Vui lòng nhập đầy đủ hãng, model và biển số');
       return;
     }
@@ -85,14 +100,9 @@ export default function VehicleFormScreen() {
         subtitle={existing ? `${existing.brand} · ${existing.plate}` : 'Điền thông tin bên dưới'}
         onBack={() => router.back()}
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Thông tin cơ bản */}
-        <SectionLabel>Thông tin cơ bản</SectionLabel>
+        <SectionHeader title="Thông tin cơ bản" />
 
         <View className="flex-row gap-3">
           <View className="flex-1">
@@ -130,13 +140,19 @@ export default function VehicleFormScreen() {
         </View>
 
         <View className="mt-4">
-          <Field label="Năm sản xuất" hint="Để trống sẽ dùng năm hiện tại">
+          <Field
+            label="Năm sản xuất"
+            hint="Để trống sẽ dùng năm hiện tại"
+            error={yearError}
+          >
             <FormTextInput
-              placeholder="2024"
+              placeholder={currentYear.toString()}
               keyboardType="numeric"
+              maxLength={4}
               value={form.year}
-              onChangeText={(t) => setForm({ ...form, year: t })}
+              onChangeText={(t) => setForm({ ...form, year: t.replace(/[^0-9]/g, '') })}
               accessibilityLabel="Năm sản xuất"
+              error={!!yearError}
             />
           </Field>
         </View>
@@ -173,21 +189,8 @@ export default function VehicleFormScreen() {
         <Text className="mt-3 text-center text-xs text-muted-foreground">
           Dữ liệu xe được đồng bộ với máy chủ khi đã tích hợp backend. Trong demo mode lưu cục bộ.
         </Text>
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }
 
-function SectionLabel({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <Text className={`mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground ${className ?? ''}`}>
-      {children}
-    </Text>
-  );
-}

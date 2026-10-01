@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { Wrench, Calendar, ChevronRight } from 'lucide-react-native';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { formatDate, formatVND } from '@/lib/mock-data';
+import { formatDate, formatVND } from '@/lib/format';
 import type { ServiceRecord } from '@/lib/types';
 
 /**

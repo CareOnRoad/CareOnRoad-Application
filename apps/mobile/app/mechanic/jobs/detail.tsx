@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Linking, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
@@ -19,9 +19,10 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Banner } from '@/components/ui/banner';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { CustomerCard } from '@/components/mechanic/cards/customer-card';
 import { JobUpdateForm } from '@/components/mechanic/forms/job-update-form';
-import { formatDate, formatVND } from '@/lib/mock-data';
+import { formatDate, formatVND } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { MechanicJobStatus } from '@/lib/mechanic-types';
 
@@ -104,11 +105,7 @@ export default function MechanicJobDetailScreen() {
         subtitle={`${job.vehicle.plate} · ${job.scheduledTime}`}
         onBack={() => router.back()}
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         <View className="mb-4 flex-row items-center gap-2">
           <View className={cn('rounded-full px-2.5 py-1', toneBg[tone])}>
             <Text className="text-xs font-semibold" style={{ color: toneColor[tone] }}>
@@ -285,7 +282,7 @@ export default function MechanicJobDetailScreen() {
           <MapPin size={14} color="#64748b" />
           <Text className="text-xs text-muted-foreground underline">Mở vị trí đón khách trên bản đồ</Text>
         </Pressable>
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }

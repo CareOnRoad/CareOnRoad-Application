@@ -4,7 +4,10 @@ import type { JsonObject } from "./idempotency.repository";
 export type ApplicationUser = {
   id: string;
   displayName?: string;
+  phone?: string;
   phoneMasked?: string;
+  address?: string;
+  avatarUrl?: string;
   status: UserStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -17,10 +20,21 @@ export type ApplicationActor = ApplicationUser & {
 export type CreateApplicationUser = {
   id: string;
   displayName?: string;
+  phone?: string;
   phoneMasked?: string;
+  address?: string;
+  avatarUrl?: string;
   status?: UserStatus;
   createdAt?: Date;
   updatedAt?: Date;
+};
+
+export type UpdateApplicationUser = {
+  displayName?: string | null;
+  phone?: string | null;
+  phoneMasked?: string | null;
+  address?: string | null;
+  avatarUrl?: string | null;
 };
 
 export type UserRoleRecord = {
@@ -97,6 +111,17 @@ export interface UserRepository {
   findActorById(id: string): Promise<ApplicationActor | undefined>;
   createProfile(input: CreateApplicationUser): Promise<ApplicationUser>;
   addRole(userId: string, role: UserRole): Promise<void>;
+  /**
+   * Cập nhật các trường profile editable (display_name, phone, address,
+   * avatar_url). Chỉ patch những field được cung cấp (undefined = không đổi).
+   * Trả về actor đã cập nhật (kèm roles). Caller phải đảm bảo identity đã
+   * được verify; repository không enforce authz.
+   */
+  updateProfile(
+    id: string,
+    input: UpdateApplicationUser,
+    updatedAt: Date,
+  ): Promise<ApplicationActor>;
   registerDevice(input: RegisterUserDevice): Promise<UserDevice>;
   listAdminUsers(input: AdminUserListInput): Promise<AdminUserPage>;
   findActorForUpdate(id: string): Promise<ApplicationActor | undefined>;

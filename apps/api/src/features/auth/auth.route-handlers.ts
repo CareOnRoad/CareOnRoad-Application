@@ -9,7 +9,8 @@ import { PostgresUnitOfWork } from "@/server/repositories/postgres/postgres-unit
 import {
   bootstrapProfileSchema,
   registerDeviceSchema,
-  rotatePushTokenSchema
+  rotatePushTokenSchema,
+  updateProfileSchema
 } from "./auth.schemas";
 import { AuthService } from "./auth.service";
 import type {
@@ -24,7 +25,21 @@ export type AuthRouteDependencies = {
     getCurrentActor(identity: VerifiedSupabaseIdentity): Promise<RequestActor>;
     bootstrapProfile(
       identity: VerifiedSupabaseIdentity,
-      input: { display_name?: string }
+      input: {
+        display_name?: string;
+        phone?: string;
+        address?: string;
+        avatar_url?: string;
+      }
+    ): Promise<RequestActor>;
+    updateProfile(
+      identity: VerifiedSupabaseIdentity,
+      input: {
+        display_name?: string;
+        phone?: string;
+        address?: string;
+        avatar_url?: string;
+      }
     ): Promise<RequestActor>;
     registerDevice(
       identity: VerifiedSupabaseIdentity,
@@ -69,6 +84,23 @@ export function createAuthRouteHandlers(dependencies: AuthRouteDependencies) {
         }
         return NextResponse.json(
           await dependencies.authService.bootstrapProfile(identity, parsed.data)
+        );
+      } catch (error) {
+        return authRouteError(error);
+      }
+    },
+
+    async updateProfile(request: Request) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        const parsed = updateProfileSchema.safeParse(await readOptionalJson(request));
+        if (!parsed.success) {
+          return jsonError(400, "INVALID_INPUT", "Profile update is invalid.", {
+            details: { issues: parsed.error.issues }
+          });
+        }
+        return NextResponse.json(
+          await dependencies.authService.updateProfile(identity, parsed.data)
         );
       } catch (error) {
         return authRouteError(error);

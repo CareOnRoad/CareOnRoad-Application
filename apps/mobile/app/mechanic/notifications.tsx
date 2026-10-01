@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import {
   Bell,
   Check,
@@ -18,6 +18,7 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
 import {
   getUnreadCount,
@@ -156,11 +157,7 @@ export default function NotificationInboxScreen() {
           </View>
         }
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {error && (
           <View className="mb-4">
             <Banner tone="error" description={error} />
@@ -192,7 +189,7 @@ export default function NotificationInboxScreen() {
             ))}
           </View>
         )}
-      </ScrollView>
+      </ScreenScroll>
     </View>
   );
 }

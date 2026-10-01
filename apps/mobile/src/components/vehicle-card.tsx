@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { Gauge, ChevronRight } from 'lucide-react-native';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { formatDate } from '@/lib/mock-data';
+import { formatDate } from '@/lib/format';
 import type { Vehicle } from '@/lib/types';
 
 export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {

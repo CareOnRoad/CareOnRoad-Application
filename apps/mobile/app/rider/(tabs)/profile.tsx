@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   Bell,
@@ -23,9 +23,12 @@ import { useAuth } from '@/contexts/auth-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { SectionHeader } from '@/components/ui/form';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { EditProfileSheet } from '@/components/ui/edit-profile-sheet';
+import { HeroCard } from '@/components/ui/hero-card';
 import { NavRow, RowIcon, ToggleRow } from '@/components/ui/toggle-row';
 import { loadProfile, type LocalProfile } from '@/lib/profile-service';
 
@@ -42,8 +45,14 @@ import { loadProfile, type LocalProfile } from '@/lib/profile-service';
  *  7. Switch role + Logout buttons.
  */
 export default function ProfileScreen() {
-  const { vehicles, services, darkMode, toggleDarkMode } = useApp();
-  const { user: authUser, logout, switchRoleDemo, isBackendConfigured } = useAuth();
+  const { vehicles, services, darkMode, toggleDarkMode, user: appUser } = useApp();
+  const {
+    user: authUser,
+    logout,
+    switchRoleDemo,
+    isBackendConfigured,
+    updateProfile,
+  } = useAuth();
   const [language, setLanguage] = useState<'EN' | 'VI'>('VI');
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -67,11 +76,13 @@ export default function ProfileScreen() {
   }, [reloadLocalProfile]);
 
   const user = {
-    name: localProfile?.name ?? authUser?.name ?? 'Nguyễn Văn An',
-    phone: localProfile?.phone ?? authUser?.phone ?? '+84 90 555 1234',
-    email: localProfile?.email ?? authUser?.email ?? 'an.nguyen@email.com',
+    name: localProfile?.name ?? authUser?.name ?? '',
+    phone: localProfile?.phone ?? authUser?.phone ?? '',
+    email: localProfile?.email ?? authUser?.email ?? '',
     avatar:
-      localProfile?.avatar ?? authUser?.avatar ?? 'https://i.pravatar.cc/200?img=15',
+      localProfile?.avatar ?? authUser?.avatar ?? '',
+    address:
+      localProfile?.address ?? authUser?.address ?? appUser.address ?? '',
   };
 
   const handleProfileSaved = (profile: LocalProfile) => {
@@ -121,15 +132,10 @@ export default function ProfileScreen() {
   return (
     <View className="flex-1 bg-background">
       <AppHeader title="Hồ sơ" />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero */}
-        <Card className="overflow-hidden border-0 bg-navy">
-          <View className="p-5">
-            <View className="flex-row items-center gap-4">
+        <HeroCard>
+          <View className="flex-row items-center gap-4">
               <View className="size-16 overflow-hidden rounded-full border-2 border-white/20">
                 <Image
                   source={{ uri: user.avatar }}
@@ -162,8 +168,7 @@ export default function ProfileScreen() {
               <ShieldCheck size={16} color="#a9ffad" />
               <Text className="text-xs text-white">CareOnRoad Plus · thành viên từ 2024</Text>
             </View>
-          </View>
-        </Card>
+        </HeroCard>
 
         {/* Stats */}
         <View className="mt-5 flex-row gap-3">
@@ -179,9 +184,7 @@ export default function ProfileScreen() {
 
         {/* Personal info */}
         <View className="mt-6">
-          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Thông tin cá nhân
-          </Text>
+          <SectionHeader title="Thông tin cá nhân" />
           <Card className="divide-y divide-border">
             <InfoRow icon={User} label="Họ và tên" value={user.name} />
             <InfoRow icon={Mail} label="Email" value={user.email} />
@@ -191,20 +194,19 @@ export default function ProfileScreen() {
 
         {/* Saved addresses */}
         <View className="mt-6">
-          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Địa chỉ đã lưu
-          </Text>
+          <SectionHeader title="Địa chỉ đã lưu" />
           <Card className="divide-y divide-border">
-            <AddressRow label="Nhà" value="124 Nguyễn Văn Cừ, Quận 5" />
-            <AddressRow label="Công ty" value="72 Lê Thánh Tôn, Quận 1" />
+            <AddressRow
+              label="Địa chỉ chính"
+              value={user.address || 'Chưa cập nhật — nhấn Sửa hồ sơ để thêm'}
+              empty={!user.address}
+            />
           </Card>
         </View>
 
         {/* Settings */}
         <View className="mt-6">
-          <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Cài đặt
-          </Text>
+          <SectionHeader title="Cài đặt" />
           <Card className="divide-y divide-border">
             <NavRow
               icon={Bell}
@@ -253,7 +255,7 @@ export default function ProfileScreen() {
         <Text className="mt-6 text-center text-xs text-muted-foreground">
           CareOnRoad · Prototype v1.0
         </Text>
-      </ScrollView>
+      </ScreenScroll>
 
       <ConfirmDialog
         visible={logoutDialogOpen}
@@ -273,10 +275,10 @@ export default function ProfileScreen() {
 
       <EditProfileSheet
         visible={editProfileOpen}
-        userId={authUser?.id ?? ''}
         initialName={user.name}
         initialEmail={user.email}
         initialPhone={user.phone}
+        initialAddress={user.address}
         initialAvatar={user.avatar}
         onClose={() => setEditProfileOpen(false)}
         onSaved={handleProfileSaved}
@@ -323,13 +325,29 @@ function InfoRow({
   );
 }
 
-function AddressRow({ label, value }: { label: string; value: string }) {
+function AddressRow({
+  label,
+  value,
+  empty,
+}: {
+  label: string;
+  value: string;
+  empty?: boolean;
+}) {
   return (
     <View className="flex-row items-center gap-3 p-4">
       <RowIcon icon={MapPin} />
       <View className="min-w-0 flex-1">
         <Text className="text-sm font-semibold text-foreground">{label}</Text>
-        <Text className="truncate text-xs text-muted-foreground">{value}</Text>
+        <Text
+          className={
+            empty
+              ? 'truncate text-xs italic text-muted-foreground'
+              : 'truncate text-xs text-muted-foreground'
+          }
+        >
+          {value}
+        </Text>
       </View>
       <ChevronRight size={20} color="#64748b" />
     </View>

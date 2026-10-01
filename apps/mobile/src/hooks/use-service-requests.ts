@@ -224,10 +224,12 @@ export function useServiceRequests(): UseServiceRequestsReturn {
       clearTimers();
       setActive({ ...INITIAL_SESSION, busy: true });
       try {
+        // BE: `emergency_rescue` thuộc nhóm fixed-mode (chỉ `other` mới nhận
+        // `fulfillment_mode`). Địa điểm xác định bằng `location`/`address_text`.
+        // Gửi `fulfillment_mode` sẽ bị BE trả 400 INVALID_INPUT.
         const created = await apiCreateServiceRequest({
           motorcycle_id: motorcycleId,
           service_type: 'emergency_rescue',
-          fulfillment_mode: 'immediate_location',
           problem_description: problemDescription,
           ...(location ? { location } : {}),
           ...(addressText ? { address_text: addressText } : {}),
@@ -269,10 +271,12 @@ export function useServiceRequests(): UseServiceRequestsReturn {
       clearTimers();
       setActive({ ...INITIAL_SESSION, busy: true });
       try {
+        // BE: `periodic_maintenance` thuộc nhóm fixed-mode (chỉ `other` mới nhận
+        // `fulfillment_mode`). Lịch hẹn xác định bằng `scheduled_start_at`.
+        // Gửi `fulfillment_mode` sẽ bị BE trả 400 INVALID_INPUT.
         const created = await apiCreateServiceRequest({
           motorcycle_id: motorcycleId,
           service_type: 'periodic_maintenance',
-          fulfillment_mode: 'scheduled_visit',
           problem_description: problemDescription,
           scheduled_start_at: scheduledStartAt,
           ...(maintenanceNotes ? { maintenance_notes: maintenanceNotes } : {}),

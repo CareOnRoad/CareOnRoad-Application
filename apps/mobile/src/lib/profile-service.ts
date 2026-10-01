@@ -1,11 +1,13 @@
 /**
- * Profile service - lưu trữ thông tin user mở rộng vào AsyncStorage.
+ * Profile service - hỗ trợ cache local cho UI trong khi BE xử lý chính.
  *
- * Phase 1 (MVP): lưu local, không đồng bộ BE.
- * Phase 2: thêm PATCH /api/v1/auth/profile với fields name/phone/email/avatar.
+ * Lưu ý: Profile (name/phone/email/avatar/address) hiện đã được BE lưu qua
+ * `PATCH /api/v1/auth/profile` và `GET /api/v1/auth/me`. AsyncStorage chỉ còn
+ * đóng vai trò cache tạm để UI hydrate ngay khi mở tab Profile (tránh flash
+ * rỗng) trước khi AuthContext refresh actor.
  *
- * Lưu ý: Profile chỉ là bản cache local. Source of truth là auth-context (BE
- * cho production, AsyncStorage session cho demo).
+ * Source of truth là BE - cache này sẽ được cập nhật lại mỗi khi
+ * `AuthContext.updateProfile()` hoặc hydrate từ session.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,6 +24,7 @@ export interface LocalProfile {
   name: string;
   email: string;
   phone: string;
+  address: string;
   avatar: string;
   updatedAt: string;
 }
@@ -45,7 +48,7 @@ export async function loadProfile(userId: string): Promise<LocalProfile | null> 
 }
 
 /**
- * Lưu profile local, ghi đè nếu đã có.
+ * Lưu profile local, ghi đè nếu đã có. Dùng để cache dữ liệu BE trả về.
  */
 export async function saveProfile(profile: LocalProfile): Promise<void> {
   if (!profile.id) throw new Error('Profile phải có id');
@@ -62,37 +65,4 @@ export async function saveProfile(profile: LocalProfile): Promise<void> {
 export async function clearProfile(userId: string): Promise<void> {
   if (!userId) return;
   await AsyncStorage.removeItem(key(userId));
-}
-
-/**
- * Validate các trường trước khi save.
- * Trả về mảng lỗi tiếng Việt; rỗng = OK.
- */
-export function validateProfile(input: {
-  name: string;
-  email: string;
-  phone: string;
-}): string[] {
-  const errors: string[] = [];
-  const name = input.name.trim();
-  if (name.length < 2) {
-    errors.push('Họ và tên phải có ít nhất 2 ký tự.');
-  } else if (name.length > 120) {
-    errors.push('Họ và tên không quá 120 ký tự.');
-  }
-  const email = input.email.trim();
-  if (!email) {
-    errors.push('Vui lòng nhập email.');
-  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    errors.push('Email không hợp lệ.');
-  }
-  const phone = input.phone.trim();
-  if (phone) {
-    // Cho phép linh hoạt: +84..., 0xxx, có khoảng trắng/dấu gạch ngang.
-    const digits = phone.replace(/[^\d]/g, '');
-    if (digits.length < 9 || digits.length > 13) {
-      errors.push('Số điện thoại phải có 9-13 chữ số.');
-    }
-  }
-  return errors;
 }

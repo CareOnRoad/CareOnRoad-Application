@@ -128,8 +128,11 @@
   travel states with explicit short retention, replay/rate controls, RLS,
   lifecycle-triggered deletion, and protected bounded cleanup.
 - Migrations `202606250001_enable_extensions.sql` through
-  `202606250032_live_location_tracking.sql` must be applied and verified on
+  `202606250033_user_profile_extended.sql` must be applied and verified on
   hosted/dev before enabling the corresponding APIs or seeding mock data.
+- `202606250033_user_profile_extended.sql` adds `phone`, `address`, and
+  `avatar_url` columns to `app_users` so the bootstrap and update profile
+  routes can persist rider/mechanic profile edits end-to-end.
 
 ## Hosted Supabase Mock Data
 
@@ -169,8 +172,14 @@
 - `POST /api/chatbot/sessions/[sessionId]/claim`
   - Binds an anonymously credential-owned chatbot session to the authenticated
     active app user; claim requires both credentials and is one-way.
-- `GET /api/v1/auth/me`, `PATCH /api/v1/auth/profile`, `POST /api/v1/auth/devices`
+- `GET /api/v1/auth/me`, `POST /api/v1/auth/profile`, `PATCH /api/v1/auth/profile`, `POST /api/v1/auth/devices`
   - Supabase JWT protected identity/profile/device endpoints.
+  - `POST /auth/profile` bootstraps a new actor with optional `display_name`,
+    `phone`, `address`, `avatar_url`.
+  - `PATCH /auth/profile` updates editable profile fields on the authenticated
+    actor; `phone` is also masked and stored in `phone_masked` for admin search.
+  - `GET /auth/me` returns `id`, `display_name`, optional `phone`, `address`,
+    `avatar_url`, `roles`, `status`.
 - `GET/POST /api/v1/motorcycles`
   - Rider-owned motorcycle list/create. Motorcycle mutations do not require `X-Idempotency-Key`.
 - `GET/PATCH/DELETE /api/v1/motorcycles/[motorcycleId]`
@@ -557,7 +566,9 @@ Never expose `GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
 - Do not put OpenRouter calls or keys in frontend code.
 - Do not send raw audio to OpenRouter.
 - Do not add motorcycle selector, brand dropdown, model dropdown, booking,
-  payment, settlement, inventory, Maps/live tracking UI, chatbot rewrites, ASR
+  payment, settlement, inventory, **rider GPS autofill UI beyond what's already
+  wired in `app/rider/(tabs)/rescue.tsx` (1-shot capture + refresh button)**,
+  Maps/live tracking UI, chatbot rewrites, ASR
   rewrites, or frontend UI unless explicitly requested.
 - Do not implement refunds, settlement, payout, invoice, card storage,
   frontend payment UI, frontend mechanic UI, completion gating, raw

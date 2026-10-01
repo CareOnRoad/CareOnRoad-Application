@@ -57,24 +57,29 @@ export function SectionHeader({
   subtitle,
   action,
   onAction,
+  className,
 }: {
   title: string;
   subtitle?: string;
-  action?: string;
+  /** Khi truyền ReactNode sẽ render thẳng (chip, badge, link). Vẫn nhận string như cũ. */
+  action?: React.ReactNode;
   onAction?: () => void;
+  className?: string;
 }) {
   return (
-    <View className="mb-3 flex-row items-end justify-between">
+    <View className={cn('mb-3 flex-row items-end justify-between', className)}>
       <View>
         <Text className="text-base font-bold text-foreground">{title}</Text>
         {subtitle && (
           <Text className="mt-0.5 text-xs text-muted-foreground">{subtitle}</Text>
         )}
       </View>
-      {action && (
+      {typeof action === 'string' ? (
         <PressableText onPress={onAction} className="text-primary">
           {action}
         </PressableText>
+      ) : (
+        action
       )}
     </View>
   );

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
@@ -17,11 +17,22 @@ import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
-import { Field, FormTextInput } from '@/components/ui/form';
-import { formatVND, serviceTypes, timeSlots } from '@/lib/mock-data';
+import { Field, FormTextInput, SectionHeader } from '@/components/ui/form';
+import {
+  DateTimePickerField,
+  combineDateTime,
+  dateToIsoDate,
+  dateToIsoTime,
+} from '@/components/ui/datetime-picker-field';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { formatVND, isPastDateTime } from '@/lib/format';
+import { serviceTypes } from '@/lib/ui-catalog';
 import { cn } from '@/lib/utils';
 import { createServiceRequest } from '@/lib/service-requests-service';
-import { createReminder, type ReminderRecurrence } from '@/lib/reminders-service';
+import {
+  createReminder,
+  type ReminderRecurrence,
+} from '@/lib/reminders-service';
 
 const serviceIcons: Record<string, LucideIcon> = {
   oil: Droplet,
@@ -37,6 +48,14 @@ const recurrenceOptions: { id: ReminderRecurrence; label: string }[] = [
   { id: 'quarterly', label: 'Mỗi quý' },
 ];
 
+/** Khung giờ gợi ý nhanh cho maintenance. */
+const QUICK_TIME_PRESETS: { label: string; hour: number; minute: number }[] = [
+  { label: 'Sáng', hour: 7, minute: 0 },
+  { label: 'Trưa', hour: 12, minute: 0 },
+  { label: 'Chiều', hour: 17, minute: 0 },
+  { label: 'Tối', hour: 19, minute: 0 },
+];
+
 type Mode = 'maintenance' | 'reminder';
 
 /**
@@ -47,14 +66,14 @@ type Mode = 'maintenance' | 'reminder';
  *  Maintenance (4 bước):
  *    1. Chọn xe
  *    2. Chọn dịch vụ (icon + giá + thời lượng)
- *    3. Nhập ngày (YYYY-MM-DD)
- *    4. Chọn giờ (chip grid)
+ *    3. Chọn ngày (DateTimePickerField)
+ *    4. Chọn giờ (DateTimePickerField + chip gợi ý)
  *  Reminder (3 bước):
  *    1. Tiêu đề + mô tả
- *    2. Ngày/giờ
+ *    2. Ngày/giờ (2 picker)
  *    3. Tần suất lặp lại
  *
- * Validation client-side: tất cả trường phải được điền.
+ * Validation client-side: tất cả trường phải được điền + không cho phép ngày/giờ trong quá khứ.
  * BE: maintenance → POST /api/v1/service-requests (periodic_maintenance, scheduled_visit).
  *      reminder   → POST /api/v1/reminders.
  */
@@ -67,37 +86,74 @@ export default function BookingScreen() {
   // Maintenance fields
   const [vehicleId, setVehicleId] = useState(vehicles[0]?.id ?? '');
   const [service, setService] = useState<string | null>(null);
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState<string | null>(null);
+  const [maintenanceDate, setMaintenanceDate] = useState<Date | null>(null);
+  const [maintenanceTime, setMaintenanceTime] = useState<Date | null>(null);
 
   // Reminder fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [reminderDate, setReminderDate] = useState('');
-  const [reminderTime, setReminderTime] = useState('');
+  const [reminderDate, setReminderDate] = useState<Date | null>(null);
+  const [reminderTime, setReminderTime] = useState<Date | null>(null);
   const [recurrence, setRecurrence] = useState<ReminderRecurrence>('none');
-  const [reminderVehicleId, setReminderVehicleId] = useState<string | null>(null);
+  const [reminderVehicleId, setReminderVehicleId] = useState<string>(vehicles[0]?.id ?? '');
+
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
+  const maintenanceIsoDate = dateToIsoDate(maintenanceDate);
+  const maintenanceIsoTime = dateToIsoTime(maintenanceTime);
+  const reminderIsoDate = dateToIsoDate(reminderDate);
+  const reminderIsoTime = dateToIsoTime(reminderTime);
+
+  const maintenanceScheduledAt = combineDateTime(maintenanceIsoDate, maintenanceIsoTime);
+  const reminderScheduledAt = combineDateTime(reminderIsoDate, reminderIsoTime);
+
+  const maintenancePast = maintenanceScheduledAt
+    ? isPastDateTime(maintenanceScheduledAt)
+    : false;
+  const reminderPast = reminderScheduledAt
+    ? isPastDateTime(reminderScheduledAt)
+    : false;
 
   const selectedService = serviceTypes.find((s) => s.id === service);
-  const maintenanceValid = vehicleId && service && date && time;
-  const reminderValid = title.trim() && reminderDate && reminderTime;
+  const maintenanceValid =
+    !!vehicleId && !!service && !!maintenanceIsoDate && !!maintenanceIsoTime && !maintenancePast;
+  const reminderValid =
+    !!title.trim() &&
+    !!reminderIsoDate &&
+    !!reminderIsoTime &&
+    !!reminderVehicleId &&
+    !reminderPast;
 
   const submit = async () => {
     setError(null);
 
     if (mode === 'maintenance') {
-      if (!maintenanceValid) {
+      if (!maintenanceScheduledAt) {
+        setError('Vui lòng chọn ngày và giờ bảo dưỡng.');
+        return;
+      }
+      if (maintenancePast) {
+        setError('Ngày giờ đã qua. Vui lòng chọn lại.');
+        return;
+      }
+      if (!vehicleId || !service) {
         setError('Vui lòng điền đầy đủ các trường để tiếp tục.');
         return;
       }
       setSubmitting(true);
       try {
         const vehicle = vehicles.find((v) => v.id === vehicleId);
-        const scheduledAt = `${date}T${time}:00+07:00`;
+        const scheduledAt = `${maintenanceIsoDate}T${maintenanceIsoTime}:00+07:00`;
+        // BE: `periodic_maintenance` thuộc nhóm fixed-mode (chỉ `other` mới nhận
+        // `fulfillment_mode`). Lịch hẹn được xác định bằng `scheduled_start_at`.
+        // Gửi `fulfillment_mode` sẽ bị BE trả 400 INVALID_INPUT.
         const created = await createServiceRequest({
           motorcycle_id: vehicleId,
           service_type: 'periodic_maintenance',
-          fulfillment_mode: 'scheduled_visit',
           problem_description: `Đặt lịch bảo dưỡng ${selectedService?.label ?? ''} cho xe ${
             vehicle?.name ?? ''
           }`,
@@ -117,20 +173,33 @@ export default function BookingScreen() {
     }
 
     // Reminder
-    if (!reminderValid) {
-      setError('Vui lòng điền tiêu đề, ngày và giờ.');
+    if (!reminderScheduledAt) {
+      setError('Vui lòng chọn ngày và giờ nhắc nhở.');
+      return;
+    }
+    if (reminderPast) {
+      setError('Ngày giờ nhắc nhở đã qua. Vui lòng chọn lại.');
+      return;
+    }
+    if (!title.trim()) {
+      setError('Vui lòng nhập tiêu đề nhắc nhở.');
+      return;
+    }
+    if (!reminderVehicleId) {
+      setError('Vui lòng chọn xe cho nhắc nhở.');
       return;
     }
     setSubmitting(true);
     try {
-      const scheduledAt = `${reminderDate}T${reminderTime}:00+07:00`;
-      await createReminder({
-        ...(reminderVehicleId ? { motorcycle_id: reminderVehicleId } : {}),
+      const scheduledAt = `${reminderIsoDate}T${reminderIsoTime}:00+07:00`;
+      const payload: Parameters<typeof createReminder>[0] = {
+        motorcycle_id: reminderVehicleId,
         title: title.trim(),
         ...(description.trim() ? { description: description.trim() } : {}),
-        scheduled_at: scheduledAt,
         recurrence,
-      });
+        next_due_at: scheduledAt,
+      };
+      await createReminder(payload);
       router.replace('/rider/(tabs)/schedule');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không thể tạo nhắc nhở');
@@ -148,12 +217,7 @@ export default function BookingScreen() {
         subtitle="Chọn loại lịch muốn tạo"
         onBack={() => router.back()}
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Mode selector */}
         <View className="mb-4 flex-row gap-2 rounded-2xl border border-border bg-secondary/40 p-1">
           <ModeTab
@@ -179,27 +243,42 @@ export default function BookingScreen() {
             onSelectVehicle={setVehicleId}
             service={service}
             onSelectService={setService}
-            date={date}
-            onChangeDate={setDate}
-            time={time}
-            onSelectTime={setTime}
+            date={maintenanceDate}
+            onChangeDate={setMaintenanceDate}
+            time={maintenanceTime}
+            onChangeTime={setMaintenanceTime}
+            today={today}
+            dateError={maintenancePast}
           />
         ) : (
-          <ReminderForm
-            vehicles={vehicles}
-            title={title}
-            onChangeTitle={setTitle}
-            description={description}
-            onChangeDescription={setDescription}
-            date={reminderDate}
-            onChangeDate={setReminderDate}
-            time={reminderTime}
-            onChangeTime={setReminderTime}
-            recurrence={recurrence}
-            onSelectRecurrence={setRecurrence}
-            vehicleId={reminderVehicleId}
-            onSelectVehicle={setReminderVehicleId}
-          />
+          <>
+            {vehicles.length === 0 && (
+              <View className="mt-3">
+                <Banner
+                  tone="warning"
+                  title="Chưa có xe nào"
+                  description="Vui lòng thêm xe trước khi tạo nhắc nhở."
+                />
+              </View>
+            )}
+            <ReminderForm
+              vehicles={vehicles}
+              title={title}
+              onChangeTitle={setTitle}
+              description={description}
+              onChangeDescription={setDescription}
+              date={reminderDate}
+              onChangeDate={setReminderDate}
+              time={reminderTime}
+              onChangeTime={setReminderTime}
+              recurrence={recurrence}
+              onSelectRecurrence={setRecurrence}
+              vehicleId={reminderVehicleId}
+              onSelectVehicle={setReminderVehicleId}
+              today={today}
+              dateError={reminderPast}
+            />
+          </>
         )}
 
         {/* Summary */}
@@ -211,8 +290,8 @@ export default function BookingScreen() {
             <RowLine label="Xe" value={`${selectedVehicle.name} · ${selectedVehicle.plate}`} />
             <RowLine label="Dịch vụ" value={selectedService.label} />
             <RowLine label="Chi phí ước tính" value={formatVND(selectedService.price)} />
-            {date && <RowLine label="Ngày" value={date} />}
-            {time && <RowLine label="Giờ" value={time} />}
+            {maintenanceIsoDate && <RowLine label="Ngày" value={maintenanceIsoDate} />}
+            {maintenanceIsoTime && <RowLine label="Giờ" value={maintenanceIsoTime} />}
           </Card>
         )}
 
@@ -244,13 +323,13 @@ export default function BookingScreen() {
                 : 'Tạo nhắc nhở'}
           </Text>
         </ActionButton>
-      </ScrollView>
+      </ScreenScroll>
     </SafeAreaView>
   );
 }
 
 function ModeTab({
-  id,
+  id: _id,
   label,
   icon: Icon,
   active,
@@ -294,21 +373,25 @@ function MaintenanceForm({
   date,
   onChangeDate,
   time,
-  onSelectTime,
+  onChangeTime,
+  today,
+  dateError,
 }: {
   vehicles: ReturnType<typeof useApp>['vehicles'];
   vehicleId: string;
   onSelectVehicle: (id: string) => void;
   service: string | null;
   onSelectService: (id: string | null) => void;
-  date: string;
-  onChangeDate: (v: string) => void;
-  time: string | null;
-  onSelectTime: (v: string | null) => void;
+  date: Date | null;
+  onChangeDate: (d: Date) => void;
+  time: Date | null;
+  onChangeTime: (d: Date) => void;
+  today: Date;
+  dateError: boolean;
 }) {
   return (
     <>
-      <SectionLabel>Bước 1 · Chọn xe</SectionLabel>
+      <SectionHeader title="Bước 1 · Chọn xe" />
       {vehicles.length === 0 ? (
         <Banner
           tone="warning"
@@ -356,7 +439,7 @@ function MaintenanceForm({
         </View>
       )}
 
-      <SectionLabel className="mt-6">Bước 2 · Chọn dịch vụ</SectionLabel>
+      <SectionHeader className="mt-6" title="Bước 2 · Chọn dịch vụ" />
       <View className="mt-3 flex-row flex-wrap gap-3">
         {serviceTypes.map((s) => {
           const Icon = serviceIcons[s.id];
@@ -392,47 +475,76 @@ function MaintenanceForm({
         })}
       </View>
 
-      <SectionLabel className="mt-6">Bước 3 · Chọn ngày</SectionLabel>
+      <SectionHeader className="mt-6" title="Bước 3 · Chọn ngày" />
       <View className="mt-3">
-        <Field label="Ngày bảo dưỡng" hint="Định dạng YYYY-MM-DD, ví dụ: 2026-10-15" required>
-          <FormTextInput
-            placeholder="2026-10-15"
+        <Field
+          label="Ngày bảo dưỡng"
+          hint="Chọn ngày trong tương lai"
+          error={dateError ? 'Ngày giờ đã qua, vui lòng chọn lại.' : undefined}
+          required
+        >
+          <DateTimePickerField
+            mode="date"
             value={date}
-            onChangeText={onChangeDate}
-            autoCapitalize="none"
-            autoCorrect={false}
+            onChange={onChangeDate}
+            minimumDate={today}
+            placeholder="Chọn ngày (dd/mm/yyyy)"
+            error={dateError}
             accessibilityLabel="Ngày bảo dưỡng"
           />
         </Field>
       </View>
 
-      <SectionLabel className="mt-6">Bước 4 · Chọn giờ</SectionLabel>
-      <View className="mt-3 flex-row flex-wrap gap-2">
-        {timeSlots.map((t) => {
-          const selected = time === t;
-          return (
-            <Pressable
-              key={t}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              accessibilityLabel={`Chọn giờ ${t}`}
-              onPress={() => onSelectTime(t)}
-              className={cn(
-                'min-w-[80px] rounded-xl border px-4 py-2.5 active:scale-95',
-                selected ? 'border-primary bg-primary' : 'border-border bg-card',
-              )}
-            >
-              <Text
+      <SectionHeader className="mt-6" title="Bước 4 · Chọn giờ" />
+      <View className="mt-3 gap-3">
+        <Field
+          label="Giờ bảo dưỡng"
+          hint="Hoặc chọn nhanh khung giờ phổ biến bên dưới"
+          required
+        >
+          <DateTimePickerField
+            mode="time"
+            value={time}
+            onChange={onChangeTime}
+            placeholder="Chọn giờ (HH:mm)"
+            minuteInterval={15}
+            accessibilityLabel="Giờ bảo dưỡng"
+          />
+        </Field>
+        <View className="flex-row flex-wrap gap-2">
+          {QUICK_TIME_PRESETS.map((preset) => {
+            const active =
+              !!time &&
+              time.getHours() === preset.hour &&
+              time.getMinutes() === preset.minute;
+            return (
+              <Pressable
+                key={preset.label}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Chọn nhanh khung giờ ${preset.label}`}
+                onPress={() => {
+                  const t = new Date();
+                  t.setHours(preset.hour, preset.minute, 0, 0);
+                  onChangeTime(t);
+                }}
                 className={cn(
-                  'text-center text-sm font-semibold',
-                  selected ? 'text-primary-foreground' : 'text-foreground',
+                  'min-w-[80px] rounded-xl border px-4 py-2.5 active:scale-95',
+                  active ? 'border-primary bg-primary' : 'border-border bg-card',
                 )}
               >
-                {t}
-              </Text>
-            </Pressable>
-          );
-        })}
+                <Text
+                  className={cn(
+                    'text-center text-sm font-semibold',
+                    active ? 'text-primary-foreground' : 'text-foreground',
+                  )}
+                >
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
     </>
   );
@@ -452,24 +564,28 @@ function ReminderForm({
   onSelectRecurrence,
   vehicleId,
   onSelectVehicle,
+  today,
+  dateError,
 }: {
   vehicles: ReturnType<typeof useApp>['vehicles'];
   title: string;
   onChangeTitle: (v: string) => void;
   description: string;
   onChangeDescription: (v: string) => void;
-  date: string;
-  onChangeDate: (v: string) => void;
-  time: string;
-  onChangeTime: (v: string) => void;
+  date: Date | null;
+  onChangeDate: (d: Date) => void;
+  time: Date | null;
+  onChangeTime: (d: Date) => void;
   recurrence: ReminderRecurrence;
   onSelectRecurrence: (r: ReminderRecurrence) => void;
-  vehicleId: string | null;
-  onSelectVehicle: (id: string | null) => void;
+  vehicleId: string;
+  onSelectVehicle: (id: string) => void;
+  today: Date;
+  dateError: boolean;
 }) {
   return (
     <>
-      <SectionLabel>Bước 1 · Tiêu đề & mô tả</SectionLabel>
+      <SectionHeader title="Bước 1 · Tiêu đề & mô tả" />
       <View className="mt-3 gap-3">
         <Field label="Tiêu đề" required>
           <FormTextInput
@@ -490,26 +606,8 @@ function ReminderForm({
           />
         </Field>
         {vehicles.length > 0 && (
-          <Field label="Gắn với xe (không bắt buộc)">
+          <Field label="Gắn với xe" required>
             <View className="flex-row flex-wrap gap-2">
-              <Pressable
-                accessibilityRole="radio"
-                accessibilityState={{ selected: vehicleId === null }}
-                onPress={() => onSelectVehicle(null)}
-                className={cn(
-                  'rounded-xl border px-4 py-2.5 active:scale-95',
-                  vehicleId === null ? 'border-primary bg-primary' : 'border-border bg-card',
-                )}
-              >
-                <Text
-                  className={cn(
-                    'text-sm font-semibold',
-                    vehicleId === null ? 'text-primary-foreground' : 'text-foreground',
-                  )}
-                >
-                  Không gắn xe
-                </Text>
-              </Pressable>
               {vehicles.map((v) => {
                 const selected = vehicleId === v.id;
                 return (
@@ -539,31 +637,37 @@ function ReminderForm({
         )}
       </View>
 
-      <SectionLabel className="mt-6">Bước 2 · Thời gian</SectionLabel>
+      <SectionHeader className="mt-6" title="Bước 2 · Thời gian" />
       <View className="mt-3 gap-3">
-        <Field label="Ngày" hint="YYYY-MM-DD, ví dụ: 2026-10-15" required>
-          <FormTextInput
+        <Field
+          label="Ngày"
+          hint="Chọn ngày trong tương lai"
+          error={dateError ? 'Ngày giờ đã qua, vui lòng chọn lại.' : undefined}
+          required
+        >
+          <DateTimePickerField
+            mode="date"
             value={date}
-            onChangeText={onChangeDate}
-            placeholder="2026-10-15"
-            autoCapitalize="none"
-            autoCorrect={false}
+            onChange={onChangeDate}
+            minimumDate={today}
+            placeholder="Chọn ngày (dd/mm/yyyy)"
+            error={dateError}
             accessibilityLabel="Ngày nhắc nhở"
           />
         </Field>
-        <Field label="Giờ" hint="HH:MM, ví dụ: 09:00" required>
-          <FormTextInput
+        <Field label="Giờ" required>
+          <DateTimePickerField
+            mode="time"
             value={time}
-            onChangeText={onChangeTime}
-            placeholder="09:00"
-            autoCapitalize="none"
-            autoCorrect={false}
+            onChange={onChangeTime}
+            placeholder="Chọn giờ (HH:mm)"
+            minuteInterval={15}
             accessibilityLabel="Giờ nhắc nhở"
           />
         </Field>
       </View>
 
-      <SectionLabel className="mt-6">Bước 3 · Lặp lại</SectionLabel>
+      <SectionHeader className="mt-6" title="Bước 3 · Lặp lại" />
       <View className="mt-3 flex-row flex-wrap gap-2">
         {recurrenceOptions.map((r) => {
           const selected = recurrence === r.id;
@@ -591,14 +695,6 @@ function ReminderForm({
         })}
       </View>
     </>
-  );
-}
-
-function SectionLabel({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <Text className={`text-xs font-bold uppercase tracking-wider text-muted-foreground ${className ?? ''}`}>
-      {children}
-    </Text>
   );
 }
 

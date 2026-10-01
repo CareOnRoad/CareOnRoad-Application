@@ -15,7 +15,7 @@
 
 import type { Session, Subscription } from '@supabase/supabase-js';
 
-import { ApiError, apiGet, apiPost, setAccessTokenProvider } from '@/lib/api';
+import { ApiError, apiGet, apiPatch, apiPost, setAccessTokenProvider } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase-client';
 
 import type { AuthRole, PublicAuthUser } from './auth-types';
@@ -24,6 +24,9 @@ import type { AuthRole, PublicAuthUser } from './auth-types';
 export interface AppActor {
   id: string;
   display_name?: string;
+  phone?: string;
+  address?: string;
+  avatar_url?: string;
   roles: AuthRole[];
   status: 'active' | 'suspended' | 'archived';
 }
@@ -82,13 +85,18 @@ function pickPrimaryRole(actor: AppActor): AuthRole {
 async function ensureProfileWithRole(
   session: Session,
   desiredRole: AuthRole,
-  displayName?: string,
+  profilePayload: { displayName?: string; phone?: string; address?: string; avatarUrl?: string },
 ): Promise<AppActor> {
   // Bootstrapping: backend tạo app_user nếu chưa có (default role = rider).
   try {
     await apiPost<AppActor>(
       '/api/v1/auth/profile',
-      { display_name: displayName ?? '' },
+      {
+        display_name: profilePayload.displayName ?? '',
+        ...(profilePayload.phone ? { phone: profilePayload.phone } : {}),
+        ...(profilePayload.address ? { address: profilePayload.address } : {}),
+        ...(profilePayload.avatarUrl ? { avatar_url: profilePayload.avatarUrl } : {}),
+      },
       { timeoutMs: 10000 },
     );
   } catch (err) {
@@ -120,14 +128,18 @@ async function ensureProfileWithRole(
 
 /** Convert AppActor → PublicAuthUser để store trong client state. */
 export function actorToPublicUser(actor: AppActor): PublicAuthUser {
-  return {
+  const result: PublicAuthUser = {
     id: actor.id,
     role: pickPrimaryRole(actor),
     name: actor.display_name ?? '',
     email: '', // Backend không trả email; UI sẽ fallback sang email đã nhập
-    phone: '',
-    avatar: '',
+    phone: actor.phone ?? '',
+    avatar: actor.avatar_url ?? '',
   };
+  if (actor.address) {
+    result.address = actor.address;
+  }
+  return result;
 }
 
 export interface SignInResult {
@@ -226,7 +238,10 @@ export async function signUp(input: SignUpInput): Promise<SignUpResult> {
     const actor = await ensureProfileWithRole(
       data.session,
       input.role,
-      input.name,
+      {
+        displayName: input.name,
+        ...(input.phone ? { phone: input.phone } : {}),
+      },
     );
     const user: PublicAuthUser = {
       ...actorToPublicUser(actor),
@@ -302,4 +317,35 @@ export function onAuthStateChange(
     handler(event, session);
   });
   return data.subscription;
+}
+
+/**
+ * PATCH /api/v1/auth/profile - cập nhật các trường editable của actor hiện tại.
+ *
+ * Caller phải đảm bảo access_token provider đã được set (AuthContext sẽ tự
+ * set sau khi sign-in/sign-up). Trả về actor đã cập nhật.
+ */
+export interface ProfileUpdateInput {
+  name?: string;
+  phone?: string;
+  address?: string;
+  avatar?: string;
+}
+
+export async function updateProfile(input: ProfileUpdateInput): Promise<AppActor> {
+  const client = getSupabase();
+  if (!client) {
+    throw new Error('Supabase chưa được cấu hình.');
+  }
+  setAccessTokenProvider(() =>
+    client.auth.getSession().then((s) => s.data.session?.access_token ?? null),
+  );
+  const payload: Record<string, string> = {};
+  if (input.name !== undefined) payload.display_name = input.name;
+  if (input.phone !== undefined) payload.phone = input.phone;
+  if (input.address !== undefined) payload.address = input.address;
+  if (input.avatar !== undefined) payload.avatar_url = input.avatar;
+  return await apiPatch<AppActor>('/api/v1/auth/profile', payload, {
+    timeoutMs: 15000,
+  });
 }

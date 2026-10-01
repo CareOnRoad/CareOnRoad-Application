@@ -9,6 +9,7 @@ import type {
   ApplicationUser,
   CreateApplicationUser,
   RegisterUserDevice,
+  UpdateApplicationUser,
   UserDevice,
   UserRepository,
   UserRoleRecord
@@ -50,13 +51,42 @@ export class InMemoryUserRepository implements UserRepository {
     const user: ApplicationUser = {
       id: input.id,
       displayName: input.displayName,
+      phone: input.phone,
       phoneMasked: input.phoneMasked,
+      address: input.address,
+      avatarUrl: input.avatarUrl,
       status: input.status ?? "active",
       createdAt: input.createdAt ?? now,
       updatedAt: input.updatedAt ?? now
     };
     this.users.push(user);
     return user;
+  }
+
+  async updateProfile(
+    id: string,
+    input: UpdateApplicationUser,
+    updatedAt: Date
+  ): Promise<ApplicationActor> {
+    const user = this.users.find((item) => item.id === id);
+    if (!user) throw new Error("USER_NOT_FOUND");
+    if (input.displayName !== undefined && input.displayName !== null) {
+      user.displayName = input.displayName;
+    }
+    if (input.phone !== undefined && input.phone !== null) {
+      user.phone = input.phone;
+    }
+    if (input.phoneMasked !== undefined && input.phoneMasked !== null) {
+      user.phoneMasked = input.phoneMasked;
+    }
+    if (input.address !== undefined && input.address !== null) {
+      user.address = input.address;
+    }
+    if (input.avatarUrl !== undefined && input.avatarUrl !== null) {
+      user.avatarUrl = input.avatarUrl;
+    }
+    user.updatedAt = updatedAt;
+    return this.toActor(user);
   }
 
   async addRole(userId: string, role: UserRole): Promise<void> {

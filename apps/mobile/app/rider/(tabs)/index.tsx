@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   ArrowRight,
@@ -20,10 +20,19 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
+import { HeroCard } from '@/components/ui/hero-card';
 import { MaintenanceCard } from '@/components/maintenance-card';
+import { NotificationBell } from '@/components/ui/notification-bell';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { SectionHeader } from '@/components/ui/form';
-import { formatDate } from '@/lib/mock-data';
+import { StatTile } from '@/components/ui/stat-tile';
+import { formatDdMmYyyyHHmm } from '@/lib/format';
 import { getUnreadCount } from '@/lib/notifications-service';
+import {
+  deriveStatus,
+  listReminders,
+  type Reminder,
+} from '@/lib/reminders-service';
 
 type QuickAction = {
   id: string;
@@ -93,6 +102,7 @@ export default function HomeScreen() {
   const { user: appUser, vehicles, services } = useApp();
   const { user: authUser } = useAuth();
   const [unread, setUnread] = useState(0);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
 
   const refreshUnread = useCallback(async () => {
     try {
@@ -103,23 +113,37 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const refreshReminders = useCallback(async () => {
+    try {
+      const items = await listReminders();
+      setReminders(items);
+    } catch {
+      // im lặng – fallback về danh sách rỗng
+    }
+  }, []);
+
   useEffect(() => {
     void refreshUnread();
+    void refreshReminders();
     // Refresh mỗi 60s — phase 7 sẽ chuyển sang foreground refresh khi focus.
     const t = setInterval(() => void refreshUnread(), 60_000);
     return () => clearInterval(t);
-  }, [refreshUnread]);
+  }, [refreshUnread, refreshReminders]);
 
   // Ưu tiên tên từ auth session, fallback mock.
   const displayName = authUser?.name ?? appUser.name;
   const displayAvatar = authUser?.avatar ?? appUser.avatar;
 
-  const upcoming = vehicles
-    .slice()
+  // Reminder gần nhất (chưa hoàn thành và enabled) – sắp theo next_due_at.
+  const upcomingReminder = reminders
+    .filter((r) => deriveStatus(r) !== 'disabled')
     .sort(
       (a, b) =>
-        new Date(a.nextMaintenance).getTime() - new Date(b.nextMaintenance).getTime(),
+        new Date(a.next_due_at).getTime() - new Date(b.next_due_at).getTime(),
     )[0];
+  const upcomingVehicle = upcomingReminder
+    ? vehicles.find((v) => v.id === upcomingReminder.motorcycle_id)
+    : null;
   const recent = services.filter((s) => s.status === 'completed').slice(0, 2);
 
   return (
@@ -129,20 +153,10 @@ export default function HomeScreen() {
         subtitle={greeting()}
         right={
           <View className="flex-row items-center gap-2">
-            <Pressable
+            <NotificationBell
+              count={unread}
               onPress={() => router.push('/rider/notifications')}
-              accessibilityLabel="Mở thông báo"
-              className="relative size-9 items-center justify-center rounded-full bg-secondary active:scale-95"
-            >
-              <Bell size={18} color="#16202f" />
-              {unread > 0 && (
-                <View className="absolute -right-0.5 -top-0.5 min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 py-0.5">
-                  <Text className="text-[10px] font-bold text-destructive-foreground">
-                    {unread > 99 ? '99+' : unread}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
+            />
             <Pressable
               onPress={() => router.push('/rider/(tabs)/profile')}
               accessibilityLabel="Mở hồ sơ"
@@ -161,14 +175,10 @@ export default function HomeScreen() {
           </View>
         }
       />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScreenScroll>
         {/* Hero greeting card */}
-        <Card className="overflow-hidden border-0 bg-navy">
-          <View className="flex-row items-center justify-between p-5">
+        <HeroCard>
+          <View className="flex-row items-center justify-between">
             <View className="flex-1">
               <Text className="text-sm text-white/70">Xin chào,</Text>
               <Text className="mt-0.5 text-2xl font-bold text-white">{displayName}</Text>
@@ -178,13 +188,13 @@ export default function HomeScreen() {
               <Bike size={28} color="#ffffff" />
             </View>
           </View>
-          <View className="mx-5 mb-5 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5">
+          <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5">
             <ShieldCheck size={16} color="#a9ffad" />
             <Text className="text-xs font-medium text-white">
               CareOnRoad Plus · hỗ trợ 24/7
             </Text>
           </View>
-        </Card>
+        </HeroCard>
 
         {/* Quick stats */}
         <View className="mt-5">
@@ -205,8 +215,8 @@ export default function HomeScreen() {
             <StatTile
               icon={CalendarPlus}
               tone="amber"
-              label="Lịch sắp tới"
-              value={vehicles.length.toString()}
+              label="Nhắc nhở bật"
+              value={reminders.filter((r) => deriveStatus(r) === 'active').length.toString()}
             />
           </View>
         </View>
@@ -250,11 +260,11 @@ export default function HomeScreen() {
         </View>
 
         {/* Maintenance reminder */}
-        {upcoming && (
+        {upcomingReminder && (
           <View className="mt-6">
             <SectionHeader
               title="Nhắc bảo dưỡng"
-              action="Đặt lịch ngay"
+              action="Quản lý"
               onAction={() => router.push('/rider/(tabs)/schedule')}
             />
             <Card>
@@ -264,10 +274,11 @@ export default function HomeScreen() {
                 </View>
                 <View className="min-w-0 flex-1">
                   <Text className="font-semibold leading-tight text-foreground">
-                    {upcoming.name} sắp đến hạn
+                    {upcomingReminder.title}
                   </Text>
                   <Text className="mt-0.5 text-xs text-muted-foreground">
-                    {formatDate(upcoming.nextMaintenance)} · {upcoming.mileage.toLocaleString()} km
+                    {formatDdMmYyyyHHmm(upcomingReminder.next_due_at)}
+                    {upcomingVehicle ? ` · ${upcomingVehicle.name}` : ''}
                   </Text>
                 </View>
                 <Badge tone="amber">
@@ -315,52 +326,22 @@ export default function HomeScreen() {
               </Text>
               <ActionButton
                 variant="mint"
-                className="mt-3 self-start px-4 py-2"
+                size="sm"
+                className="mt-3 self-start"
                 onPress={() => router.push('/rider/(tabs)/schedule')}
               >
-                <Text className="text-sm font-semibold text-green">Đặt lịch ngay</Text>
+                <Text className="text-xs font-semibold text-green">Đặt lịch ngay</Text>
                 <ArrowRight size={16} color="#145413" />
               </ActionButton>
             </View>
             <Siren size={48} color="#ffffff" className="opacity-30" />
           </View>
         </Card>
-      </ScrollView>
+      </ScreenScroll>
     </View>
   );
 }
 
-function StatTile({
-  icon: Icon,
-  tone,
-  label,
-  value,
-}: {
-  icon: LucideIcon;
-  tone: 'blue' | 'green' | 'amber';
-  label: string;
-  value: string;
-}) {
-  const toneStyles = {
-    blue: { bg: 'bg-primary/10', fg: '#1974f7' },
-    green: { bg: 'bg-green/10', fg: '#145413' },
-    amber: { bg: 'bg-amber-500/15', fg: '#d97706' },
-  } as const;
-  const s = toneStyles[tone];
-  return (
-    <Card className="flex-1 p-3">
-      <View className="mb-2 size-9 items-center justify-center rounded-xl" style={{ backgroundColor: `${s.fg}1a` }}>
-        <Icon size={16} color={s.fg} />
-      </View>
-      <Text className="text-xl font-bold text-foreground">{value}</Text>
-      <Text className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{label}</Text>
-    </Card>
-  );
-}
-
-/**
- * Lời chào theo giờ trong ngày.
- */
 function greeting(): string {
   const hour = new Date().getHours();
   if (hour < 5) return 'Chúc bạn ngủ ngon';
