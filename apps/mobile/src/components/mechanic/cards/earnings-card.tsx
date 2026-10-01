@@ -2,12 +2,12 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { TrendingUp, TrendingDown } from 'lucide-react-native';
 import { Card } from '@/components/ui/card';
-import { formatVND } from '@/lib/mock-data';
+import { formatVND } from '@/lib/format';
 
 export function EarningsCard({
   thisWeek,
   lastWeek,
-  label = 'This week',
+  label = 'Tuần này',
 }: {
   thisWeek: number;
   lastWeek: number;
@@ -28,7 +28,7 @@ export function EarningsCard({
           {isUp ? <TrendingUp size={14} color="#a9ffad" /> : <TrendingDown size={14} color="#ffffff" />}
           <Text className={`text-xs font-semibold ${isUp ? 'text-mint' : 'text-white/80'}`}>
             {isUp ? '+' : ''}
-            {(delta * 100).toFixed(1)}% vs last week
+            {(delta * 100).toFixed(1)}% so với tuần trước
           </Text>
         </View>
       </View>

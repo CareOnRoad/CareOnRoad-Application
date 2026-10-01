@@ -8,7 +8,8 @@ import { requireActiveActor } from "./authorization";
 import type {
   BootstrapProfileInput,
   RegisterDeviceInput,
-  RotatePushTokenInput
+  RotatePushTokenInput,
+  UpdateProfileInput
 } from "./auth.schemas";
 import {
   AuthError,
@@ -59,6 +60,10 @@ export class AuthService {
       await users.createProfile({
         id: identity.subject,
         displayName: input.display_name ?? identity.displayName,
+        phone: input.phone,
+        phoneMasked: input.phone ? maskPhone(input.phone) : undefined,
+        address: input.address,
+        avatarUrl: input.avatar_url,
         status: "active",
         createdAt: now,
         updatedAt: now
@@ -112,6 +117,57 @@ export class AuthService {
         throw new Error("Profile bootstrap did not create an actor.");
       }
       return toRequestActor(actor);
+    });
+  }
+
+  updateProfile(
+    identity: VerifiedSupabaseIdentity,
+    input: UpdateProfileInput
+  ): Promise<RequestActor> {
+    return this.unitOfWork.execute(async (repositories) => {
+      const { audit, outbox, users } = repositories;
+      const existing = await users.findActorById(identity.subject);
+      if (!existing) {
+        throw new AuthError("NOT_FOUND", "Application profile not found.", 404);
+      }
+      requireActiveActor(toRequestActor(existing));
+
+      const now = this.options.now?.() ?? new Date();
+      const createId = this.options.createId ?? randomUUID;
+
+      const patch: Parameters<typeof users.updateProfile>[1] = {};
+      if (input.display_name !== undefined) patch.displayName = input.display_name;
+      if (input.phone !== undefined) {
+        patch.phone = input.phone;
+        patch.phoneMasked = maskPhone(input.phone);
+      }
+      if (input.address !== undefined) patch.address = input.address;
+      if (input.avatar_url !== undefined) patch.avatarUrl = input.avatar_url;
+
+      const updated = await users.updateProfile(identity.subject, patch, now);
+
+      await outbox.append({
+        id: createId(),
+        topic: "user.profile.updated",
+        aggregateType: "app_user",
+        aggregateId: identity.subject,
+        dedupeKey: `user.profile.updated:${identity.subject}:${updated.updatedAt.toISOString()}`,
+        payload: { resource_id: identity.subject },
+        createdAt: now,
+        nextAttemptAt: now
+      });
+      await audit.append({
+        id: createId(),
+        actorId: identity.subject,
+        actorRole: preferredAuditRole(updated.roles),
+        action: "user.profile.updated",
+        entityType: "app_user",
+        entityId: identity.subject,
+        metadata: { resource_id: identity.subject },
+        createdAt: now
+      });
+
+      return toRequestActor(updated);
     });
   }
 
@@ -423,12 +479,18 @@ function toRegisteredDevice(
 function toRequestActor(actor: {
   id: string;
   displayName?: string;
+  phone?: string;
+  address?: string;
+  avatarUrl?: string;
   roles: RequestActor["roles"];
   status: RequestActor["status"];
 }): RequestActor {
   return {
     id: actor.id,
     ...(actor.displayName ? { display_name: actor.displayName } : {}),
+    ...(actor.phone ? { phone: actor.phone } : {}),
+    ...(actor.address ? { address: actor.address } : {}),
+    ...(actor.avatarUrl ? { avatar_url: actor.avatarUrl } : {}),
     roles: actor.roles,
     status: actor.status
   };
@@ -436,6 +498,17 @@ function toRequestActor(actor: {
 
 function hashDeviceKey(deviceKey: string): string {
   return createHash("sha256").update(deviceKey).digest("hex");
+}
+
+/**
+ * Mask một số điện thoại để hiển thị an toàn (vd: "+84 90 xxx 1234" → "+84 ****1234").
+ * Nếu chuỗi quá ngắn (< 4 chữ số) thì trả về toàn "*" để tránh lộ dữ liệu.
+ */
+function maskPhone(phone: string): string {
+  const digits = phone.replace(/[^\d]/g, "");
+  if (digits.length < 4) return "*".repeat(digits.length);
+  const tail = digits.slice(-4);
+  return `*`.repeat(Math.max(0, digits.length - 4)) + tail;
 }
 
 function preferredAuditRole(roles: RequestActor["roles"]): RequestActor["roles"][number] {

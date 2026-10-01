@@ -1,10 +1,12 @@
 import type { ApiErrorCode } from "@/lib/api-error";
 
-export const userRoles = ["rider", "mechanic", "admin"] as const;
-export const userStatuses = ["active", "suspended", "archived"] as const;
+// Enum values live in the contract package so the backend and the admin web
+// frontend share a single definition. `src/__tests__/enum-parity.test.ts` in
+// that package keeps them aligned with the PostgreSQL enums.
+export { userRoles, userStatuses } from "@careonroad/api-contract/enums";
+export type { UserRole, UserStatus } from "@careonroad/api-contract/enums";
 
-export type UserRole = (typeof userRoles)[number];
-export type UserStatus = (typeof userStatuses)[number];
+import type { UserRole, UserStatus } from "@careonroad/api-contract/enums";
 
 export type VerifiedSupabaseIdentity = {
   subject: string;
@@ -16,6 +18,9 @@ export type VerifiedSupabaseIdentity = {
 export type RequestActor = {
   id: string;
   display_name?: string;
+  phone?: string;
+  address?: string;
+  avatar_url?: string;
   roles: UserRole[];
   status: UserStatus;
 };

@@ -10,7 +10,9 @@ import {
   bootstrapProfileSchema,
   registerDeviceSchema,
   rotatePushTokenSchema,
-  type BootstrapProfileInput
+  type BootstrapProfileInput,
+  type UpdateProfileInput,
+  updateProfileSchema
 } from "./auth.schemas";
 import { AuthService } from "./auth.service";
 import type {
@@ -26,6 +28,10 @@ export type AuthRouteDependencies = {
     bootstrapProfile(
       identity: VerifiedSupabaseIdentity,
       input: BootstrapProfileInput
+    ): Promise<RequestActor>;
+    updateProfile(
+      identity: VerifiedSupabaseIdentity,
+      input: UpdateProfileInput
     ): Promise<RequestActor>;
     registerDevice(
       identity: VerifiedSupabaseIdentity,
@@ -70,6 +76,23 @@ export function createAuthRouteHandlers(dependencies: AuthRouteDependencies) {
         }
         return NextResponse.json(
           await dependencies.authService.bootstrapProfile(identity, parsed.data)
+        );
+      } catch (error) {
+        return authRouteError(error);
+      }
+    },
+
+    async updateProfile(request: Request) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        const parsed = updateProfileSchema.safeParse(await readOptionalJson(request));
+        if (!parsed.success) {
+          return jsonError(400, "INVALID_INPUT", "Profile update is invalid.", {
+            details: { issues: parsed.error.issues }
+          });
+        }
+        return NextResponse.json(
+          await dependencies.authService.updateProfile(identity, parsed.data)
         );
       } catch (error) {
         return authRouteError(error);

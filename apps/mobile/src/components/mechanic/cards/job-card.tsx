@@ -1,9 +1,8 @@
 import React from 'react';
-import { Image, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { Phone, Bike, Wrench, ChevronRight, Clock } from 'lucide-react-native';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { formatVND } from '@/lib/mock-data';
+import { formatVND } from '@/lib/format';
 import type { MechanicJob } from '@/lib/mechanic-types';
 
 const statusTone: Record<MechanicJob['status'], 'amber' | 'blue' | 'red' | 'green'> = {
@@ -14,10 +13,10 @@ const statusTone: Record<MechanicJob['status'], 'amber' | 'blue' | 'red' | 'gree
 };
 
 const statusLabel: Record<MechanicJob['status'], string> = {
-  pending: 'Pending',
-  in_progress: 'In progress',
-  awaiting_parts: 'Awaiting parts',
-  completed: 'Completed',
+  pending: 'Chờ xử lý',
+  in_progress: 'Đang xử lý',
+  awaiting_parts: 'Chờ phụ tùng',
+  completed: 'Hoàn tất',
 };
 
 const toneTextColor: Record<string, string> = {

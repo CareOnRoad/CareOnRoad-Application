@@ -2,13 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Calendar as CalIcon, ChevronLeft, ChevronRight } from 'lucide-react-native';
+
 import { useMechanicApp } from '@/contexts/mechanic-app-context';
 import { AppHeader } from '@/components/ui/app-header';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
-const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 const BASE_WEEK_START = '2026-07-13';
 
 function shiftDate(iso: string, days: number) {
@@ -21,14 +21,20 @@ function getDayLabel(iso: string) {
   return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 }
 
+/**
+ * MechanicScheduleScreen - lịch tuần của thợ (dạng grid).
+ *
+ * Mỗi ô là 1 slot thời gian × ngày. Status:
+ *  - Working (primary blue) - đang trong ca làm việc.
+ *  - Awaiting (amber) - đã có job nhưng chưa bắt đầu.
+ *  - Off (slate dashed) - ngoài giờ làm.
+ *  - Open (slate solid) - trống.
+ */
 export default function MechanicScheduleScreen() {
   const { scheduleSlots, getJob } = useMechanicApp();
   const [weekOffset, setWeekOffset] = useState(0);
 
-  const weekStart = useMemo(
-    () => shiftDate(BASE_WEEK_START, weekOffset * 7),
-    [weekOffset],
-  );
+  const weekStart = useMemo(() => shiftDate(BASE_WEEK_START, weekOffset * 7), [weekOffset]);
   const weekDates = useMemo(
     () => Array.from({ length: 7 }, (_, i) => shiftDate(weekStart, i)),
     [weekStart],
@@ -53,55 +59,73 @@ export default function MechanicScheduleScreen() {
   return (
     <View className="flex-1 bg-background">
       <AppHeader
-        title="Schedule"
+        title="Lịch tuần"
         subtitle={weekRange}
         right={
           <Pressable
-            accessibilityLabel="Calendar"
+            accessibilityLabel="Mở lịch tháng"
             className="size-9 items-center justify-center rounded-full bg-secondary active:opacity-60"
           >
             <CalIcon size={18} color="#16202f" />
           </Pressable>
         }
       />
+
+      {/* Week navigation */}
       <View className="flex-row items-center justify-between px-5 py-3">
         <Pressable
           onPress={() => setWeekOffset((w) => w - 1)}
-          accessibilityLabel="Previous week"
+          accessibilityLabel="Tuần trước"
           className="size-9 items-center justify-center rounded-full bg-secondary active:opacity-60"
         >
           <ChevronLeft size={18} color="#16202f" />
         </Pressable>
-        <Text className="text-sm font-semibold text-foreground">
-          Week{' '}
-          {weekOffset === 0 ? 'current' : weekOffset > 0 ? `+${weekOffset}` : weekOffset}
-        </Text>
+        <View className="items-center">
+          <Text className="text-sm font-bold text-foreground">
+            {weekOffset === 0 ? 'Tuần này' : weekOffset > 0 ? `+${weekOffset} tuần` : `${weekOffset} tuần`}
+          </Text>
+          <Text className="text-[11px] text-muted-foreground">{weekRange}</Text>
+        </View>
         <Pressable
           onPress={() => setWeekOffset((w) => w + 1)}
-          accessibilityLabel="Next week"
+          accessibilityLabel="Tuần sau"
           className="size-9 items-center justify-center rounded-full bg-secondary active:opacity-60"
         >
           <ChevronRight size={18} color="#16202f" />
         </Pressable>
       </View>
+
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
+        showsVerticalScrollIndicator={false}
       >
         <Card className="overflow-hidden p-0">
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View>
+              {/* Header row */}
               <View className="flex-row border-b border-border bg-secondary/40 px-2 py-2">
-                <Text className="w-16 px-1 text-[11px] font-semibold text-muted-foreground">Time</Text>
+                <Text className="w-16 px-1 text-[11px] font-semibold text-muted-foreground">
+                  Giờ
+                </Text>
                 {weekDates.map((d, i) => (
                   <View key={d} className="w-20 items-center px-1">
-                    <Text className="text-[11px] font-semibold text-muted-foreground">{WEEKDAY_LABELS[i]}</Text>
-                    <Text className="text-[10px] font-normal text-muted-foreground">{getDayLabel(d)}</Text>
+                    <Text className="text-[11px] font-semibold text-muted-foreground">
+                      {WEEKDAY_LABELS[i]}
+                    </Text>
+                    <Text className="text-[10px] font-normal text-muted-foreground">
+                      {getDayLabel(d)}
+                    </Text>
                   </View>
                 ))}
               </View>
+
+              {/* Time rows */}
               {timeSlots.map((time) => (
-                <View key={time} className="flex-row border-b border-border px-2 py-1.5 last:border-b-0">
+                <View
+                  key={time}
+                  className="flex-row border-b border-border px-2 py-1.5 last:border-b-0"
+                >
                   <View className="w-16 justify-start px-1">
                     <Text className="text-[11px] font-semibold text-muted-foreground">{time}</Text>
                   </View>
@@ -119,6 +143,8 @@ export default function MechanicScheduleScreen() {
                       <View key={date} className="w-20 px-1">
                         {job ? (
                           <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Mở chi tiết ${job.type}`}
                             onPress={() =>
                               router.push({ pathname: '/mechanic/jobs/detail', params: { id: job.id } })
                             }
@@ -155,13 +181,8 @@ export default function MechanicScheduleScreen() {
                               isAvailableEmpty && 'border-border bg-background',
                             )}
                           >
-                            <Text
-                              className={cn(
-                                'text-[10px]',
-                                isOffEmpty ? 'text-muted-foreground' : 'text-muted-foreground',
-                              )}
-                            >
-                              {isOffEmpty ? 'Off' : 'Open'}
+                            <Text className="text-[10px] text-muted-foreground">
+                              {isOffEmpty ? 'Nghỉ' : 'Trống'}
                             </Text>
                           </View>
                         )}
@@ -174,21 +195,17 @@ export default function MechanicScheduleScreen() {
           </ScrollView>
         </Card>
 
+        {/* Legend */}
         <View className="mt-3 flex-row flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <LegendDot className="bg-primary" label="Working" />
-          <LegendDot className="bg-amber-500/40 border border-amber-500/50" label="Awaiting" />
-          <LegendDot className="border border-dashed border-border bg-secondary/30" label="Available / Off" />
+          <LegendDot className="bg-primary" label="Đang làm" />
+          <LegendDot className="bg-amber-500/40 border border-amber-500/50" label="Chờ xử lý" />
+          <LegendDot className="border border-dashed border-border bg-secondary/30" label="Trống / Nghỉ" />
         </View>
 
-        <Card className="mt-3 bg-primary/5 p-4">
-          <View className="flex-row items-center gap-2">
-            <Badge tone="blue" className="self-start">
-              <Text className="text-xs font-semibold text-primary">Tip</Text>
-            </Badge>
-            <Text className="flex-1 text-xs text-muted-foreground">
-              Tap any job slot to open its full details.
-            </Text>
-          </View>
+        <Card className="mt-4 border-primary/20 bg-primary/5 p-4">
+          <Text className="text-xs leading-relaxed text-foreground">
+            💡 <Text className="font-semibold">Mẹo:</Text> chạm vào ô job bất kỳ để mở chi tiết và cập nhật trạng thái.
+          </Text>
         </Card>
       </ScrollView>
     </View>

@@ -1,5 +1,28 @@
 {
-    "name": "@careonroad/api-contract",
-    "version": "0.0.0",
-    "private": true
+  "name": "@careonroad/api-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "exports": {
+    "./common": "./src/common.ts",
+    "./enums": "./src/enums.ts",
+    "./auth": "./src/auth.ts",
+    "./admin/users": "./src/admin-users.ts",
+    "./admin/mechanics": "./src/admin-mechanics.ts",
+    "./admin/service-requests": "./src/admin-service-requests.ts",
+    "./admin/operations": "./src/admin-operations.ts",
+    "./health": "./src/health.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
   }
+}

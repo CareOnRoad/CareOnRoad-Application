@@ -1,18 +1,46 @@
 import React from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { ArrowRight, Bell, CheckCircle2, Circle, Clock, LucideIcon, Star, Wrench } from 'lucide-react-native';
+import {
+  ArrowRight,
+  Bell,
+  CheckCircle2,
+  Circle,
+  Clock,
+  Star,
+  Wrench,
+} from 'lucide-react-native';
+
 import { useMechanicApp } from '@/contexts/mechanic-app-context';
+import { useAuth } from '@/contexts/auth-context';
 import { ActionButton } from '@/components/ui/action-button';
-import { Badge } from '@/components/ui/badge';
+import { AppHeader } from '@/components/ui/app-header';
 import { Card } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { HeroCard } from '@/components/ui/hero-card';
+import { NotificationBell } from '@/components/ui/notification-bell';
+import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { SectionHeader } from '@/components/ui/form';
+import { StatTile } from '@/components/ui/stat-tile';
 import { EarningsCard } from '@/components/mechanic/cards/earnings-card';
 import { JobCard } from '@/components/mechanic/cards/job-card';
-import { SectionHeader } from '@/components/ui/form';
-
+/**
+ * MechanicDashboardScreen - dashboard cho thợ sửa xe.
+ *
+ * Layout:
+ *  1. AppHeader với avatar.
+ *  2. Hero card navy: greeting + garage + rating + active job counter.
+ *  3. Stats 3 cột (Pending / In progress / Completed) với tone color semantic.
+ *  4. Earnings card (this week vs last week).
+ *  5. "Up next" card (CTA lên job tiếp theo).
+ *  6. Danh sách upcoming jobs (3 đầu).
+ */
 export default function MechanicDashboardScreen() {
-  const { mechanic, garage, todayJobs, upcomingTodayJobs, earnings, updateJobStatus } =
-    useMechanicApp();
+  const { mechanic, garage, todayJobs, upcomingTodayJobs, updateJobStatus, earnings } = useMechanicApp();
+  const { user: authUser } = useAuth();
+
+  const displayName = authUser?.name ?? mechanic.name;
+  const displayAvatar = authUser?.avatar ?? mechanic.avatar;
 
   const pendingCount = todayJobs.filter((j) => j.status === 'pending').length;
   const inProgressCount = todayJobs.filter((j) => j.status === 'in_progress').length;
@@ -21,126 +49,153 @@ export default function MechanicDashboardScreen() {
 
   const handleStartNext = () => {
     if (!nextJob) return;
-    if (nextJob.status === 'pending') updateJobStatus(nextJob.id, 'in_progress');
+    if (nextJob.status === 'pending') {
+      // Fire-and-forget; context sẽ optimistic update rồi rollback nếu BE lỗi.
+      void updateJobStatus(nextJob.id, 'in_progress');
+    }
     router.push({ pathname: '/mechanic/jobs/detail', params: { id: nextJob.id } });
   };
 
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-    >
-      <Card className="overflow-hidden border-0 bg-navy">
-        <View className="p-5">
+    <View className="flex-1 bg-background">
+      <AppHeader
+        title="Dashboard"
+        subtitle={greeting()}
+        right={
+          <View className="flex-row items-center gap-2">
+            <NotificationBell
+              onPress={() => router.push('/mechanic/notifications' as never)}
+            />
+            <View className="size-9 overflow-hidden rounded-full bg-secondary">
+              {displayAvatar ? (
+                <Image source={{ uri: displayAvatar }} className="size-full" resizeMode="cover" />
+              ) : (
+                <View className="size-full items-center justify-center">
+                  <Text className="text-sm font-bold text-foreground">
+                    {displayName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        }
+      />
+      <ScreenScroll>
+        {/* Hero */}
+        <HeroCard>
           <View className="flex-row items-center justify-between">
-            <View>
-              <Text className="text-sm text-white/70">Good afternoon,</Text>
-              <Text className="text-xl font-bold text-white">{mechanic.name}</Text>
-              <Text className="mt-1 text-xs text-white/70">{garage.name}</Text>
+            <View className="flex-1">
+              <Text className="text-sm text-white/70">Xin chào,</Text>
+              <Text className="mt-0.5 text-2xl font-bold text-white">{displayName}</Text>
+              <View className="mt-1 flex-row items-center gap-1.5">
+                <Wrench size={12} color="#a9ffad" />
+                <Text className="text-xs text-white/70">{garage.name}</Text>
+              </View>
             </View>
             <View className="items-end gap-2">
-              <Image source={{ uri: mechanic.avatar }} className="size-12 rounded-full" resizeMode="cover" />
-              <View className="flex-row items-center gap-1 rounded-full bg-white/10 px-2 py-0.5">
+              <View className="flex-row items-center gap-1 rounded-full bg-white/10 px-2.5 py-1">
                 <Star size={12} color="#a9ffad" fill="#a9ffad" />
-                <Text className="text-xs text-white">{mechanic.rating}</Text>
+                <Text className="text-xs font-bold text-white">{mechanic.rating}</Text>
+              </View>
+              <View className="flex-row items-center gap-1.5 rounded-full bg-green/20 px-2.5 py-1">
+                <View className="size-1.5 rounded-full bg-green" />
+                <Text className="text-xs font-semibold text-white">Đang nhận việc</Text>
               </View>
             </View>
           </View>
-          <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
+          <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5">
             <Bell size={16} color="#a9ffad" />
-            <Text className="text-xs text-white">
-              {pendingCount + inProgressCount} jobs active today
+            <Text className="text-xs font-medium text-white">
+              {pendingCount + inProgressCount} công việc đang hoạt động hôm nay
             </Text>
           </View>
-        </View>
-      </Card>
+        </HeroCard>
 
-      <View className="mt-5">
-        <SectionHeader title="Today" />
-        <View className="flex-row gap-2">
-          <StatTile icon={Circle} label="Pending" value={pendingCount} tone="amber" />
-          <StatTile icon={Clock} label="In progress" value={inProgressCount} tone="blue" />
-          <StatTile icon={CheckCircle2} label="Completed" value={completedCount} tone="green" />
-        </View>
-      </View>
-
-      <View className="mt-5">
-        <EarningsCard thisWeek={earnings.thisWeek} lastWeek={earnings.lastWeek} />
-      </View>
-
-      {nextJob && (
-        <Card className="mt-5 overflow-hidden border-0 bg-green">
-          <View className="flex-row items-center gap-3 p-5">
-            <View className="size-12 shrink-0 items-center justify-center rounded-2xl bg-white/20">
-              <Wrench size={24} color="#ffffff" />
-            </View>
-            <View className="min-w-0 flex-1">
-              <Text className="text-xs text-white/80">Up next</Text>
-              <Text className="truncate font-bold leading-tight text-white" numberOfLines={1}>
-                {nextJob.type} · {nextJob.vehicle.plate}
-              </Text>
-              <Text className="text-xs text-white/80">
-                {nextJob.scheduledTime} · {nextJob.customer.name}
-              </Text>
-            </View>
-            <ActionButton variant="mint" className="px-3 py-2" onPress={handleStartNext}>
-              <Text className="text-sm font-semibold text-green">Start</Text>
-              <ArrowRight size={16} color="#145413" />
-            </ActionButton>
+        {/* Today stats */}
+        <View className="mt-5">
+          <SectionHeader title="Hôm nay" subtitle="Tổng quan trong ngày" />
+          <View className="flex-row gap-3">
+            <StatTile icon={Circle} tone="amber" label="Chờ xử lý" value={pendingCount} />
+            <StatTile icon={Clock} tone="blue" label="Đang làm" value={inProgressCount} />
+            <StatTile icon={CheckCircle2} tone="green" label="Hoàn tất" value={completedCount} />
           </View>
-        </Card>
-      )}
+        </View>
 
-      <View className="mt-5">
-        <SectionHeader title="Upcoming today" action="See all" onAction={() => router.push('/mechanic/(tabs)/jobs')} />
-        {upcomingTodayJobs.length === 0 ? (
-          <Card className="p-6">
-            <Text className="text-center text-sm text-muted-foreground">
-              No more jobs scheduled for today. Nice work!
-            </Text>
+        {/* Earnings */}
+        <View className="mt-6">
+          <EarningsCard
+            thisWeek={earnings.thisWeek}
+            lastWeek={earnings.lastWeek}
+            label="Thu nhập tuần này"
+          />
+        </View>
+
+        {/* Up next */}
+        {nextJob && (
+          <Card className="mt-5 overflow-hidden border-0 bg-green">
+            <View className="flex-row items-center gap-3 p-5">
+              <View className="size-12 shrink-0 items-center justify-center rounded-2xl bg-white/20">
+                <Wrench size={24} color="#ffffff" />
+              </View>
+              <View className="min-w-0 flex-1">
+                <Text className="text-xs text-white/80">Tiếp theo</Text>
+                <Text className="truncate font-bold leading-tight text-white" numberOfLines={1}>
+                  {nextJob.type} · {nextJob.vehicle.plate}
+                </Text>
+                <Text className="text-xs text-white/80">
+                  {nextJob.scheduledTime} · {nextJob.customer.name}
+                </Text>
+              </View>
+              <ActionButton
+                variant="mint"
+                size="sm"
+                onPress={handleStartNext}
+                accessibilityLabel={`Bắt đầu công việc ${nextJob.type}`}
+              >
+                <Text className="text-xs font-semibold text-green">Bắt đầu</Text>
+                <ArrowRight size={16} color="#145413" />
+              </ActionButton>
+            </View>
           </Card>
-        ) : (
-          <View className="gap-3">
-            {upcomingTodayJobs.slice(0, 3).map((j) => (
-              <Pressable key={j.id} onPress={() => router.push({ pathname: '/mechanic/jobs/detail', params: { id: j.id } })}>
-                <JobCard job={j} />
-              </Pressable>
-            ))}
-          </View>
         )}
-      </View>
-    </ScrollView>
+
+        {/* Upcoming jobs */}
+        <View className="mt-6">
+          <SectionHeader
+            title="Lịch hôm nay"
+            action="Xem tất cả"
+            onAction={() => router.push('/mechanic/(tabs)/jobs')}
+          />
+          {upcomingTodayJobs.length === 0 ? (
+            <EmptyState
+              icon={CheckCircle2}
+              tone="success"
+              title="Đã xong việc hôm nay!"
+              description="Không còn công việc nào đang chờ. Nghỉ ngơi và chuẩn bị cho ngày mai."
+            />
+          ) : (
+            <View className="gap-3">
+              {upcomingTodayJobs.slice(0, 3).map((j) => (
+                <Pressable
+                  key={j.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Mở chi tiết công việc ${j.type}`}
+                  onPress={() => router.push({ pathname: '/mechanic/jobs/detail', params: { id: j.id } })}
+                >
+                  <JobCard job={j} />
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+      </ScreenScroll>
+    </View>
   );
 }
 
-function StatTile({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: number;
-  tone: 'amber' | 'blue' | 'green';
-}) {
-  const toneStyles = {
-    amber: 'bg-amber-500/15',
-    blue: 'bg-primary/10',
-    green: 'bg-green/10',
-  };
-  const iconColor = {
-    amber: '#d97706',
-    blue: '#1974f7',
-    green: '#145413',
-  };
-  return (
-    <Card className="flex-1 p-3">
-      <View className={`size-8 items-center justify-center rounded-xl ${toneStyles[tone]}`}>
-        <Icon size={16} color={iconColor[tone]} />
-      </View>
-      <Text className="mt-2 text-xl font-bold text-foreground">{value}</Text>
-      <Text className="text-[11px] text-muted-foreground">{label}</Text>
-    </Card>
-  );
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Chào buổi sáng';
+  if (hour < 18) return 'Chào buổi chiều';
+  return 'Chào buổi tối';
 }

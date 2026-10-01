@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { AlertTriangle, ChevronDown, X } from 'lucide-react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { AlertTriangle, X } from 'lucide-react-native';
 import { ActionButton } from '@/components/ui/action-button';
-import { Field } from '@/components/ui/form';
-import { FormTextInput } from '@/components/ui/form';
+import { Field, FormTextInput } from '@/components/ui/form';
 import { cn } from '@/lib/utils';
 
 export const CANCEL_REASONS = [
@@ -49,130 +48,172 @@ export function CancelAppointmentModal({
 
   return (
     <View className="absolute inset-0 z-50 items-center justify-center bg-black/60 px-4">
-      <Pressable onPress={onClose} className="absolute inset-0" />
+      <Pressable
+        onPress={onClose}
+        accessibilityLabel="Đóng hộp thoại"
+        accessibilityRole="button"
+        className="absolute inset-0"
+      />
       <View className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card shadow-2xl">
         <Pressable
           onPress={onClose}
-          accessibilityLabel="Close dialog"
+          accessibilityLabel="Đóng hộp thoại"
+          accessibilityRole="button"
           className="absolute right-3 top-3 z-10 size-9 items-center justify-center rounded-full bg-secondary active:scale-95"
         >
           <X size={16} color="#16202f" />
         </Pressable>
 
-        <View className="gap-5 p-5">
-          <View className="flex-row items-start gap-3">
-            <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-destructive/10">
-              <AlertTriangle size={20} color="#ed3f3a" />
+        <ScrollView
+          className="max-h-[600px]"
+          contentContainerStyle={{ padding: 20 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View className="gap-5">
+            <View className="flex-row items-start gap-3">
+              <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-destructive/10">
+                <AlertTriangle size={20} color="#ed3f3a" />
+              </View>
+              <View className="min-w-0 flex-1 pr-8">
+                <Text className="text-base font-bold leading-tight text-foreground">
+                  Huỷ lịch hẹn này?
+                </Text>
+                {appointmentLabel && (
+                  <Text className="mt-1 text-xs text-muted-foreground">
+                    {appointmentLabel}
+                  </Text>
+                )}
+              </View>
             </View>
-            <View className="min-w-0 flex-1 pr-8">
-              <Text className="text-base font-bold leading-tight text-foreground">
-                Cancel this appointment?
-              </Text>
-              {appointmentLabel && (
-                <Text className="mt-1 text-xs text-muted-foreground">{appointmentLabel}</Text>
-              )}
-            </View>
-          </View>
 
-          <Field label="Lý do hủy">
-            <View className="relative">
+            <Field label="Lý do huỷ" required>
               <View
                 className={cn(
-                  'w-full rounded-2xl border border-input bg-background px-4 py-3',
-                  error && 'border-destructive',
+                  'w-full rounded-2xl border bg-background px-4 py-3',
+                  error ? 'border-destructive' : 'border-input',
                 )}
               >
                 <Text className="text-sm font-medium text-foreground">
-                  {reason || '-- Chọn lý do --'}
+                  {reason === 'other'
+                    ? 'Khác (tự điền)'
+                    : reason || '-- Chọn lý do --'}
                 </Text>
               </View>
-              <Pressable
-                onPress={() => setError(null)}
-                accessibilityLabel="Select reason"
-                className="absolute inset-0"
-              />
-              <ChevronDown
-                size={16}
-                color="#64748b"
-                className="absolute right-4 top-1/2 -translate-y-1/2"
-              />
-            </View>
-            <View className="mt-2 gap-1.5">
-              <Pressable
-                onPress={() => {
-                  setReason('');
-                  setError(null);
-                }}
-                className={cn(
-                  'rounded-xl border px-3 py-2',
-                  !reason ? 'border-primary bg-primary/5' : 'border-border bg-background',
-                )}
-              >
-                <Text className="text-sm">-- Chọn lý do --</Text>
-              </Pressable>
-              {CANCEL_REASONS.map((r) => (
-                <Pressable
-                  key={r}
+              <View className="mt-2 gap-1.5">
+                <ReasonOption
+                  selected={!reason}
+                  label="-- Chọn lý do --"
                   onPress={() => {
-                    setReason(r);
+                    setReason('');
                     setError(null);
                   }}
-                  className={cn(
-                    'rounded-xl border px-3 py-2',
-                    reason === r ? 'border-primary bg-primary/5' : 'border-border bg-background',
-                  )}
-                >
-                  <Text className="text-sm">{r}</Text>
-                </Pressable>
-              ))}
-              <Pressable
-                onPress={() => {
-                  setReason('other');
-                  setError(null);
-                }}
-                className={cn(
-                  'rounded-xl border px-3 py-2',
-                  reason === 'other' ? 'border-primary bg-primary/5' : 'border-border bg-background',
-                )}
-              >
-                <Text className="text-sm">Khác (tự điền)</Text>
-              </Pressable>
-            </View>
-          </Field>
-
-          {reason === 'other' && (
-            <Field label="Nhập lý do của bạn">
-              <FormTextInput
-                value={customReason}
-                onChangeText={(t) => {
-                  setCustomReason(t);
-                  setError(null);
-                }}
-                multiline
-                numberOfLines={3}
-                placeholder="Ví dụ: Tôi cần đổi sang thợ khác..."
-                className={cn('min-h-[80px]', error && 'border-destructive')}
-              />
+                />
+                {CANCEL_REASONS.map((r) => (
+                  <ReasonOption
+                    key={r}
+                    selected={reason === r}
+                    label={r}
+                    onPress={() => {
+                      setReason(r);
+                      setError(null);
+                    }}
+                  />
+                ))}
+                <ReasonOption
+                  selected={reason === 'other'}
+                  label="Khác (tự điền)"
+                  onPress={() => {
+                    setReason('other');
+                    setError(null);
+                  }}
+                />
+              </View>
             </Field>
-          )}
 
-          {error && <Text className="text-xs font-medium text-destructive">{error}</Text>}
+            {reason === 'other' && (
+              <Field label="Nhập lý do của bạn" required>
+                <FormTextInput
+                  value={customReason}
+                  onChangeText={(t) => {
+                    setCustomReason(t);
+                    setError(null);
+                  }}
+                  multiline
+                  numberOfLines={3}
+                  placeholder="Ví dụ: Tôi cần đổi sang thợ khác..."
+                  className={cn('min-h-[80px]', error && 'border-destructive')}
+                />
+              </Field>
+            )}
 
-          <View className="flex-row gap-2 pt-1">
-            <ActionButton variant="outline" fullWidth onPress={onClose} className="flex-1 py-3">
-              Keep appointment
-            </ActionButton>
-            <ActionButton
-              variant="destructive"
-              fullWidth
-              onPress={handleConfirm}
-              className="flex-1 py-3"
-            >
-              Confirm cancel
-            </ActionButton>
+            {error && (
+              <Text className="text-xs font-medium text-destructive">{error}</Text>
+            )}
+
+            <View className="flex-row gap-2 pt-1">
+              <ActionButton
+                variant="outline"
+                fullWidth
+                onPress={onClose}
+                className="flex-1 py-3"
+                accessibilityLabel="Giữ lịch hẹn"
+              >
+                <Text className="text-sm font-semibold text-foreground">Giữ lịch hẹn</Text>
+              </ActionButton>
+              <ActionButton
+                variant="destructive"
+                fullWidth
+                onPress={handleConfirm}
+                className="flex-1 py-3"
+                accessibilityLabel="Xác nhận huỷ"
+              >
+                <Text className="text-sm font-semibold text-primary-foreground">
+                  Xác nhận huỷ
+                </Text>
+              </ActionButton>
+            </View>
           </View>
-        </View>
+        </ScrollView>
       </View>
     </View>
+  );
+}
+
+function ReasonOption({
+  selected,
+  label,
+  onPress,
+}: {
+  selected: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      className={cn(
+        'flex-row items-center gap-2 rounded-xl border px-3 py-2.5 active:scale-[0.98]',
+        selected ? 'border-primary bg-primary/5' : 'border-border bg-background',
+      )}
+    >
+      <View
+        className={cn(
+          'size-4 shrink-0 items-center justify-center rounded-full border',
+          selected ? 'border-primary bg-primary' : 'border-input bg-background',
+        )}
+      >
+        {selected && <View className="size-1.5 rounded-full bg-white" />}
+      </View>
+      <Text
+        className={cn(
+          'flex-1 text-sm',
+          selected ? 'font-semibold text-foreground' : 'text-foreground',
+        )}
+      >
+        {label}
+      </Text>
+    </Pressable>
   );
 }

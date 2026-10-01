@@ -1,14 +1,11 @@
 import { z } from "zod";
 
-export const serviceTypes = [
-  "emergency_rescue",
-  "mobile_repair",
-  "at_home_service",
-  "periodic_maintenance",
-  "other"
-] as const;
+// Shared with the admin web frontend via the contract package; see
+// `packages/api-contract/src/enums.ts` and its enum-parity test.
+import { serviceTypes } from "@careonroad/api-contract/enums";
 
-export type ServiceType = (typeof serviceTypes)[number];
+export { serviceTypes } from "@careonroad/api-contract/enums";
+export type { ServiceType } from "@careonroad/api-contract/enums";
 
 export const motorcycleInputSchema = z
   .object({

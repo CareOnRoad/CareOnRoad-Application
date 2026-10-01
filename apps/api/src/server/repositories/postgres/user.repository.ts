@@ -11,6 +11,7 @@ import type {
   ApplicationUser,
   CreateApplicationUser,
   RegisterUserDevice,
+  UpdateApplicationUser,
   UserDevice,
   UserRepository
 } from "../contracts/user.repository";
@@ -19,7 +20,10 @@ import type { JsonObject } from "../contracts/idempotency.repository";
 type UserRow = {
   id: string;
   display_name: string | null;
+  phone: string | null;
   phone_masked: string | null;
+  address: string | null;
+  avatar_url: string | null;
   status: UserStatus;
   created_at: Date;
   updated_at: Date;
@@ -52,7 +56,8 @@ export class PostgresUserRepository implements UserRepository {
 
   async findById(id: string): Promise<ApplicationUser | undefined> {
     const rows = await this.sql<UserRow[]>`
-      select id, display_name, phone_masked, status, created_at, updated_at
+      select id, display_name, phone, phone_masked, address, avatar_url,
+             status, created_at, updated_at
       from app_users
       where id = ${id}
       limit 1
@@ -65,7 +70,10 @@ export class PostgresUserRepository implements UserRepository {
       select
         users.id,
         users.display_name,
+        users.phone,
         users.phone_masked,
+        users.address,
+        users.avatar_url,
         users.status,
         users.created_at,
         users.updated_at,
@@ -85,15 +93,45 @@ export class PostgresUserRepository implements UserRepository {
   async createProfile(input: CreateApplicationUser): Promise<ApplicationUser> {
     const now = input.createdAt ?? new Date();
     const rows = await this.sql<UserRow[]>`
-      insert into app_users (id, display_name, phone_masked, status, created_at, updated_at)
+      insert into app_users (
+        id, display_name, phone, phone_masked, address, avatar_url,
+        status, created_at, updated_at
+      )
       values (
-        ${input.id}, ${input.displayName ?? null}, ${input.phoneMasked ?? null},
+        ${input.id}, ${input.displayName ?? null}, ${input.phone ?? null},
+        ${input.phoneMasked ?? null}, ${input.address ?? null}, ${input.avatarUrl ?? null},
         ${input.status ?? "active"}, ${now}, ${input.updatedAt ?? now}
       )
       on conflict (id) do update set id = excluded.id
-      returning id, display_name, phone_masked, status, created_at, updated_at
+      returning id, display_name, phone, phone_masked, address, avatar_url,
+                status, created_at, updated_at
     `;
     return mapUser(rows[0]!);
+  }
+
+  async updateProfile(
+    id: string,
+    input: UpdateApplicationUser,
+    updatedAt: Date,
+  ): Promise<ApplicationActor> {
+    const rows = await this.sql<UserRow[]>`
+      update app_users
+      set
+        display_name = coalesce(${input.displayName ?? null}::text, display_name),
+        phone = coalesce(${input.phone ?? null}::text, phone),
+        phone_masked = coalesce(${input.phoneMasked ?? null}::text, phone_masked),
+        address = coalesce(${input.address ?? null}::text, address),
+        avatar_url = coalesce(${input.avatarUrl ?? null}::text, avatar_url),
+        updated_at = ${updatedAt}
+      where id = ${id}
+      returning id, display_name, phone, phone_masked, address, avatar_url,
+                status, created_at, updated_at
+    `;
+    if (!rows[0]) throw new Error("USER_NOT_FOUND");
+    const roleRows = await this.sql<{ role: UserRole }[]>`
+      select role from user_roles where user_id = ${id} order by role
+    `;
+    return { ...mapUser(rows[0]), roles: roleRows.map((row) => row.role) };
   }
 
   async addRole(userId: string, role: UserRole): Promise<void> {
@@ -128,7 +166,8 @@ export class PostgresUserRepository implements UserRepository {
   async listAdminUsers(input: AdminUserListInput): Promise<AdminUserPage> {
     const rows = await this.sql<UserRow[]>`
       select
-        users.id, users.display_name, users.phone_masked, users.status,
+        users.id, users.display_name, users.phone, users.phone_masked,
+        users.address, users.avatar_url, users.status,
         users.created_at, users.updated_at,
         coalesce(
           array_agg(roles.role::text order by roles.role)
@@ -150,6 +189,7 @@ export class PostgresUserRepository implements UserRepository {
           ${input.query ?? null}::text is null
           or users.id::text ilike '%' || ${input.query ?? null} || '%'
           or coalesce(users.display_name, '') ilike '%' || ${input.query ?? null} || '%'
+          or coalesce(users.phone, '') ilike '%' || ${input.query ?? null} || '%'
           or coalesce(users.phone_masked, '') ilike '%' || ${input.query ?? null} || '%'
         )
         and (${input.from ?? null}::timestamptz is null or users.updated_at >= ${input.from ?? null})
@@ -175,7 +215,8 @@ export class PostgresUserRepository implements UserRepository {
 
   async findActorForUpdate(id: string): Promise<ApplicationActor | undefined> {
     const rows = await this.sql<UserRow[]>`
-      select id, display_name, phone_masked, status, created_at, updated_at
+      select id, display_name, phone, phone_masked, address, avatar_url,
+             status, created_at, updated_at
       from app_users
       where id = ${id}
       for update
@@ -196,7 +237,8 @@ export class PostgresUserRepository implements UserRepository {
       update app_users
       set status = ${status}, updated_at = ${updatedAt}
       where id = ${id}
-      returning id, display_name, phone_masked, status, created_at, updated_at
+      returning id, display_name, phone, phone_masked, address, avatar_url,
+                status, created_at, updated_at
     `;
     if (!rows[0]) throw new Error("USER_NOT_FOUND");
     const roleRows = await this.sql<{ role: UserRole }[]>`
@@ -367,7 +409,10 @@ function mapUser(row: UserRow): ApplicationUser {
   return {
     id: row.id,
     displayName: row.display_name ?? undefined,
+    phone: row.phone ?? undefined,
     phoneMasked: row.phone_masked ?? undefined,
+    address: row.address ?? undefined,
+    avatarUrl: row.avatar_url ?? undefined,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at
