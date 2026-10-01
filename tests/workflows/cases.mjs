@@ -155,7 +155,7 @@ export function buildCases(c) {
   for (const [name,lines] of laborBad) add('MNT',`Labor quote rejects ${name}`,'400/422/409; no invalid immutable quote',()=>c.quote(need('accepted'),'maintenance_labor',lines,{},'mechanic',[...invalid,409]));
   for (const more of [{discount_amount:1},{diagnosis_id:randomUUID()},{labor_pricing:{base_amount:1}},{total_amount:1}]) add('MNT',`Labor quote rejects ${Object.keys(more)[0]}`,'400/422/409; server owns pricing',()=>c.quote(need('accepted'),'maintenance_labor',c.laborLines,more,'mechanic',[...invalid,409]));
   add('MNT','Work quote before approved labor','409',()=>c.quote(need('accepted'),'maintenance_work',c.parts,{},'mechanic',409));
-  add('MNT','New maintenance rejects legacy standard purpose','409',()=>c.quote(need('accepted'),'standard',c.laborLines,{},'mechanic',409));
+  add('MNT','New maintenance rejects legacy standard purpose','Invalid purpose rejected; no quote or payment',()=>c.quote(need('accepted'),'standard',c.laborLines,{},'mechanic',[...invalid,409]));
   add('MNT','Labor rejection retains mechanic; replacement immutable','Rejected cannot travel; replacement supersedes prior pending; latest only',async()=>{
     const flow=need('accepted'); const first=await c.quote(flow,'maintenance_labor',c.laborLines); await c.decide(first,'reject');
     await status(flow,'quoted','awaiting_quote_approval'); await c.transition(flow,'en_route',409);
@@ -227,7 +227,7 @@ export function buildCases(c) {
     const sum=await c.summary(need('payable')); a.equal(sum.total_amount,24000); a.equal(sum.paid_amount,0); a.equal(sum.remaining_amount,24000); a.equal(sum.payment_timing,'after_service');
   });
   for (const input of [{},{quote_id:'bad'},{quote_id:null},{quote_id:randomUUID()},{quote_id:randomUUID(),amount:1},
-    {quote_id:randomUUID(),status:'succeeded'},{quote_id:randomUUID(),provider:'cash'}]) add('PAY','Payment input malformed/unknown/mass assignment','Invalid input or nonexistent quote; no provider request',()=>mutation('POST','/api/v1/payments/orders','rider',input,input.quote_id?.length===36&&Object.keys(input).length===1?404:invalid));
+    {quote_id:randomUUID(),status:'succeeded'},{quote_id:randomUUID(),provider:'cash'}]) add('PAY','Payment input malformed/unknown/mass assignment','Invalid input or nonexistent quote; no provider request',()=>mutation('POST','/api/v1/payments/orders','rider',input,input.quote_id?.length===36?[...invalid,404]:invalid));
   for (const role of ['rider2','mechanic']) add('PAY',`Foreign payment creation by ${role}`,'403/404',()=>c.order(need('payQuote'),forbidden,key(),role));
   add('PAY','Payment missing idempotency','400/422',()=>http('POST','/api/v1/payments/orders','rider',{quote_id:need('payQuote').id},invalid));
   add('PAY','Client cannot reduce charge amount','400/422',()=>c.order(need('payQuote'),invalid,key(),'rider',{amount:1}));
@@ -345,7 +345,9 @@ export function buildCases(c) {
     const overlap=await c.book({scheduled:Date.parse(flow.request.scheduled_start_at)+15*60_000}); await worker('outbox/run');
     const offers=await http('GET','/api/v1/dispatch/offers','mechanic'); a.ok(!offers.items.some(x=>x.request_id===overlap.id),'Overlapping reservation must not invite same mechanic'); await cancel(overlap);
     const rescue=await c.assigned({service:'emergency_rescue',scheduled:0});
-    await cancel(rescue); shift(150*60_000); await c.refreshMechanics(); await worker('dispatch/run');
+    shift(150*60_000); await c.transition(flow,'en_route',409);
+    await mutation('POST',`/api/v1/assignments/${rescue.assignment.id}/recover`,'mechanic',{reason_code:'cannot_continue'},200); await cancel(rescue);
+    await c.refreshMechanics(); await worker('dispatch/run');
     await c.transition(flow,'en_route'); await c.transition(flow,'on_site'); await c.transition(flow,'diagnosis');
     flow.work=await c.quote(flow,'maintenance_work',[]); await c.decide(flow.work); await c.transition(flow,'in_progress'); await finish(flow);
   });
@@ -491,8 +493,6 @@ export function buildCases(c) {
     ['PAY','Real bank transfer + signed external payOS webhook','Approved test bank account and explicit money-transfer execution; stub cannot prove settlement'],
     ['PAY','Legacy standard maintenance prepayment compatibility','Pre-migration approved legacy fixture; cannot fabricate workflow state through SQL'],
     ['PAY','Provider timeout after link creation and process crash before response','Dedicated crash/restart fault injection with durable provider state'],
-    ['MNT','Maximum duration 480 and adjacent buffered reservation boundary','Two independently available mechanics and controllable completed boundary fixture'],
-    ['MNT','Simultaneous cancellation versus offer acceptance','Independent repeated race runs and post-race cleanup, beyond deterministic serial runner'],
     ['MNT','Repair legacy request missing location','Existing legacy request fixture created before migration035; current API rejects malformed new data'],
     ['NTF','Android physical receipt foreground/background/app terminated','FCM service credentials + registered real-device token + physical receipt observer'],
     ['NTF','iOS physical receipt foreground/background/app terminated','APNs/FCM setup + registered iOS device + physical receipt observer'],

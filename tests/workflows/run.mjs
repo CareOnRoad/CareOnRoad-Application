@@ -8,6 +8,7 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startProviders, sign } from './providers.mjs';
 import { buildCases } from './cases.mjs';
+import { buildExtraCases } from './extra-cases.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url)); const root = resolve(directory, '../..');
 const requireApi = createRequire(join(root, 'apps/api/package.json'));
@@ -42,6 +43,17 @@ function checkRedaction(data) {
 }
 async function http(method, path, role = 'rider', body, statuses = 200, headers = {}) {
   if (!['anonymous','invalid','worker'].includes(role) && !actors[role]) block(`Missing actor ${role}`);
+  if (actors[role]?.token && Date.now() >= actors[role].expiresAt - 60_000) {
+    const actor = actors[role];
+    actor.refreshing ||= authRequest(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST', headers: { apikey: process.env.SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: actor.refreshToken })
+    }).then(async response => {
+      if(response.status !== 200) block(`Fixture token refresh HTTP ${response.status}`);
+      applyTokens(actor, await response.json());
+    }).finally(() => { actor.refreshing = undefined; });
+    await actor.refreshing;
+  }
   const auth = role === 'invalid' ? 'invalid.jwt.token' : actors[role]?.token;
   const start = Date.now();
   const response = await fetch(origin + path, { method, redirect: 'manual', signal: AbortSignal.timeout(path.includes('/workers/') ? 240_000 : 90_000),
@@ -139,10 +151,13 @@ async function webhook(value, change = {}, options = {}) {
 const context = { assert, http, mutation, worker, inbox, key, state, actors, now, shift, wait, item, block,
   refreshMechanics, book, assigned, quote, decide, transition, atSite, ready, summary, order, webhook, providerOrder,
   laborLines, parts, checklist, provider: () => provider, sql: () => scoped };
-const cases = buildCases(context);
-const hashes = Object.fromEntries(['cases.mjs','run.mjs','providers.mjs','sandbox.cjs'].map(file =>
+const allCases = [...buildCases(context), ...buildExtraCases(context)];
+const only = process.argv.find(arg=>arg.startsWith('--only='))?.slice(7).split(',');
+const cases = process.argv.includes('--extra-only') ? allCases.filter(x=>x.group==='EXT') : only ? allCases.filter(x=>only.includes(x.id)) : allCases;
+assert.ok(cases.length, 'No selected test cases');
+const hashes = Object.fromEntries(['cases.mjs','extra-cases.mjs','run.mjs','providers.mjs','sandbox.cjs'].map(file =>
   [file, createHash('sha256').update(readFileSync(join(directory, file))).digest('hex')]));
-const catalog = cases.map(({ run, ...test }) => test);
+const catalog = allCases.map(({ run, ...test }) => test);
 writeFileSync(join(directory, 'test-cases.json'), JSON.stringify({ generated_at: new Date().toISOString(), sources: [
   'apps/api/MAINTENANCE-WORKFLOW.md','apps/api/MAINTENANCE-NOTIFICATIONS.md','apps/api/RESCUE-WORKFLOW.md',
   'specs/005-careonroad-payment/contracts/payment-api.yaml','specs/002-careonroad-backend-mvp/contracts/backend-api.yaml',
@@ -150,7 +165,7 @@ writeFileSync(join(directory, 'test-cases.json'), JSON.stringify({ generated_at:
   'specs/011-notification-inbox-api/contracts/notification-inbox-api.md','https://payos.vn/docs/api/',
   'https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/','https://firebase.google.com/docs/cloud-messaging/error-codes'
 ], hashes, cases: catalog }, null, 2));
-writeFileSync(join(output, 'catalog-before-run.json'), JSON.stringify({ hashes, cases: catalog }, null, 2));
+writeFileSync(join(output, 'catalog-before-run.json'), JSON.stringify({ hashes, cases: catalog, selected: cases.map(x=>x.id) }, null, 2));
 for (const file of Object.keys(hashes)) writeFileSync(join(output, file), readFileSync(join(directory, file)));
 if (process.argv.includes('--list')) { console.log(JSON.stringify({ cases: cases.length, catalogue: 'tests/workflows/test-cases.json' })); process.exit(0); }
 for (const file of ['.env','.env.local','apps/api/.env','apps/api/.env.local']) if (existsSync(join(root, file))) process.loadEnvFile(join(root, file));
@@ -168,6 +183,12 @@ function authRequest(url, options = {}) {
     request.on('error', reject); request.on('timeout', () => request.destroy(new Error('Auth network timeout')));
     request.end(options.body);
   });
+}
+function applyTokens(actor, auth) {
+  assert.ok(auth.access_token && auth.refresh_token && auth.expires_in, 'Auth token response contract');
+  secrets.add(auth.access_token); secrets.add(auth.refresh_token);
+  actor.token = auth.access_token; actor.refreshToken = auth.refresh_token;
+  actor.expiresAt = Date.now() + Number(auth.expires_in) * 1000; actor.ttlSeconds = Number(auth.expires_in);
 }
 if (process.argv.includes('--preflight')) {
   const response = await authRequest(`${process.env.SUPABASE_URL}/auth/v1/health`, { headers: { apikey: process.env.SUPABASE_PUBLISHABLE_KEY } });
@@ -222,8 +243,7 @@ async function provision() {
     actors[role] = { id: user.id };
     const login = await authRequest(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`, { method: 'POST',
       headers: { apikey: process.env.SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }), signal: AbortSignal.timeout(30_000) });
-    assert.equal(login.status, 200, 'Fixture login'); const auth = await login.json(); secrets.add(auth.access_token); secrets.add(auth.refresh_token);
-    actors[role].token = auth.access_token; stage(`profile-${role}`);
+    assert.equal(login.status, 200, 'Fixture login'); applyTokens(actors[role], await login.json()); stage(`profile-${role}`);
     await http('POST', '/api/v1/auth/profile', role, { account_type: role.startsWith('mechanic') ? 'mechanic' : 'rider' }, 200);
     const [local] = await scoped`select id from app_users where id = ${user.id}`;
     const [outside] = await database`select id from public.app_users where id = ${user.id}`;
