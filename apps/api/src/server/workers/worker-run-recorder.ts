@@ -17,7 +17,7 @@ export async function recordWorkerRun<T>(input: {
     const result = await input.run();
     const completedAt = input.now?.() ?? new Date();
     const counts = input.summarize(result);
-    await append(input, { status: "succeeded", startedAt, completedAt, ...counts });
+    await append(input, { status: counts.failed > 0 ? "failed" : "succeeded", startedAt, completedAt, ...counts });
     return result;
   } catch (error) {
     const completedAt = input.now?.() ?? new Date();

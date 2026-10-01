@@ -23,7 +23,7 @@ export class NotificationDeliveryService {
   constructor(
     private readonly unitOfWork: UnitOfWork,
     private readonly provider: NotificationProvider,
-    private readonly cipher: PushTokenCipher,
+    private readonly cipher: PushTokenCipher | (() => PushTokenCipher),
     private readonly options: { now?: () => Date; createId?: () => string } = {}
   ) {}
 
@@ -52,11 +52,16 @@ export class NotificationDeliveryService {
       const allReceipts = await repositories.notificationDeliveries.listByNotificationId(
         notificationId
       );
-      const activeIds = new Set(credentials.map((item) => item.id));
+      const activeIds = new Set(credentials.map((item) => `${item.id}:${item.credentialVersion}`));
       for (const receipt of allReceipts) {
-        if (!terminalStatuses.has(receipt.status) && !activeIds.has(receipt.credentialId)) {
+        if (!terminalStatuses.has(receipt.status) && !activeIds.has(`${receipt.credentialId}:${receipt.credentialVersion}`)) {
+          const token = randomUUID();
+          const claimed = await repositories.notificationDeliveries.claim({ id: receipt.id, token, now,
+            leaseUntil: new Date(now.getTime() + 90_000) });
+          if (!claimed) continue;
           await repositories.notificationDeliveries.recordOutcome({
             id: receipt.id,
+            leaseToken: token,
             status: "permanent_failed",
             attemptedAt: now,
             errorCode: "PUSH_CREDENTIAL_DISABLED"
@@ -70,32 +75,38 @@ export class NotificationDeliveryService {
       prepared.credentials.map((credential) => [credential.id, credential])
     );
     for (const receipt of prepared.receipts) {
-      if (terminalStatuses.has(receipt.status)) continue;
+      const claimTime = this.options.now?.() ?? new Date();
+      const token = randomUUID();
+      const claimed = await this.unitOfWork.execute(({ notificationDeliveries }) => notificationDeliveries.claim({
+        id: receipt.id, token, now: claimTime, leaseUntil: new Date(claimTime.getTime() + 90_000)
+      }));
+      if (!claimed) continue;
       const credential = credentialById.get(receipt.credentialId);
       if (!credential) continue;
-      const rawCredential = this.decryptCredential(credential);
       let outcome: NotificationProviderOutcome;
       try {
+        const rawCredential = this.decryptCredential(credential);
         outcome = await this.provider.send({
-          provider: credential.provider,
-          credential: rawCredential,
-          title: prepared.notification.title,
-          body: prepared.notification.body,
-          data: prepared.notification.data,
-          deliveryId: receipt.id
+          provider: credential.provider, credential: rawCredential,
+          title: prepared.notification.title, body: prepared.notification.body,
+          data: { ...prepared.notification.data, notification_id: notificationId }, deliveryId: receipt.id
         });
-      } finally {
-        // Keep the decrypted credential scoped to this iteration and never persist it.
+      } catch {
+        outcome = { kind: "temporary_failure", errorCode: "PUSH_DELIVERY_UNAVAILABLE" };
       }
-      await this.persistOutcome(receipt, credential, outcome, now);
+      const attemptedAt = this.options.now?.() ?? new Date();
+      await this.persistOutcome(claimed, credential, outcome, attemptedAt);
     }
 
     const finalReceipts = await this.unitOfWork.execute(({ notificationDeliveries }) =>
       notificationDeliveries.listByNotificationId(notificationId)
     );
-    const retryable = finalReceipts.find((receipt) => receipt.status === "retryable_failed");
+    const retryable = finalReceipts.find((receipt) => !terminalStatuses.has(receipt.status));
     if (retryable) {
-      throw new NotificationDeliveryError(retryable.lastErrorCode ?? "PUSH_DELIVERY_RETRYABLE");
+      const retryTimes = finalReceipts.filter((receipt) => !terminalStatuses.has(receipt.status))
+        .flatMap((receipt) => [receipt.nextAttemptAt, receipt.leaseExpiresAt].filter((date): date is Date => Boolean(date)));
+      throw new NotificationDeliveryError(retryable.lastErrorCode ?? "PUSH_DELIVERY_RETRYABLE",
+        retryTimes.length ? new Date(Math.max(...retryTimes.map((date) => date.getTime()))) : undefined);
     }
     if (finalReceipts.some((receipt) => receipt.status === "sent")) {
       return { status: "sent" };
@@ -117,7 +128,7 @@ export class NotificationDeliveryService {
       throw new NotificationDeliveryError("PUSH_CREDENTIAL_UNAVAILABLE");
     }
     try {
-      return this.cipher.decrypt({
+      return (typeof this.cipher === "function" ? this.cipher() : this.cipher).decrypt({
         ciphertext: credential.credentialCiphertext,
         iv: credential.credentialIv,
         authTag: credential.credentialTag,
@@ -139,7 +150,12 @@ export class NotificationDeliveryService {
       const saved = await repositories.notificationDeliveries.recordOutcome({
         id: receipt.id,
         status: mapped.status,
-        attemptedAt,
+        attemptedAt, leaseToken: receipt.leaseToken,
+        ...((outcome.kind === "throttled" || outcome.kind === "temporary_failure") &&
+          (outcome.retryAfter || outcome.kind === "throttled") ? {
+            nextAttemptAt: new Date(Math.max(outcome.retryAfter?.getTime() ?? 0,
+              outcome.kind === "throttled" ? attemptedAt.getTime() + 60_000 : 0))
+          } : {}),
         ...(mapped.providerMessageId
           ? { providerMessageId: mapped.providerMessageId }
           : {}),

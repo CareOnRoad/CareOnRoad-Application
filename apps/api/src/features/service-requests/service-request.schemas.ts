@@ -38,6 +38,12 @@ export const cancelServiceRequestInputSchema = z
   })
   .strict();
 
+export const appointmentUpdateSchema = z.object({
+  location: geoPointSchema.optional(),
+  address_text: z.string().trim().min(1).max(500).optional(),
+  scheduled_start_at: z.string().datetime({ offset: true }).nullable().optional()
+}).strict().refine((input) => Object.keys(input).length > 0, "At least one appointment field is required.");
+
 export { requestMediaMetadataInputSchema };
 
 export type ServiceRequestInput = z.infer<typeof serviceRequestInputSchema>;

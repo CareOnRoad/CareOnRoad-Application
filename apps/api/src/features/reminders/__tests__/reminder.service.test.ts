@@ -24,7 +24,7 @@ describe("ReminderService", () => {
       uuid(5),
       uuid(6),
       uuid(7),
-      uuid(8)
+      uuid(8), uuid(9), uuid(10)
     ]);
 
     const created = await service.createReminderRule(identity(riderId), {
@@ -56,17 +56,26 @@ describe("ReminderService", () => {
     ).resolves.toMatchObject({ title: "Bao duong lai", interval_days: 60 });
     await expect(
       service.snoozeReminderRule(identity(riderId), reminderId, {
-        until: "2026-06-27T03:00:00.000Z"
+        until: "2026-07-27T03:00:00.000Z"
       })
-    ).resolves.toMatchObject({ snoozed_until: "2026-06-27T03:00:00.000Z" });
+    ).resolves.toMatchObject({ snoozed_until: "2026-07-27T03:00:00.000Z" });
+    await expect(service.snoozeReminderRule(identity(riderId), reminderId, {
+      until: "2026-07-26T03:00:00.000Z"
+    })).rejects.toMatchObject({ status: 400 });
+    const rescheduled = await service.updateReminderRule(identity(riderId), reminderId, {
+      motorcycle_id: motorcycleId, title: "Lịch mới", interval_days: 60,
+      next_due_at: "2026-08-01T03:00:00.000Z", enabled: true
+    });
+    expect(rescheduled.snoozed_until).toBeUndefined();
+    expect(rescheduled.next_due_at).toBe("2026-08-01T03:00:00.000Z");
     await expect(service.disableReminderRule(identity(riderId), reminderId)).resolves.toMatchObject({
       enabled: false
     });
 
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.reminderRules).toHaveLength(1);
-    expect(snapshot.outboxEvents).toHaveLength(4);
-    expect(snapshot.auditLogs).toHaveLength(4);
+    expect(snapshot.outboxEvents).toHaveLength(5);
+    expect(snapshot.auditLogs).toHaveLength(5);
     expect(JSON.stringify({ outbox: snapshot.outboxEvents, audit: snapshot.auditLogs })).not.toContain(
       "Bao duong dau nhot"
     );

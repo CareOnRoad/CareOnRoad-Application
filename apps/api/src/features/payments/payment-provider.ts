@@ -10,7 +10,7 @@ export type CreateProviderPaymentInput = {
 export type ProviderPaymentLink = {
   paymentLinkId: string;
   checkoutUrl: string;
-  qrCode: string;
+  qrCode?: string;
   status: "PENDING" | "PAID" | "CANCELLED" | "EXPIRED" | "FAILED";
 };
 

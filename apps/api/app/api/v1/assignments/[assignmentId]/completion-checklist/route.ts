@@ -6,6 +6,11 @@ type AssignmentCompletionChecklistRouteContext = {
   params: Promise<{ assignmentId: string }>;
 };
 
+export async function GET(request: Request, context: AssignmentCompletionChecklistRouteContext) {
+  const { assignmentId } = await context.params;
+  return createDefaultMechanicOperationsRouteHandlers().getCompletionChecklist(request, assignmentId);
+}
+
 export async function POST(
   request: Request,
   context: AssignmentCompletionChecklistRouteContext

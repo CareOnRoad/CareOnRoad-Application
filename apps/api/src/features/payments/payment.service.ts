@@ -2,16 +2,20 @@ import { randomUUID } from "node:crypto";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { loadActiveActor } from "@/features/assignments/assignment.service";
-import { prepareIdempotency } from "@/lib/idempotency";
+import { loadActiveAdminActor } from "@/features/admin/admin.authorization";
+import { persistNotification } from "@/features/notifications/notification.service";
+import { hashIdempotencyRequest, prepareIdempotency } from "@/lib/idempotency";
 import type {
   PaymentEvent,
   PaymentOrder,
   PaymentOrderStatus
 } from "@/server/repositories/contracts/payment.repository";
 import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import type { Assignment } from "@/server/repositories/contracts/assignment.repository";
+import type { Quote } from "@/server/repositories/contracts/quote.repository";
 import type { ApiErrorCode } from "@/lib/api-error";
 
-import { createPaymentOrderInputSchema, paymentOrderIdParamSchema } from "./payment.schemas";
+import { createPaymentOrderInputSchema, paymentOrderIdParamSchema, resolvePaymentReviewInputSchema } from "./payment.schemas";
 import type { PaymentProviderClient, ProviderPaymentStatus, VerifiedPaymentEvent } from "./payment-provider";
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -52,6 +56,25 @@ export type PaymentReconcileResult = {
   succeeded: number;
   needs_review: number;
   still_pending: number;
+  failed?: number;
+};
+
+export type PaymentSummaryResponse = {
+  request_id: string;
+  assignment_id: string;
+  quote_id: string;
+  labor_quote_id?: string;
+  pending_quote_id?: string;
+  payment_timing?: "labor_upfront" | "after_repair" | "after_service";
+  currency: "VND";
+  labor_amount: number;
+  parts_amount: number;
+  other_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  quote_status: string;
+  assignment_status: string;
 };
 
 export type PaymentServiceOptions = {
@@ -68,6 +91,32 @@ export class PaymentService {
     private readonly options: PaymentServiceOptions
   ) {}
 
+  async getPaymentSummary(identity: VerifiedSupabaseIdentity, requestId: string): Promise<PaymentSummaryResponse> {
+    if (!paymentOrderIdParamSchema.safeParse(requestId).success) throw new PaymentError("INVALID_INPUT", "Request id must be a UUID.", 400);
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveActor(repositories, identity.subject);
+      const request = await repositories.serviceRequests.findByIdForUpdate(requestId);
+      if (!request) throw new PaymentError("NOT_FOUND", "Service request not found.", 404);
+      const latest = await repositories.quotes.findLatestByRequest(requestId);
+      const assignment = latest ? await repositories.assignments.findById(latest.assignmentId) : undefined;
+      if (!latest || !assignment) throw new PaymentError("NOT_FOUND", "Payment workflow not found.", 404);
+      if (!actor.roles.includes("admin") && request.riderId !== actor.id && !(actor.roles.includes("mechanic") && assignment.mechanicId === actor.id)) throw new PaymentError("FORBIDDEN", "Payment summary access is not allowed.", 403);
+      const laborId = assignment.maintenanceLaborQuoteId ?? assignment.rescueLaborQuoteId;
+      const labor = laborId ? await repositories.quotes.findById(laborId) : undefined;
+      const maintenance = Boolean(assignment.maintenanceLaborQuoteId);
+      const quote = maintenance ? (await repositories.quotes.findLatestApprovedByAssignment(assignment.id, "maintenance_work")) ?? labor ?? latest : latest;
+      const paid = await repositories.payments.sumSucceededForAssignment(assignment.id);
+      const laborAmount = !maintenance && labor ? labor.totalAmount : quote.lines.filter((line) => line.lineType === "labor").reduce((amount, line) => amount + line.lineTotalAmount, 0);
+      return { request_id: requestId, assignment_id: assignment.id, quote_id: quote.id, labor_quote_id: labor?.id,
+        pending_quote_id: maintenance && latest.status === "pending" ? latest.id : undefined,
+        payment_timing: maintenance ? "after_service" : assignment.rescuePaymentTiming, currency: "VND", labor_amount: laborAmount,
+        parts_amount: quote.purpose === "rescue_final" ? quote.totalAmount - laborAmount : quote.lines.filter((line) => line.lineType === "part").reduce((amount, line) => amount + line.lineTotalAmount, 0),
+        other_amount: quote.lines.filter((line) => line.lineType === "other").reduce((amount, line) => amount + line.lineTotalAmount, 0),
+        total_amount: quote.totalAmount, paid_amount: paid, remaining_amount: Math.max(0, quote.totalAmount - paid),
+        quote_status: quote.status, assignment_status: assignment.status };
+    });
+  }
+
   async createPaymentOrder(
     identity: VerifiedSupabaseIdentity,
     input: unknown,
@@ -81,7 +130,10 @@ export class PaymentService {
       });
     }
 
-    return this.unitOfWork.execute(async (repositories) => {
+    const provider = this.options.providerFactory();
+    const returnUrl = this.options.returnUrl();
+    const cancelUrl = this.options.cancelUrl();
+    const reserved = await this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
       if (!actor.roles.includes("rider")) {
         throw new PaymentError("FORBIDDEN", "Only the owning rider may create payment orders.", 403);
@@ -104,32 +156,47 @@ export class PaymentService {
         throw new PaymentError("CONFLICT", "Idempotency key is already in progress.", 409);
       }
       if (decision.action === "replay") {
-        return decision.responseBody as PaymentOrderResponse;
+        const order = await repositories.payments.findById(decision.resourceId ?? String(decision.responseBody.id));
+        if (!order || order.riderId !== actor.id) throw new PaymentError("NOT_FOUND", "Payment order not found.", 404);
+        return order;
       }
 
-      const quote = await repositories.quotes.findByIdForUpdate(parsed.data.quote_id);
-      if (!quote) {
+      const snapshot = await repositories.quotes.findById(parsed.data.quote_id);
+      if (!snapshot) {
         throw new PaymentError("NOT_FOUND", "Quote not found.", 404);
       }
-      const latest = await repositories.quotes.findLatestByRequestForUpdate(quote.requestId);
-      const request = await repositories.serviceRequests.findByIdForUpdate(quote.requestId);
-      const assignment = await repositories.assignments.findByIdForUpdate(quote.assignmentId);
-      if (!latest || !request || !assignment) {
+      const request = await repositories.serviceRequests.findByIdForUpdate(snapshot.requestId);
+      const assignment = await repositories.assignments.findByIdForUpdate(snapshot.assignmentId);
+      const quote = await repositories.quotes.findByIdForUpdate(snapshot.id);
+      const latest = await repositories.quotes.findLatestByRequestForUpdate(snapshot.requestId);
+      if (!quote || !latest || !request || !assignment) {
         throw new PaymentError("NOT_FOUND", "Payment workflow not found.", 404);
       }
       if (request.riderId !== actor.id) {
         throw new PaymentError("FORBIDDEN", "Only the owning rider may pay this quote.", 403);
       }
+      const upfrontLabor = quote.purpose === "rescue_labor" && assignment.rescueLaborQuoteId === quote.id && assignment.rescuePaymentTiming === "labor_upfront";
+      const payable = await latestPayableQuote(repositories, assignment, latest);
       if (
-        latest.id !== quote.id ||
+        payable?.id !== quote.id ||
         quote.status !== "approved" ||
-        request.status !== "awaiting_payment" ||
-        assignment.status !== "awaiting_payment" ||
+        request.status !== (upfrontLabor ? "assigned" : "awaiting_payment") ||
+        assignment.status !== (upfrontLabor ? "accepted" : "awaiting_payment") ||
+        (quote.purpose === "rescue_labor" && !upfrontLabor) ||
+        quote.purpose === "maintenance_labor" ||
+        (assignment.maintenanceLaborQuoteId && quote.purpose !== "maintenance_work") ||
         quote.currency !== "VND"
       ) {
         throw new PaymentError("CONFLICT", "Quote is not payable.", 409);
       }
+      if (await repositories.payments.hasSucceededForAssignment({ assignmentId: assignment.id, requestId: request.id, quoteId: quote.id })) {
+        throw new PaymentError("CONFLICT", "This quote has already been paid.", 409);
+      }
+      const alreadyPaid = quote.purpose === "rescue_final" || quote.purpose === "maintenance_work" ? await repositories.payments.sumSucceededForAssignment(assignment.id) : 0;
+      const amountDue = quote.totalAmount - alreadyPaid;
+      if (amountDue <= 0 || amountDue > 999_999_999_999) throw new PaymentError("CONFLICT", "No supported outstanding amount is payable.", 409);
       const active = await repositories.payments.findActiveByQuoteForUpdate(quote.id);
+      if (active?.status === "needs_review") throw new PaymentError("CONFLICT", "Resolve the payment under review before collecting again.", 409);
       if (active) {
         const response = toPaymentOrderResponse(active);
         await repositories.idempotency.complete({
@@ -142,7 +209,7 @@ export class PaymentService {
           resourceId: active.id,
           completedAt: now
         });
-        return response;
+        return active;
       }
 
       const providerOrderCode = await repositories.payments.allocateProviderOrderCode();
@@ -154,43 +221,22 @@ export class PaymentService {
         assignmentId: quote.assignmentId,
         riderId: actor.id,
         providerOrderCode,
-        amount: quote.totalAmount,
+        amount: amountDue,
         description: createPaymentDescription(providerOrderCode),
         createdAt: now,
         updatedAt: now,
         expiresAt
       });
 
-      const provider = this.options.providerFactory();
-      const providerLink = await provider.createPaymentLink({
-        orderCode: providerOrderCode,
-        amount: order.amount,
-        description: order.description,
-        returnUrl: this.options.returnUrl(),
-        cancelUrl: this.options.cancelUrl(),
-        expiredAt: Math.floor(expiresAt.getTime() / 1000)
-      });
-      const updated = await repositories.payments.updateProviderFields({
-        id: order.id,
-        status: "pending",
-        providerPaymentLinkId: providerLink.paymentLinkId,
-        checkoutUrl: providerLink.checkoutUrl,
-        qrCode: providerLink.qrCode,
-        updatedAt: now,
-        expiresAt
-      });
-      if (!updated) {
-        throw new PaymentError("NOT_FOUND", "Payment order not found.", 404);
-      }
       await appendPaymentAuditOutbox(repositories, {
-        action: "payment.pending",
-        order: updated,
+        action: "payment.created",
+        order,
         actorId: actor.id,
         actorRole: "rider",
         now,
         createId
       });
-      const response = toPaymentOrderResponse(updated);
+      const response = toPaymentOrderResponse(order);
       await repositories.idempotency.complete({
         actorId: actor.id,
         scope,
@@ -198,11 +244,40 @@ export class PaymentService {
         responseStatus: 201,
         responseBody: response as unknown as Record<string, unknown>,
         resourceType: "payment_order",
-        resourceId: updated.id,
+        resourceId: order.id,
         completedAt: now
       });
-      return response;
+      return order;
     });
+    return toPaymentOrderResponse(await this.initializePaymentLink(reserved, provider, returnUrl, cancelUrl));
+  }
+
+  private async initializePaymentLink(order: PaymentOrder, provider: PaymentProviderClient,
+    returnUrl: string, cancelUrl: string): Promise<PaymentOrder> {
+    if (order.status !== "created") return order;
+    const now = this.options.now?.() ?? new Date();
+    const expiresAt = order.expiresAt && order.expiresAt > now ? order.expiresAt : new Date(now.getTime() + DEFAULT_PAYMENT_EXPIRY_MS);
+    const link = await provider.createPaymentLink({ orderCode: order.providerOrderCode, amount: order.amount,
+      description: order.description, returnUrl, cancelUrl, expiredAt: Math.floor(expiresAt.getTime() / 1000) });
+    const updated = await this.unitOfWork.execute(async (repositories) => {
+      const current = await repositories.payments.findByIdForUpdate(order.id);
+      if (!current) throw new PaymentError("NOT_FOUND", "Payment order not found.", 404);
+      // A webhook may have settled the durable order while link creation was in flight.
+      const now = this.options.now?.() ?? new Date();
+      const changed = await repositories.payments.updateProviderFields({ id: order.id,
+        status: current.status === "created" ? "pending" : current.status,
+        providerPaymentLinkId: link.paymentLinkId, checkoutUrl: link.checkoutUrl, qrCode: link.qrCode, updatedAt: now, expiresAt });
+      if (!changed) throw new PaymentError("NOT_FOUND", "Payment order not found.", 404);
+      if (current.status === "created") await appendPaymentAuditOutbox(repositories, {
+        action: "payment.pending", order: changed, actorId: order.riderId, actorRole: "rider", now, createId: this.options.createId ?? randomUUID });
+      return changed;
+    });
+    if (link.status !== "PENDING") {
+      const status = await provider.getPaymentStatus(order.providerOrderCode);
+      await this.applyVerifiedProviderEvent(providerStatusToEvent(status));
+      return this.unitOfWork.execute(async (repositories) => (await repositories.payments.findById(order.id))!);
+    }
+    return updated;
   }
 
   async getPaymentOrder(
@@ -226,7 +301,7 @@ export class PaymentService {
       ) {
         throw new PaymentError("FORBIDDEN", "Payment order access is not allowed.", 403);
       }
-      if (actor.roles.includes("mechanic")) {
+      if (!actor.roles.includes("admin") && order.riderId !== actor.id && actor.roles.includes("mechanic")) {
         const assignment = await repositories.assignments.findById(order.assignmentId);
         if (!assignment || assignment.mechanicId !== actor.id) {
           throw new PaymentError("FORBIDDEN", "Payment order access is not allowed.", 403);
@@ -256,13 +331,15 @@ export class PaymentService {
       if (order.status !== "created" && order.status !== "pending" && order.status !== "failed") {
         throw new PaymentError("CONFLICT", "Payment order cannot be canceled.", 409);
       }
+      if (order.status === "created") throw new PaymentError("CONFLICT", "Payment link creation is being recovered; retry after reconciliation.", 409);
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
-      if (order.status === "pending") {
-        await this.options.providerFactory().cancelPaymentLink({
+      if (order.status === "pending" || order.status === "failed") {
+        const cancellation = await this.options.providerFactory().cancelPaymentLink({
           orderCode: order.providerOrderCode,
           cancellationReason: "rider_cancel"
         });
+        if (cancellation.orderCode !== order.providerOrderCode || cancellation.status !== "CANCELLED" || (cancellation.amountPaid ?? 0) > 0) throw new PaymentError("CONFLICT", "Payment cancellation was not confirmed; await reconciliation.", 409);
       }
       const updated = await repositories.payments.updateStatus({
         id: order.id,
@@ -296,7 +373,82 @@ export class PaymentService {
     return this.applyVerifiedProviderEvent(verified);
   }
 
+  async resolvePaymentReview(identity: VerifiedSupabaseIdentity, paymentOrderId: string,
+    input: unknown, idempotencyKey: string): Promise<Record<string, unknown>> {
+    const parsed = resolvePaymentReviewInputSchema.safeParse(input);
+    if (!parsed.success || !paymentOrderIdParamSchema.safeParse(paymentOrderId).success) {
+      throw new PaymentError("INVALID_INPUT", "Payment review input is invalid.", 400);
+    }
+    const key = normalizeIdempotencyKey(idempotencyKey);
+    const scope = `POST /api/v1/admin/payments/orders/${paymentOrderId}/resolve`;
+    const snapshot = await this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveAdminActor(identity, repositories.users);
+      const replay = await repositories.idempotency.find(actor.id, scope, key);
+      if (replay && replay.requestHash !== hashIdempotencyRequest(parsed.data)) throw new PaymentError("CONFLICT", "Idempotency key payload mismatch.", 409);
+      if (replay?.completedAt && replay.responseBody) return { response: replay.responseBody };
+      const order = await repositories.payments.findById(paymentOrderId);
+      if (!order) throw new PaymentError("NOT_FOUND", "Payment order not found.", 404);
+      if (order.status !== "needs_review") throw new PaymentError("CONFLICT", "Payment is not under review.", 409);
+      return { order };
+    });
+    if (snapshot.response) return snapshot.response;
+    const verified = await this.options.providerFactory().getPaymentStatus(snapshot.order!.providerOrderCode);
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveAdminActor(identity, repositories.users);
+      const now = this.options.now?.() ?? new Date();
+      const createId = this.options.createId ?? randomUUID;
+      const decision = await prepareIdempotency(repositories.idempotency, { actorId: actor.id, scope,
+        idempotencyKey: key, request: parsed.data, expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS), id: createId() });
+      if (decision.action === "replay") return decision.responseBody;
+      if (decision.action !== "execute") throw new PaymentError("CONFLICT", "Payment resolution is already in progress or conflicts.", 409);
+      const request = await repositories.serviceRequests.findByIdForUpdate(snapshot.order!.requestId);
+      const assignment = await repositories.assignments.findByIdForUpdate(snapshot.order!.assignmentId);
+      const quote = await repositories.quotes.findByIdForUpdate(snapshot.order!.quoteId);
+      const latest = await repositories.quotes.findLatestByRequestForUpdate(snapshot.order!.requestId);
+      const order = await repositories.payments.findByIdForUpdate(paymentOrderId);
+      if (!order || order.status !== "needs_review") throw new PaymentError("CONFLICT", "Payment is no longer under review.", 409);
+      if (verified.orderCode !== order.providerOrderCode || verified.amount !== order.amount || verified.currency !== order.currency ||
+        !verified.paymentLinkId || (order.providerPaymentLinkId && verified.paymentLinkId !== order.providerPaymentLinkId)) {
+        throw new PaymentError("CONFLICT", "Provider payment identity does not match; manual bank investigation is required.", 409);
+      }
+      const paid = verified.amountPaid;
+      const confirming = parsed.data.action === "confirm_received";
+      if (confirming) {
+        const upfrontLabor = quote?.purpose === "rescue_labor" && assignment?.rescueLaborQuoteId === quote.id && assignment.rescuePaymentTiming === "labor_upfront";
+        const active = await repositories.payments.findActiveByQuoteForUpdate(order.quoteId, order.id);
+        const alreadyPaid = await repositories.payments.sumSucceededForAssignment(order.assignmentId);
+        const payable = assignment ? await latestPayableQuote(repositories, assignment, latest) : undefined;
+        if (verified.status !== "PAID" || paid !== order.amount || !request || !assignment || !quote || payable?.id !== quote.id || quote.status !== "approved" ||
+          assignment.status !== (upfrontLabor ? "accepted" : "awaiting_payment") || request.status !== (upfrontLabor ? "assigned" : "awaiting_payment") ||
+          (quote.purpose === "rescue_labor" && !upfrontLabor) ||
+          quote.purpose === "maintenance_labor" ||
+          (assignment.maintenanceLaborQuoteId && quote.purpose !== "maintenance_work") ||
+          active ||
+          await repositories.payments.hasSucceededForAssignment({ assignmentId: order.assignmentId, requestId: order.requestId, quoteId: order.quoteId }) ||
+          (quote.purpose === "rescue_final" || quote.purpose === "maintenance_work" ? quote.totalAmount - alreadyPaid : quote.totalAmount) !== order.amount) {
+          throw new PaymentError("CONFLICT", "Payment cannot be credited to this job; investigate duplicate, partial or excess funds manually.", 409);
+        }
+      } else if (paid !== 0 || !["CANCELLED", "EXPIRED", "FAILED"].includes(verified.status)) {
+        throw new PaymentError("CONFLICT", "Only a verified terminal unpaid payment may be closed.", 409);
+      }
+      const updated = await repositories.payments.updateStatus({ id: order.id, status: confirming ? "succeeded" : "canceled",
+        reviewReason: confirming ? "admin_verified_received" : "admin_verified_unpaid", updatedAt: now,
+        ...(confirming ? { succeededAt: now } : { canceledAt: now }) });
+      if (!updated) throw new PaymentError("NOT_FOUND", "Payment order not found.", 404);
+      await appendPaymentAuditOutbox(repositories, { action: confirming ? "payment.succeeded" : "payment.canceled", order: updated, actorId: actor.id, actorRole: "admin", now, createId });
+      await repositories.audit.append({ id: createId(), actorId: actor.id, actorRole: "admin", action: "payment.review.resolved",
+        entityType: "payment_order", entityId: order.id, requestId: order.requestId,
+        metadata: { action: parsed.data.action, reason_hash: hashIdempotencyRequest(parsed.data.reason), previous_status: order.status, status: updated.status }, createdAt: now });
+      const response = { id: updated.id, request_id: updated.requestId, quote_id: updated.quoteId,
+        status: updated.status, amount: updated.amount, currency: updated.currency, review_reason: updated.reviewReason, resolved_at: now.toISOString() };
+      await repositories.idempotency.complete({ actorId: actor.id, scope, idempotencyKey: key, responseStatus: 200,
+        responseBody: response, resourceType: "payment_order", resourceId: order.id, completedAt: now });
+      return response;
+    });
+  }
+
   async reconcilePendingPayments(limit = 20): Promise<PaymentReconcileResult> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new PaymentError("INVALID_INPUT", "Reconciliation limit must be between 1 and 50.", 400);
     const now = this.options.now?.() ?? new Date();
     const staleBefore = new Date(now.getTime() - 2 * 60 * 1000);
     const provider = this.options.providerFactory();
@@ -311,11 +463,23 @@ export class PaymentService {
       claimed: pending.length,
       succeeded: 0,
       needs_review: 0,
-      still_pending: 0
+      still_pending: 0,
+      failed: 0
     };
     for (const order of pending) {
+      try {
+      if (order.status === "created") {
+        const restored = await this.initializePaymentLink(order, provider, this.options.returnUrl(), this.options.cancelUrl());
+        if (restored.status === "succeeded") { result.succeeded += 1; continue; }
+        if (restored.status === "needs_review") { result.needs_review += 1; continue; }
+      }
       const status = await provider.getPaymentStatus(order.providerOrderCode);
-      const event = providerStatusToEvent(status, order);
+      if (status.orderCode !== order.providerOrderCode) throw new PaymentError("CONFLICT", "Provider order code mismatch.", 409);
+      if (status.status === "PENDING" && (status.amountPaid ?? 0) === 0) {
+        result.still_pending += 1;
+        continue;
+      }
+      const event = providerStatusToEvent(status);
       const applied = await this.applyVerifiedProviderEvent(event);
       if (applied.status === "succeeded") {
         result.succeeded += 1;
@@ -323,6 +487,14 @@ export class PaymentService {
         result.needs_review += 1;
       } else {
         result.still_pending += 1;
+      }
+      } catch {
+        result.failed = (result.failed ?? 0) + 1;
+        await this.unitOfWork.execute(async (repositories) => {
+          const current = await repositories.payments.findByIdForUpdate(order.id);
+          if (current && ["created", "pending"].includes(current.status)) await repositories.payments.updateProviderFields({
+            id: current.id, status: current.status, updatedAt: now });
+        });
       }
     }
     return result;
@@ -349,12 +521,18 @@ export class PaymentService {
         await repositories.payments.createEvent(toPaymentEvent({ event, now, createId }));
         return { received: true, matched: false, status: "ignored" };
       }
+      // Another delivery may have committed while this transaction waited for the order lock.
+      if (await repositories.payments.findEventByDedupeKey("payos", event.eventDedupeKey)) {
+        return { received: true, matched: true, status: "duplicate" };
+      }
       await repositories.payments.createEvent(
         toPaymentEvent({ event, order, now, createId })
       );
       if (order.status === "succeeded") {
         return { received: true, matched: true, status: "duplicate" };
       }
+      if (order.status === "needs_review") return { received: true, matched: true, status: "needs_review" };
+      if (order.status === "canceled" && !event.success) return { received: true, matched: true, status: "ignored" };
       if (!event.success) {
         const failed = await repositories.payments.updateStatus({
           id: order.id,
@@ -372,7 +550,14 @@ export class PaymentService {
         }
         return { received: true, matched: true, status: "failed" };
       }
+      const request = await repositories.serviceRequests.findById(order.requestId);
+      const assignment = await repositories.assignments.findById(order.assignmentId);
+      const inactiveWorkflow = !request || !assignment || ["canceled", "completed"].includes(request.status) ||
+        ["canceled", "completed", "recovery_canceled"].includes(assignment.status);
       if (
+        inactiveWorkflow ||
+        order.status === "canceled" ||
+        await repositories.payments.hasSucceededForAssignment({ assignmentId: order.assignmentId, requestId: order.requestId, quoteId: order.quoteId }) ||
         event.amount !== order.amount ||
         event.currency !== order.currency ||
         (event.paymentLinkId &&
@@ -383,7 +568,7 @@ export class PaymentService {
           id: order.id,
           status: "needs_review",
           updatedAt: now,
-          reviewReason: "provider_payment_mismatch"
+          reviewReason: inactiveWorkflow ? "paid_for_inactive_workflow" : order.status === "canceled" ? "paid_after_cancellation" : "provider_payment_mismatch"
         });
         if (review) {
           await appendPaymentAuditOutbox(repositories, {
@@ -502,6 +687,24 @@ async function appendPaymentAuditOutbox(
     metadata: payload,
     createdAt: input.now
   });
+  if (input.action === "payment.succeeded") {
+    const request = await repositories.serviceRequests.findById(input.order.requestId);
+    const assignment = await repositories.assignments.findById(input.order.assignmentId);
+    if (request && assignment) {
+      for (const userId of [request.riderId, assignment.mechanicId]) await persistNotification(repositories, {
+        userId, type: "payment.succeeded", title: request.serviceType === "periodic_maintenance" ? "Thanh toán bảo dưỡng đã được xác nhận" : "Thanh toán đã được xác nhận",
+        body: "Mở yêu cầu để xem số tiền còn lại và bước tiếp theo.",
+        data: { request_id: request.id, assignment_id: assignment.id, payment_order_id: input.order.id },
+        dedupeKey: `payment.succeeded:${input.order.id}:${userId}`, requestId: request.id
+      }, input.now, input.createId);
+    }
+  }
+}
+
+async function latestPayableQuote(repositories: FoundationRepositories, assignment: Assignment, latest?: Quote): Promise<Quote | undefined> {
+  if (!assignment.maintenanceLaborQuoteId) return latest;
+  if (!latest || latest.assignmentId !== assignment.id || latest.status === "pending") return undefined;
+  return repositories.quotes.findLatestApprovedByAssignment(assignment.id, "maintenance_work");
 }
 
 function normalizeIdempotencyKey(idempotencyKey: string): string {
@@ -520,16 +723,13 @@ function createPaymentDescription(orderCode: number): string {
   return `COR${String(orderCode).slice(-6)}`;
 }
 
-function providerStatusToEvent(
-  status: ProviderPaymentStatus,
-  order: PaymentOrder
-): Extract<VerifiedPaymentEvent, { kind: "valid" }> {
+function providerStatusToEvent(status: ProviderPaymentStatus): Extract<VerifiedPaymentEvent, { kind: "valid" }> {
   return {
     kind: "valid",
     eventDedupeKey: `reconcile:${status.orderCode}:${status.status}:${status.amountPaid ?? 0}`,
-    success: status.status === "PAID" || status.amountPaid === order.amount,
+    success: status.status === "PAID" || (status.amountPaid ?? 0) > 0,
     orderCode: status.orderCode,
-    amount: status.amount,
+    amount: status.amountPaid ?? status.amount,
     currency: status.currency,
     paymentLinkId: status.paymentLinkId,
     status: status.status

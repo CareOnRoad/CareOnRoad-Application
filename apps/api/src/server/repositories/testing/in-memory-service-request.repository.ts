@@ -12,6 +12,14 @@ export class InMemoryServiceRequestRepository implements ServiceRequestRepositor
     private readonly history: RequestStatusHistory[]
   ) {}
 
+  async updateAppointment(input: Parameters<ServiceRequestRepository["updateAppointment"]>[0]) {
+    const request = this.requests.find((item) => item.id === input.id);
+    if (!request) throw new Error("SERVICE_REQUEST_NOT_FOUND");
+    Object.assign(request, { serviceLocation: input.location, addressText: input.addressText,
+      scheduledStartAt: input.scheduledStartAt, updatedAt: input.updatedAt });
+    return cloneRequest(request);
+  }
+
   async create(input: CreateServiceRequest): Promise<ServiceRequest> {
     if (this.requests.some((request) => request.requestCode === input.requestCode)) {
       throw new Error("SERVICE_REQUEST_CODE_EXISTS");

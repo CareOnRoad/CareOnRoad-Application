@@ -23,6 +23,13 @@ type OutboxRow = {
 export class PostgresOutboxRepository implements OutboxRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async renewLease(input: Parameters<OutboxRepository["renewLease"]>[0]) {
+    const rows = await this.sql`update outbox_events set lease_expires_at = ${input.leaseUntil}
+      where id = ${input.id} and status = 'processing' and lease_owner = ${input.leaseOwner}
+        and lease_expires_at > ${input.now} returning id`;
+    return rows.length === 1;
+  }
+
   async append(input: AppendOutboxEvent): Promise<OutboxEvent> {
     const rows = await this.sql<OutboxRow[]>`
       insert into outbox_events (

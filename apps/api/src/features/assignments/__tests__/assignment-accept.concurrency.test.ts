@@ -71,8 +71,8 @@ describe("assignment accept conflict behavior", () => {
 
     expect(after.assignments).toHaveLength(1);
     expect(after.assignmentStatusHistory).toHaveLength(1);
-    expect(after.auditLogs).toHaveLength(1);
-    expect(after.outboxEvents).toHaveLength(1);
+    expect(after.auditLogs).toHaveLength(2);
+    expect(after.outboxEvents).toHaveLength(2);
     expect(after.dispatchCandidates.find((candidate) => candidate.id === offerB1)?.status).toBe(
       "offered"
     );
@@ -141,8 +141,8 @@ describe("assignment accept conflict behavior", () => {
     );
     expect(afterCancelLoss.assignmentStatusHistory).toHaveLength(1);
     expect(afterCancelLoss.requestStatusHistory).toHaveLength(1);
-    expect(afterCancelLoss.auditLogs).toHaveLength(1);
-    expect(afterCancelLoss.outboxEvents).toHaveLength(1);
+    expect(afterCancelLoss.auditLogs).toHaveLength(2);
+    expect(afterCancelLoss.outboxEvents).toHaveLength(2);
     expect(
       afterCancelLoss.serviceRequests.some(
         (request) =>

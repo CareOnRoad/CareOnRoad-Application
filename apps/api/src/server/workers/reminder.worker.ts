@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import type { ReminderRule } from "@/server/repositories/contracts/reminder.repository";
-import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import { persistNotification } from "@/features/notifications/notification.service";
+import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_LEASE_MS = 60_000;
@@ -10,7 +11,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export type ReminderWorkerResult = {
   claimed: number;
   generated: number;
+  /** @deprecated Push outcomes belong to notification receipts. */
   sent: number;
+  queued: number;
   failed: number;
 };
 
@@ -26,89 +29,62 @@ export class ReminderWorker {
     } = {}
   ) {}
 
-  processDueReminders(): Promise<ReminderWorkerResult> {
+  async processDueReminders(): Promise<ReminderWorkerResult> {
     const now = this.options.now?.() ?? new Date();
-    const workerId = this.options.workerId ?? `reminder-worker-${randomUUID()}`;
+    const workerId = `${this.options.workerId ?? "reminder-worker"}:${randomUUID()}`;
     const createId = this.options.createId ?? randomUUID;
-    const leaseUntil = new Date(now.getTime() + (this.options.leaseMs ?? DEFAULT_LEASE_MS));
-    const batchSize = this.options.batchSize ?? DEFAULT_BATCH_SIZE;
-
-    return this.unitOfWork.execute(async ({ audit, outbox, reminders }) => {
-      const rules = await reminders.claimDueRules({
-        now,
-        leaseOwner: workerId,
-        leaseUntil,
-        limit: batchSize
-      });
-      const result: ReminderWorkerResult = {
-        claimed: rules.length,
-        generated: 0,
-        sent: 0,
-        failed: 0
-      };
-
-      for (const rule of rules) {
-        try {
+    const rules = await this.unitOfWork.execute(({ reminders }) => reminders.claimDueRules({
+      now, leaseOwner: workerId,
+      leaseUntil: new Date(now.getTime() + (this.options.leaseMs ?? DEFAULT_LEASE_MS)),
+      limit: this.options.batchSize ?? DEFAULT_BATCH_SIZE
+    }));
+    const result = { claimed: rules.length, generated: 0, sent: 0, queued: 0, failed: 0 };
+    for (const claimed of rules) {
+      try {
+        const outcome = await this.unitOfWork.execute(async (repositories) => {
+          const { reminders } = repositories;
+          const rule = await reminders.findRuleByIdForUpdate(claimed.id);
+          if (!rule || rule.leaseOwner !== workerId || !rule.enabled) return undefined;
+          const motorcycle = await repositories.motorcycles.findById(rule.motorcycleId);
+          const actor = await repositories.users.findActorById(rule.riderId);
+          if (!motorcycle || motorcycle.archivedAt || !actor || actor.status !== "active") {
+            await reminders.completeRuleClaim({ id: rule.id, enabled: false, lastCompletedAt: now, updatedAt: now });
+            return undefined;
+          }
           const dueAt = effectiveDueAt(rule);
-          const occurrenceResult = await reminders.createOccurrenceIfNotExists({
-            id: createId(),
-            ruleId: rule.id,
-            riderId: rule.riderId,
-            motorcycleId: rule.motorcycleId,
-            dueAt,
-            status: "due",
-            createdAt: now
+          // An update or snooze may have postponed this rule after the claim.
+          if (dueAt > now) {
+            await reminders.failRuleClaim({ id: rule.id, updatedAt: now });
+            return undefined;
+          }
+          const created = await reminders.createOccurrenceIfNotExists({
+            id: createId(), ruleId: rule.id, riderId: rule.riderId,
+            motorcycleId: rule.motorcycleId, dueAt, status: "due", createdAt: now
           });
-          const { occurrence } = occurrenceResult;
-          if (occurrenceResult.created) {
-            result.generated += 1;
-            await appendWorkerAuditOutbox({
-              action: "reminder.job.generated",
-              rule,
-              occurrenceId: occurrence.id,
-              dueAt,
-              audit,
-              outbox,
-              now,
-              createId
-            });
-          }
-
-          if (occurrence.status !== "sent") {
-            await reminders.updateOccurrenceStatus({
-              id: occurrence.id,
-              status: "sent",
-              processedAt: now,
-              retryCount: occurrence.status === "failed" ? occurrence.retryCount + 1 : occurrence.retryCount
-            });
-            result.sent += 1;
-            await appendWorkerAuditOutbox({
-              action: "reminder.job.sent",
-              rule,
-              occurrenceId: occurrence.id,
-              dueAt,
-              audit,
-              outbox,
-              now,
-              createId
-            });
-          }
-
+          const notification = created.occurrence.status === "dismissed" ? undefined :
+            await queueReminderNotification(repositories, rule, created.occurrence.id, dueAt, now, createId);
+          if (notification) await reminders.updateOccurrenceStatus({
+            id: created.occurrence.id, status: "queued", notificationId: notification.notification.id,
+            processedAt: now,
+            retryCount: created.occurrence.retryCount + (created.occurrence.status === "failed" ? 1 : 0)
+          });
           await reminders.completeRuleClaim({
-            id: rule.id,
-            nextDueAt: rule.intervalDays ? nextRecurringDueAt(dueAt, rule.intervalDays, now) : undefined,
-            enabled: rule.intervalDays ? true : false,
-            lastCompletedAt: now,
-            updatedAt: now
+            id: rule.id, nextDueAt: rule.intervalDays ? nextRecurringDueAt(dueAt, rule.intervalDays, now) : undefined,
+            enabled: Boolean(rule.intervalDays), lastCompletedAt: now, updatedAt: now
           });
-        } catch {
-          result.failed += 1;
-          await reminders.failRuleClaim({ id: rule.id, updatedAt: now });
-        }
+          return { generated: created.created, queued: Boolean(notification?.created) };
+        });
+        result.generated += outcome?.generated ? 1 : 0;
+        result.queued += outcome?.queued ? 1 : 0;
+      } catch {
+        result.failed += 1;
+        await this.unitOfWork.execute(async ({ reminders }) => {
+          const rule = await reminders.findRuleByIdForUpdate(claimed.id);
+          if (rule?.leaseOwner === workerId) await reminders.failRuleClaim({ id: rule.id, updatedAt: now });
+        });
       }
-
-      return result;
-    });
+    }
+    return result;
   }
 }
 
@@ -124,41 +100,14 @@ function nextRecurringDueAt(dueAt: Date, intervalDays: number, now: Date): Date 
   return next;
 }
 
-async function appendWorkerAuditOutbox(input: {
-  action: string;
-  rule: ReminderRule;
-  occurrenceId: string;
-  dueAt: Date;
-  audit: Parameters<Parameters<UnitOfWork["execute"]>[0]>[0]["audit"];
-  outbox: Parameters<Parameters<UnitOfWork["execute"]>[0]>[0]["outbox"];
-  now: Date;
-  createId: () => string;
-}): Promise<void> {
-  const eventId = input.createId();
-  const payload = {
-    resource_id: input.occurrenceId,
-    reminder_id: input.rule.id,
-    rider_id: input.rule.riderId,
-    motorcycle_id: input.rule.motorcycleId,
-    due_at: input.dueAt.toISOString()
-  };
-  await input.outbox.append({
-    id: eventId,
-    topic: input.action,
-    aggregateType: "reminder_occurrence",
-    aggregateId: input.occurrenceId,
-    dedupeKey: `${input.action}:${input.occurrenceId}`,
-    payload,
-    createdAt: input.now,
-    nextAttemptAt: input.now
-  });
-  await input.audit.append({
-    id: input.createId(),
-    action: input.action,
-    entityType: "reminder_occurrence",
-    entityId: input.occurrenceId,
-    requestId: input.occurrenceId,
-    metadata: payload,
-    createdAt: input.now
-  });
+export function queueReminderNotification(
+  repositories: FoundationRepositories, rule: ReminderRule, occurrenceId: string,
+  dueAt: Date, now: Date, createId: () => string
+) {
+  return persistNotification(repositories, {
+    userId: rule.riderId, type: "maintenance.reminder", title: "Đến lịch bảo dưỡng xe",
+    body: rule.title, data: { reminder_id: rule.id, reminder_context_id: occurrenceId,
+      motorcycle_id: rule.motorcycleId, due_at: dueAt.toISOString() },
+    dedupeKey: `maintenance.reminder:${occurrenceId}`
+  }, now, createId);
 }

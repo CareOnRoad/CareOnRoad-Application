@@ -1,0 +1,1704 @@
+{
+  "generated_at": "2026-10-01T14:12:41.036Z",
+  "sources": [
+    "apps/api/MAINTENANCE-WORKFLOW.md",
+    "apps/api/MAINTENANCE-NOTIFICATIONS.md",
+    "apps/api/RESCUE-WORKFLOW.md",
+    "specs/005-careonroad-payment/contracts/payment-api.yaml",
+    "specs/002-careonroad-backend-mvp/contracts/backend-api.yaml",
+    "specs/009-push-device-token-lifecycle/contracts/push-token-api.md",
+    "specs/010-notification-provider-delivery/spec.md",
+    "specs/011-notification-inbox-api/contracts/notification-inbox-api.md",
+    "https://payos.vn/docs/api/",
+    "https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/",
+    "https://firebase.google.com/docs/cloud-messaging/error-codes"
+  ],
+  "hashes": {
+    "cases.mjs": "a438df0157bdc1c3d5ac5f2fa16034449e901b5092a1bab2aaeeb7cdb8a3721a",
+    "run.mjs": "f9992f3fa65e21539b1643e3005924817ea4e292f85ded45c81f3bf12acb316d",
+    "providers.mjs": "e0854db0b3248ac5685a66f8f9bc9e7a715179a00e49dda30242380c4c06a46d",
+    "sandbox.cjs": "155ad4530a2a270610d59aa0fe69d323c3bc02cfa01768a47107c05b079a9a62"
+  },
+  "cases": [
+    {
+      "id": "SEC-001",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-002",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-003",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-004",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-005",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests/:id / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-006",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests/:id / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-007",
+      "group": "SEC",
+      "name": "PATCH /api/v1/service-requests/:id / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-008",
+      "group": "SEC",
+      "name": "PATCH /api/v1/service-requests/:id / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-009",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests/:id/cancel / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-010",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests/:id/cancel / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-011",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests/:id/dispatch / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-012",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests/:id/dispatch / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-013",
+      "group": "SEC",
+      "name": "GET /api/v1/dispatch/offers / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-014",
+      "group": "SEC",
+      "name": "GET /api/v1/dispatch/offers / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-015",
+      "group": "SEC",
+      "name": "POST /api/v1/dispatch/offers/:id/accept / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-016",
+      "group": "SEC",
+      "name": "POST /api/v1/dispatch/offers/:id/accept / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-017",
+      "group": "SEC",
+      "name": "POST /api/v1/dispatch/offers/:id/decline / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-018",
+      "group": "SEC",
+      "name": "POST /api/v1/dispatch/offers/:id/decline / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-019",
+      "group": "SEC",
+      "name": "GET /api/v1/assignments / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-020",
+      "group": "SEC",
+      "name": "GET /api/v1/assignments / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-021",
+      "group": "SEC",
+      "name": "POST /api/v1/assignments/:id/status / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-022",
+      "group": "SEC",
+      "name": "POST /api/v1/assignments/:id/status / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-023",
+      "group": "SEC",
+      "name": "GET /api/v1/assignments/:id/completion-checklist / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-024",
+      "group": "SEC",
+      "name": "GET /api/v1/assignments/:id/completion-checklist / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-025",
+      "group": "SEC",
+      "name": "POST /api/v1/assignments/:id/completion-checklist / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-026",
+      "group": "SEC",
+      "name": "POST /api/v1/assignments/:id/completion-checklist / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-027",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests/:id/quotes / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-028",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests/:id/quotes / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-029",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests/:id/quotes / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-030",
+      "group": "SEC",
+      "name": "POST /api/v1/service-requests/:id/quotes / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-031",
+      "group": "SEC",
+      "name": "POST /api/v1/quotes/:id/approve / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-032",
+      "group": "SEC",
+      "name": "POST /api/v1/quotes/:id/approve / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-033",
+      "group": "SEC",
+      "name": "POST /api/v1/quotes/:id/reject / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-034",
+      "group": "SEC",
+      "name": "POST /api/v1/quotes/:id/reject / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-035",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests/:id/payment-summary / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-036",
+      "group": "SEC",
+      "name": "GET /api/v1/service-requests/:id/payment-summary / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-037",
+      "group": "SEC",
+      "name": "POST /api/v1/payments/orders / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-038",
+      "group": "SEC",
+      "name": "POST /api/v1/payments/orders / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-039",
+      "group": "SEC",
+      "name": "GET /api/v1/payments/orders/:id / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-040",
+      "group": "SEC",
+      "name": "GET /api/v1/payments/orders/:id / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-041",
+      "group": "SEC",
+      "name": "POST /api/v1/payments/orders/:id/cancel / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-042",
+      "group": "SEC",
+      "name": "POST /api/v1/payments/orders/:id/cancel / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-043",
+      "group": "SEC",
+      "name": "GET /api/v1/reminders / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-044",
+      "group": "SEC",
+      "name": "GET /api/v1/reminders / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-045",
+      "group": "SEC",
+      "name": "POST /api/v1/reminders / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-046",
+      "group": "SEC",
+      "name": "POST /api/v1/reminders / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-047",
+      "group": "SEC",
+      "name": "PATCH /api/v1/reminders/:id / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-048",
+      "group": "SEC",
+      "name": "PATCH /api/v1/reminders/:id / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-049",
+      "group": "SEC",
+      "name": "POST /api/v1/reminders/:id/snooze / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-050",
+      "group": "SEC",
+      "name": "POST /api/v1/reminders/:id/snooze / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-051",
+      "group": "SEC",
+      "name": "GET /api/v1/notifications / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-052",
+      "group": "SEC",
+      "name": "GET /api/v1/notifications / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-053",
+      "group": "SEC",
+      "name": "GET /api/v1/notifications/unread-count / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-054",
+      "group": "SEC",
+      "name": "GET /api/v1/notifications/unread-count / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-055",
+      "group": "SEC",
+      "name": "POST /api/v1/notifications/:id/read / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-056",
+      "group": "SEC",
+      "name": "POST /api/v1/notifications/:id/read / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-057",
+      "group": "SEC",
+      "name": "POST /api/v1/notifications/read-all / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-058",
+      "group": "SEC",
+      "name": "POST /api/v1/notifications/read-all / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-059",
+      "group": "SEC",
+      "name": "POST /api/v1/auth/devices / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-060",
+      "group": "SEC",
+      "name": "POST /api/v1/auth/devices / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-061",
+      "group": "SEC",
+      "name": "PUT /api/v1/auth/devices/:id/push-token / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-062",
+      "group": "SEC",
+      "name": "PUT /api/v1/auth/devices/:id/push-token / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-063",
+      "group": "SEC",
+      "name": "DELETE /api/v1/auth/devices/:id/push-token / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-064",
+      "group": "SEC",
+      "name": "DELETE /api/v1/auth/devices/:id/push-token / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-065",
+      "group": "SEC",
+      "name": "GET /api/v1/admin/operations/payments-needs-review / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-066",
+      "group": "SEC",
+      "name": "GET /api/v1/admin/operations/payments-needs-review / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-067",
+      "group": "SEC",
+      "name": "POST /api/v1/admin/payments/orders/:id/resolve / anonymous",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-068",
+      "group": "SEC",
+      "name": "POST /api/v1/admin/payments/orders/:id/resolve / invalid",
+      "expectation": "401; no side effect or secret leakage"
+    },
+    {
+      "id": "SEC-069",
+      "group": "SEC",
+      "name": "Worker outbox/run rejects anonymous",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-070",
+      "group": "SEC",
+      "name": "Worker outbox/run rejects rider",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-071",
+      "group": "SEC",
+      "name": "Worker outbox/run rejects mechanic",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-072",
+      "group": "SEC",
+      "name": "Worker outbox/run rejects admin",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-073",
+      "group": "SEC",
+      "name": "Worker outbox/run wrong secret",
+      "expectation": "Reject wrong worker secret"
+    },
+    {
+      "id": "SEC-074",
+      "group": "SEC",
+      "name": "Worker reminders/run rejects anonymous",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-075",
+      "group": "SEC",
+      "name": "Worker reminders/run rejects rider",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-076",
+      "group": "SEC",
+      "name": "Worker reminders/run rejects mechanic",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-077",
+      "group": "SEC",
+      "name": "Worker reminders/run rejects admin",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-078",
+      "group": "SEC",
+      "name": "Worker reminders/run wrong secret",
+      "expectation": "Reject wrong worker secret"
+    },
+    {
+      "id": "SEC-079",
+      "group": "SEC",
+      "name": "Worker dispatch/run rejects anonymous",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-080",
+      "group": "SEC",
+      "name": "Worker dispatch/run rejects rider",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-081",
+      "group": "SEC",
+      "name": "Worker dispatch/run rejects mechanic",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-082",
+      "group": "SEC",
+      "name": "Worker dispatch/run rejects admin",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-083",
+      "group": "SEC",
+      "name": "Worker dispatch/run wrong secret",
+      "expectation": "Reject wrong worker secret"
+    },
+    {
+      "id": "SEC-084",
+      "group": "SEC",
+      "name": "Worker payments/reconcile rejects anonymous",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-085",
+      "group": "SEC",
+      "name": "Worker payments/reconcile rejects rider",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-086",
+      "group": "SEC",
+      "name": "Worker payments/reconcile rejects mechanic",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-087",
+      "group": "SEC",
+      "name": "Worker payments/reconcile rejects admin",
+      "expectation": "User JWT cannot replace worker authority"
+    },
+    {
+      "id": "SEC-088",
+      "group": "SEC",
+      "name": "Worker payments/reconcile wrong secret",
+      "expectation": "Reject wrong worker secret"
+    },
+    {
+      "id": "MNT-001",
+      "group": "MNT",
+      "name": "Booking rejects invalid motorcycle_id: \"bad\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-002",
+      "group": "MNT",
+      "name": "Booking rejects invalid service_type: \"unknown\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-003",
+      "group": "MNT",
+      "name": "Booking rejects invalid problem_description: \"\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-004",
+      "group": "MNT",
+      "name": "Booking rejects invalid problem_description: \"  \"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-005",
+      "group": "MNT",
+      "name": "Booking rejects invalid problem_description: 2",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-006",
+      "group": "MNT",
+      "name": "Booking rejects invalid problem_description: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-007",
+      "group": "MNT",
+      "name": "Booking rejects invalid scheduled_start_at: \"bad\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-008",
+      "group": "MNT",
+      "name": "Booking rejects invalid scheduled_start_at: \"2020-01-01T00:00:00Z\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-009",
+      "group": "MNT",
+      "name": "Booking rejects invalid scheduled_start_at: null",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-010",
+      "group": "MNT",
+      "name": "Booking rejects invalid location: null",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-011",
+      "group": "MNT",
+      "name": "Booking rejects invalid location: {}",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-012",
+      "group": "MNT",
+      "name": "Booking rejects invalid location: {\"latitude\":91,\"longitude\":107}",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-013",
+      "group": "MNT",
+      "name": "Booking rejects invalid location: {\"latitude\":11,\"longitude\":-181}",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-014",
+      "group": "MNT",
+      "name": "Booking rejects invalid location: {\"latitude\":\"11\",\"longitude\":107}",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-015",
+      "group": "MNT",
+      "name": "Booking rejects invalid location: {\"latitude\":11}",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-016",
+      "group": "MNT",
+      "name": "Booking rejects invalid address_text: \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-017",
+      "group": "MNT",
+      "name": "Booking rejects invalid rider_id: \"f20acd3f-4cf4-476f-9a25-a36cdc6ee3f2\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-018",
+      "group": "MNT",
+      "name": "Booking rejects invalid status: \"completed\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-019",
+      "group": "MNT",
+      "name": "Booking rejects invalid paid_amount: 1",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-020",
+      "group": "MNT",
+      "name": "Booking rejects invalid reminder_id: \"5cf97b46-1e6f-45bb-8c7d-06669b41439a\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-021",
+      "group": "MNT",
+      "name": "Booking rejects invalid reminder_context_id: \"ea4aa10a-349a-45c2-b28b-5cdf82187e63\"",
+      "expectation": "400/422; no invalid request persisted"
+    },
+    {
+      "id": "MNT-022",
+      "group": "MNT",
+      "name": "Coordinates required even with address",
+      "expectation": "Missing coordinates rejected"
+    },
+    {
+      "id": "MNT-023",
+      "group": "MNT",
+      "name": "Schedule required without reminder references",
+      "expectation": "Missing appointment rejected"
+    },
+    {
+      "id": "MNT-024",
+      "group": "MNT",
+      "name": "Foreign motorcycle booking",
+      "expectation": "403; ownership enforced"
+    },
+    {
+      "id": "MNT-025",
+      "group": "MNT",
+      "name": "Missing booking idempotency key",
+      "expectation": "400/422"
+    },
+    {
+      "id": "MNT-026",
+      "group": "MNT",
+      "name": "Booking key length boundary",
+      "expectation": "Invalid key rejected"
+    },
+    {
+      "id": "MNT-027",
+      "group": "MNT",
+      "name": "Booking key length boundary",
+      "expectation": "Invalid key rejected"
+    },
+    {
+      "id": "MNT-028",
+      "group": "MNT",
+      "name": "Booking retry and conflicting payload",
+      "expectation": "Same ID on replay; changed payload 409; cancel successful"
+    },
+    {
+      "id": "MNT-029",
+      "group": "MNT",
+      "name": "Concurrent booking retry",
+      "expectation": "Exactly one request and one logical dispatch event"
+    },
+    {
+      "id": "MNT-030",
+      "group": "MNT",
+      "name": "Owner edits coordinates before dispatch",
+      "expectation": "Idempotent PATCH, changed replay conflicts, foreign owner rejected"
+    },
+    {
+      "id": "MNT-031",
+      "group": "MNT",
+      "name": "Cancel before matching then replay worker",
+      "expectation": "Canceled request never generates a live offer"
+    },
+    {
+      "id": "MNT-032",
+      "group": "MNT",
+      "name": "Automatic matching immediately after booking",
+      "expectation": "Outbox generates offers without client dispatch; not confirmed yet"
+    },
+    {
+      "id": "MNT-033",
+      "group": "MNT",
+      "name": "Explicit documented dispatch prepares independent main workflow",
+      "expectation": "Offered request and live mechanic offer; independent of automatic-worker failure"
+    },
+    {
+      "id": "MNT-034",
+      "group": "MNT",
+      "name": "Scheduled accept duration undefined invalid",
+      "expectation": "400/422; offer remains available"
+    },
+    {
+      "id": "MNT-035",
+      "group": "MNT",
+      "name": "Scheduled accept duration 14 invalid",
+      "expectation": "400/422; offer remains available"
+    },
+    {
+      "id": "MNT-036",
+      "group": "MNT",
+      "name": "Scheduled accept duration 481 invalid",
+      "expectation": "400/422; offer remains available"
+    },
+    {
+      "id": "MNT-037",
+      "group": "MNT",
+      "name": "Scheduled accept duration 15.5 invalid",
+      "expectation": "400/422; offer remains available"
+    },
+    {
+      "id": "MNT-038",
+      "group": "MNT",
+      "name": "Scheduled accept duration 90 invalid",
+      "expectation": "400/422; offer remains available"
+    },
+    {
+      "id": "MNT-039",
+      "group": "MNT",
+      "name": "Scheduled accept duration null invalid",
+      "expectation": "400/422; offer remains available"
+    },
+    {
+      "id": "MNT-040",
+      "group": "MNT",
+      "name": "Foreign mechanic cannot accept offer",
+      "expectation": "403/404"
+    },
+    {
+      "id": "MNT-041",
+      "group": "MNT",
+      "name": "Accept confirms buffered reservation",
+      "expectation": "Confirmed; start -30 minutes; end duration +30 minutes; retry same assignment"
+    },
+    {
+      "id": "MNT-042",
+      "group": "MNT",
+      "name": "Skip labor approval to en_route",
+      "expectation": "409; no state advance"
+    },
+    {
+      "id": "MNT-043",
+      "group": "MNT",
+      "name": "Skip labor approval to in_progress",
+      "expectation": "409; no state advance"
+    },
+    {
+      "id": "MNT-044",
+      "group": "MNT",
+      "name": "Skip labor approval to awaiting_payment",
+      "expectation": "409; no state advance"
+    },
+    {
+      "id": "MNT-045",
+      "group": "MNT",
+      "name": "Skip labor approval to completed",
+      "expectation": "409; no state advance"
+    },
+    {
+      "id": "MNT-046",
+      "group": "MNT",
+      "name": "Unassigned rider2 progresses assignment",
+      "expectation": "403/404"
+    },
+    {
+      "id": "MNT-047",
+      "group": "MNT",
+      "name": "Unassigned mechanic2 progresses assignment",
+      "expectation": "403/404"
+    },
+    {
+      "id": "MNT-048",
+      "group": "MNT",
+      "name": "Labor quote rejects no labor",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-049",
+      "group": "MNT",
+      "name": "Labor quote rejects zero labor",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-050",
+      "group": "MNT",
+      "name": "Labor quote rejects part mixed",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-051",
+      "group": "MNT",
+      "name": "Labor quote rejects negative",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-052",
+      "group": "MNT",
+      "name": "Labor quote rejects fraction money",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-053",
+      "group": "MNT",
+      "name": "Labor quote rejects zero quantity",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-054",
+      "group": "MNT",
+      "name": "Labor quote rejects empty description",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-055",
+      "group": "MNT",
+      "name": "Labor quote rejects overflow",
+      "expectation": "400/422/409; no invalid immutable quote"
+    },
+    {
+      "id": "MNT-056",
+      "group": "MNT",
+      "name": "Labor quote rejects discount_amount",
+      "expectation": "400/422/409; server owns pricing"
+    },
+    {
+      "id": "MNT-057",
+      "group": "MNT",
+      "name": "Labor quote rejects diagnosis_id",
+      "expectation": "400/422/409; server owns pricing"
+    },
+    {
+      "id": "MNT-058",
+      "group": "MNT",
+      "name": "Labor quote rejects labor_pricing",
+      "expectation": "400/422/409; server owns pricing"
+    },
+    {
+      "id": "MNT-059",
+      "group": "MNT",
+      "name": "Labor quote rejects total_amount",
+      "expectation": "400/422/409; server owns pricing"
+    },
+    {
+      "id": "MNT-060",
+      "group": "MNT",
+      "name": "Work quote before approved labor",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-061",
+      "group": "MNT",
+      "name": "New maintenance rejects legacy standard purpose",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-062",
+      "group": "MNT",
+      "name": "Labor rejection retains mechanic; replacement immutable",
+      "expectation": "Rejected cannot travel; replacement supersedes prior pending; latest only"
+    },
+    {
+      "id": "MNT-063",
+      "group": "MNT",
+      "name": "Labor quote decision by rider2",
+      "expectation": "403/404"
+    },
+    {
+      "id": "MNT-064",
+      "group": "MNT",
+      "name": "Labor quote decision by mechanic",
+      "expectation": "403/404"
+    },
+    {
+      "id": "PAY-001",
+      "group": "PAY",
+      "name": "Pending labor cannot be paid",
+      "expectation": "409; payment is after service"
+    },
+    {
+      "id": "MNT-065",
+      "group": "MNT",
+      "name": "Maintenance rejects rescue payment timing",
+      "expectation": "400/422/409"
+    },
+    {
+      "id": "MNT-066",
+      "group": "MNT",
+      "name": "Approve fixed labor",
+      "expectation": "Accepted/assigned; total 12000; no payment or automatic travel"
+    },
+    {
+      "id": "PAY-002",
+      "group": "PAY",
+      "name": "Approved labor still cannot create a payment",
+      "expectation": "409; no upfront payment for new maintenance"
+    },
+    {
+      "id": "MNT-067",
+      "group": "MNT",
+      "name": "No second labor after fixed approval",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-068",
+      "group": "MNT",
+      "name": "Travel and arrival synchronize request; cannot skip diagnosis",
+      "expectation": "Active reservation; en_route / on_site / diagnosis"
+    },
+    {
+      "id": "MNT-069",
+      "group": "MNT",
+      "name": "Initial work cannot add duplicate labor",
+      "expectation": "409/400/422"
+    },
+    {
+      "id": "MNT-070",
+      "group": "MNT",
+      "name": "Materials rejected then revised",
+      "expectation": "Rejected work blocks start; revised work has fixed labor plus approved parts"
+    },
+    {
+      "id": "PAY-003",
+      "group": "PAY",
+      "name": "Unapproved material quote cannot be paid",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-071",
+      "group": "MNT",
+      "name": "Approve scope then start work",
+      "expectation": "Approval returns diagnosis; manual in_progress; no implicit payment"
+    },
+    {
+      "id": "PAY-004",
+      "group": "PAY",
+      "name": "Cannot charge during work",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-072",
+      "group": "MNT",
+      "name": "Cannot collect without checklist",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-073",
+      "group": "MNT",
+      "name": "Cannot complete without verified payment",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-074",
+      "group": "MNT",
+      "name": "Addition needs latest approved basis",
+      "expectation": "409 or invalid; no scope changes"
+    },
+    {
+      "id": "MNT-075",
+      "group": "MNT",
+      "name": "Addition needs latest approved basis",
+      "expectation": "409 or invalid; no scope changes"
+    },
+    {
+      "id": "MNT-076",
+      "group": "MNT",
+      "name": "Addition needs latest approved basis",
+      "expectation": "409 or invalid; no scope changes"
+    },
+    {
+      "id": "MNT-077",
+      "group": "MNT",
+      "name": "Pending addition blocks collection; rejection preserves scope",
+      "expectation": "No payment for rejected amount; still assigned to same mechanic"
+    },
+    {
+      "id": "PAY-005",
+      "group": "PAY",
+      "name": "Rejected addition cannot be charged",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-078",
+      "group": "MNT",
+      "name": "Approved addition cumulative, prior labor fixed",
+      "expectation": "21000 total; original labor preserved; no automatic completion"
+    },
+    {
+      "id": "MNT-079",
+      "group": "MNT",
+      "name": "Old approved basis cannot create another addition",
+      "expectation": "409"
+    },
+    {
+      "id": "MNT-080",
+      "group": "MNT",
+      "name": "Checklist invalid or price/state mass assignment",
+      "expectation": "400/422; cannot bypass approval"
+    },
+    {
+      "id": "MNT-081",
+      "group": "MNT",
+      "name": "Checklist invalid or price/state mass assignment",
+      "expectation": "400/422; cannot bypass approval"
+    },
+    {
+      "id": "MNT-082",
+      "group": "MNT",
+      "name": "Checklist invalid or price/state mass assignment",
+      "expectation": "400/422; cannot bypass approval"
+    },
+    {
+      "id": "MNT-083",
+      "group": "MNT",
+      "name": "Checklist invalid or price/state mass assignment",
+      "expectation": "400/422; cannot bypass approval"
+    },
+    {
+      "id": "MNT-084",
+      "group": "MNT",
+      "name": "Checklist invalid or price/state mass assignment",
+      "expectation": "400/422; cannot bypass approval"
+    },
+    {
+      "id": "MNT-085",
+      "group": "MNT",
+      "name": "Checklist version, ownership and idempotency",
+      "expectation": "Quote binding server-owned; replay same; changed payload conflict; read does not complete"
+    },
+    {
+      "id": "MNT-086",
+      "group": "MNT",
+      "name": "Approval after checklist makes checklist stale",
+      "expectation": "Old checklist cannot unlock payment; new revision binds latest quote"
+    },
+    {
+      "id": "PAY-006",
+      "group": "PAY",
+      "name": "Payment summary computed from approved work",
+      "expectation": "24000; unpaid 0; remaining full; timing after_service"
+    },
+    {
+      "id": "PAY-007",
+      "group": "PAY",
+      "name": "Payment input malformed/unknown/mass assignment",
+      "expectation": "Invalid input or nonexistent quote; no provider request"
+    },
+    {
+      "id": "PAY-008",
+      "group": "PAY",
+      "name": "Payment input malformed/unknown/mass assignment",
+      "expectation": "Invalid input or nonexistent quote; no provider request"
+    },
+    {
+      "id": "PAY-009",
+      "group": "PAY",
+      "name": "Payment input malformed/unknown/mass assignment",
+      "expectation": "Invalid input or nonexistent quote; no provider request"
+    },
+    {
+      "id": "PAY-010",
+      "group": "PAY",
+      "name": "Payment input malformed/unknown/mass assignment",
+      "expectation": "Invalid input or nonexistent quote; no provider request"
+    },
+    {
+      "id": "PAY-011",
+      "group": "PAY",
+      "name": "Payment input malformed/unknown/mass assignment",
+      "expectation": "Invalid input or nonexistent quote; no provider request"
+    },
+    {
+      "id": "PAY-012",
+      "group": "PAY",
+      "name": "Payment input malformed/unknown/mass assignment",
+      "expectation": "Invalid input or nonexistent quote; no provider request"
+    },
+    {
+      "id": "PAY-013",
+      "group": "PAY",
+      "name": "Payment input malformed/unknown/mass assignment",
+      "expectation": "Invalid input or nonexistent quote; no provider request"
+    },
+    {
+      "id": "PAY-014",
+      "group": "PAY",
+      "name": "Foreign payment creation by rider2",
+      "expectation": "403/404"
+    },
+    {
+      "id": "PAY-015",
+      "group": "PAY",
+      "name": "Foreign payment creation by mechanic",
+      "expectation": "403/404"
+    },
+    {
+      "id": "PAY-016",
+      "group": "PAY",
+      "name": "Payment missing idempotency",
+      "expectation": "400/422"
+    },
+    {
+      "id": "PAY-017",
+      "group": "PAY",
+      "name": "Client cannot reduce charge amount",
+      "expectation": "400/422"
+    },
+    {
+      "id": "PAY-018",
+      "group": "PAY",
+      "name": "Payment create and replay",
+      "expectation": "201 same ID; amount equals remaining; provider called once for logical link"
+    },
+    {
+      "id": "PAY-019",
+      "group": "PAY",
+      "name": "Concurrent different keys never create two active links",
+      "expectation": "At most one active provider link and one active payment order"
+    },
+    {
+      "id": "PAY-020",
+      "group": "PAY",
+      "name": "Read order as rider",
+      "expectation": "Visible to owner/assigned mechanic/admin"
+    },
+    {
+      "id": "PAY-021",
+      "group": "PAY",
+      "name": "Read order as mechanic",
+      "expectation": "Visible to owner/assigned mechanic/admin"
+    },
+    {
+      "id": "PAY-022",
+      "group": "PAY",
+      "name": "Read order as admin",
+      "expectation": "Visible to owner/assigned mechanic/admin"
+    },
+    {
+      "id": "PAY-023",
+      "group": "PAY",
+      "name": "Foreign rider2 cannot read order",
+      "expectation": "403/404"
+    },
+    {
+      "id": "PAY-024",
+      "group": "PAY",
+      "name": "Foreign mechanic2 cannot read order",
+      "expectation": "403/404"
+    },
+    {
+      "id": "PAY-025",
+      "group": "PAY",
+      "name": "Return URL query cannot mark paid",
+      "expectation": "Only verified webhook/provider reconciliation is evidence"
+    },
+    {
+      "id": "PAY-026",
+      "group": "PAY",
+      "name": "Webhook missing rejected",
+      "expectation": "400/401/422; no credit and no state advance"
+    },
+    {
+      "id": "PAY-027",
+      "group": "PAY",
+      "name": "Webhook badSignature rejected",
+      "expectation": "400/401/422; no credit and no state advance"
+    },
+    {
+      "id": "PAY-028",
+      "group": "PAY",
+      "name": "Webhook tamper rejected",
+      "expectation": "400/401/422; no credit and no state advance"
+    },
+    {
+      "id": "PAY-029",
+      "group": "PAY",
+      "name": "Signed unknown order is safely ignored",
+      "expectation": "200 controlled acknowledgment; no fixture credit"
+    },
+    {
+      "id": "PAY-030",
+      "group": "PAY",
+      "name": "Pending order cannot complete work",
+      "expectation": "409"
+    },
+    {
+      "id": "PAY-031",
+      "group": "PAY",
+      "name": "Verified webhook credits exact money once",
+      "expectation": "Succeeded, remaining zero, still awaiting_payment"
+    },
+    {
+      "id": "PAY-032",
+      "group": "PAY",
+      "name": "Concurrent/replayed webhook cannot double-credit",
+      "expectation": "Paid amount unchanged; one logical success notification"
+    },
+    {
+      "id": "PAY-033",
+      "group": "PAY",
+      "name": "Already paid cannot create another charge",
+      "expectation": "409; no zero or double payment"
+    },
+    {
+      "id": "PAY-034",
+      "group": "PAY",
+      "name": "Succeeded order cannot be canceled",
+      "expectation": "409; paid evidence preserved"
+    },
+    {
+      "id": "MNT-087",
+      "group": "MNT",
+      "name": "Paid maintenance manually completes",
+      "expectation": "Both request/assignment completed; no backward transition"
+    },
+    {
+      "id": "MNT-088",
+      "group": "MNT",
+      "name": "Completed assignment allows one immutable owner review",
+      "expectation": "201; duplicate blocked; foreign forbidden"
+    },
+    {
+      "id": "NTF-001",
+      "group": "NTF",
+      "name": "Maintenance lifecycle notices and navigation",
+      "expectation": "Owner receives assignment, quote, verified payment, completion; unrelated user never receives IDs"
+    },
+    {
+      "id": "MNT-089",
+      "group": "MNT",
+      "name": "E2E no parts",
+      "expectation": "Booking → labor → materials approval → checklist → verified payment → completed"
+    },
+    {
+      "id": "MNT-090",
+      "group": "MNT",
+      "name": "E2E parts quantity 2",
+      "expectation": "Booking → labor → materials approval → checklist → verified payment → completed"
+    },
+    {
+      "id": "MNT-091",
+      "group": "MNT",
+      "name": "E2E fractional part quantity",
+      "expectation": "Booking → labor → materials approval → checklist → verified payment → completed"
+    },
+    {
+      "id": "MNT-092",
+      "group": "MNT",
+      "name": "Expired labor cannot be approved; revised quote succeeds",
+      "expectation": "Expired quote cannot travel/charge; replacement allows whole workflow"
+    },
+    {
+      "id": "PAY-035",
+      "group": "PAY",
+      "name": "Cancel pending, replay cancel, new payment then complete",
+      "expectation": "Old link canceled; replacement unique; only replacement credit"
+    },
+    {
+      "id": "PAY-036",
+      "group": "PAY",
+      "name": "Signed webhook underpaid needs intervention",
+      "expectation": "No credit/close; review or controlled rejection; admin must independently verify provider"
+    },
+    {
+      "id": "PAY-037",
+      "group": "PAY",
+      "name": "Signed webhook overpaid needs intervention",
+      "expectation": "No credit/close; review or controlled rejection; admin must independently verify provider"
+    },
+    {
+      "id": "PAY-038",
+      "group": "PAY",
+      "name": "Signed webhook currency needs intervention",
+      "expectation": "No credit/close; review or controlled rejection; admin must independently verify provider"
+    },
+    {
+      "id": "PAY-039",
+      "group": "PAY",
+      "name": "Signed webhook wrong link needs intervention",
+      "expectation": "No credit/close; review or controlled rejection; admin must independently verify provider"
+    },
+    {
+      "id": "PAY-040",
+      "group": "PAY",
+      "name": "Late success after canceled link requires review",
+      "expectation": "No automatic credit; admin proof and ownership/idempotency required"
+    },
+    {
+      "id": "PAY-041",
+      "group": "PAY",
+      "name": "Reconcile recovers missed webhook",
+      "expectation": "Stale provider PAID credits once, remains awaiting_payment until mechanic closes"
+    },
+    {
+      "id": "PAY-042",
+      "group": "PAY",
+      "name": "Provider create outage cannot mark paid; recovery retry",
+      "expectation": "Controlled 502/503; same key recovers link; no duplicate credit"
+    },
+    {
+      "id": "MNT-093",
+      "group": "MNT",
+      "name": "Future reservation blocks overlap but allows unrelated immediate job",
+      "expectation": "Future confirmed does not occupy current job; early travel blocked; active job blocks later activation"
+    },
+    {
+      "id": "MNT-094",
+      "group": "MNT",
+      "name": "No available mechanic never confirms appointment",
+      "expectation": "After bounded dispatch rounds becomes manual_escalation and rider notified"
+    },
+    {
+      "id": "NTF-002",
+      "group": "NTF",
+      "name": "Reminder invalid title",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-003",
+      "group": "NTF",
+      "name": "Reminder invalid title",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-004",
+      "group": "NTF",
+      "name": "Reminder invalid interval_days",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-005",
+      "group": "NTF",
+      "name": "Reminder invalid interval_days",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-006",
+      "group": "NTF",
+      "name": "Reminder invalid interval_days",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-007",
+      "group": "NTF",
+      "name": "Reminder invalid enabled",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-008",
+      "group": "NTF",
+      "name": "Reminder invalid next_due_at",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-009",
+      "group": "NTF",
+      "name": "Reminder invalid odometer_km",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-010",
+      "group": "NTF",
+      "name": "Reminder invalid rider_id",
+      "expectation": "400/422; no invalid reminder persisted"
+    },
+    {
+      "id": "NTF-011",
+      "group": "NTF",
+      "name": "Reminder motorcycle ownership",
+      "expectation": "403"
+    },
+    {
+      "id": "NTF-012",
+      "group": "NTF",
+      "name": "Due reminder atomic inbox and repeated workers",
+      "expectation": "One occurrence/inbox; queued truthfully; worker sent counter zero"
+    },
+    {
+      "id": "NTF-013",
+      "group": "NTF",
+      "name": "Reminder snooze and schedule edit clears snooze",
+      "expectation": "Effective due moves; not early; PATCH removes old snooze"
+    },
+    {
+      "id": "NTF-014",
+      "group": "NTF",
+      "name": "Foreign reminder mutation PATCH",
+      "expectation": "403"
+    },
+    {
+      "id": "NTF-015",
+      "group": "NTF",
+      "name": "Foreign reminder mutation /snooze",
+      "expectation": "403"
+    },
+    {
+      "id": "NTF-016",
+      "group": "NTF",
+      "name": "Disabled reminder does not notify",
+      "expectation": "No occurrence inbox after due"
+    },
+    {
+      "id": "NTF-017",
+      "group": "NTF",
+      "name": "Archived motorcycle disables reminders",
+      "expectation": "Worker never sends due reminder for archived vehicle"
+    },
+    {
+      "id": "NTF-018",
+      "group": "NTF",
+      "name": "Recurring date reminder advances once without drift duplication",
+      "expectation": "Next due + interval; no duplicate on worker repeat; next cycle gets new context"
+    },
+    {
+      "id": "NTF-019",
+      "group": "NTF",
+      "name": "Reminder creates immediate maintenance once; completion leaves recurrence intact",
+      "expectation": "References owned/due/vehicle-bound; occurrence consumed only after successful request"
+    },
+    {
+      "id": "NTF-020",
+      "group": "NTF",
+      "name": "Inbox invalid filter limit=0",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-021",
+      "group": "NTF",
+      "name": "Inbox invalid filter limit=101",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-022",
+      "group": "NTF",
+      "name": "Inbox invalid filter limit=abc",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-023",
+      "group": "NTF",
+      "name": "Inbox invalid filter cursor=invalid",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-024",
+      "group": "NTF",
+      "name": "Inbox invalid filter unread_only=wrong",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-025",
+      "group": "NTF",
+      "name": "Inbox opaque cursor pagination",
+      "expectation": "No duplicates/missing across pages; limit respected; owner data only"
+    },
+    {
+      "id": "NTF-026",
+      "group": "NTF",
+      "name": "Unread → read idempotent independent of delivery",
+      "expectation": "Unread decrements once; first read timestamp preserved; foreign owner 404"
+    },
+    {
+      "id": "NTF-027",
+      "group": "NTF",
+      "name": "Read-all idempotent and owner-scoped",
+      "expectation": "Owner unread zero; unrelated user count unchanged"
+    },
+    {
+      "id": "NTF-028",
+      "group": "NTF",
+      "name": "Device token fields paired/provider controlled",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-029",
+      "group": "NTF",
+      "name": "Device token fields paired/provider controlled",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-030",
+      "group": "NTF",
+      "name": "Device token fields paired/provider controlled",
+      "expectation": "400/422"
+    },
+    {
+      "id": "NTF-031",
+      "group": "NTF",
+      "name": "Push token ownership, rotation and revoke",
+      "expectation": "Token never returned; foreign cannot rotate; revoke replay safe"
+    },
+    {
+      "id": "NTF-032",
+      "group": "NTF",
+      "name": "No active device retains inbox; no provider call",
+      "expectation": "No raw-device destination; inbox usable even when no push"
+    },
+    {
+      "id": "NTF-033",
+      "group": "NTF",
+      "name": "FCM success wire response",
+      "expectation": "Inbox persists; typed failure classified; successful devices not resent; Retry-After honored"
+    },
+    {
+      "id": "NTF-034",
+      "group": "NTF",
+      "name": "FCM invalid wire response",
+      "expectation": "Inbox persists; typed failure classified; successful devices not resent; Retry-After honored"
+    },
+    {
+      "id": "NTF-035",
+      "group": "NTF",
+      "name": "FCM mismatch wire response",
+      "expectation": "Inbox persists; typed failure classified; successful devices not resent; Retry-After honored"
+    },
+    {
+      "id": "NTF-036",
+      "group": "NTF",
+      "name": "FCM permanent wire response",
+      "expectation": "Inbox persists; typed failure classified; successful devices not resent; Retry-After honored"
+    },
+    {
+      "id": "NTF-037",
+      "group": "NTF",
+      "name": "FCM temporary wire response",
+      "expectation": "Inbox persists; typed failure classified; successful devices not resent; Retry-After honored"
+    },
+    {
+      "id": "NTF-038",
+      "group": "NTF",
+      "name": "FCM quota wire response",
+      "expectation": "Inbox persists; typed failure classified; successful devices not resent; Retry-After honored"
+    },
+    {
+      "id": "NTF-039",
+      "group": "NTF",
+      "name": "Mixed devices retry only unresolved device",
+      "expectation": "One success, one invalid, one temporary; terminal destinations sent once"
+    },
+    {
+      "id": "NTF-040",
+      "group": "NTF",
+      "name": "Concurrent outbox workers deduplicate slow provider sends",
+      "expectation": "One successful send per notification/device version; no duplicate inbox"
+    },
+    {
+      "id": "NTF-041",
+      "group": "NTF",
+      "name": "Permanent temporary-failure exhaustion dead letters",
+      "expectation": "Bounded retries; not falsely sent; inbox remains; operational queue visible"
+    },
+    {
+      "id": "NTF-042",
+      "group": "NTF",
+      "name": "Rescue E2E notifications labor_upfront",
+      "expectation": "Offer → assignment → labor → travel → parts → payment → completion notices owner-only"
+    },
+    {
+      "id": "NTF-043",
+      "group": "NTF",
+      "name": "Rescue E2E notifications after_repair",
+      "expectation": "Offer → assignment → labor → travel → parts → payment → completion notices owner-only"
+    },
+    {
+      "id": "PAY-043",
+      "group": "PAY",
+      "name": "Real bank transfer + signed external payOS webhook",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "PAY-044",
+      "group": "PAY",
+      "name": "Legacy standard maintenance prepayment compatibility",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "PAY-045",
+      "group": "PAY",
+      "name": "Provider timeout after link creation and process crash before response",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "MNT-095",
+      "group": "MNT",
+      "name": "Maximum duration 480 and adjacent buffered reservation boundary",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "MNT-096",
+      "group": "MNT",
+      "name": "Simultaneous cancellation versus offer acceptance",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "MNT-097",
+      "group": "MNT",
+      "name": "Repair legacy request missing location",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "NTF-044",
+      "group": "NTF",
+      "name": "Android physical receipt foreground/background/app terminated",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "NTF-045",
+      "group": "NTF",
+      "name": "iOS physical receipt foreground/background/app terminated",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "NTF-046",
+      "group": "NTF",
+      "name": "Permission denied/offline/device reconnect/notification tap",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "NTF-047",
+      "group": "NTF",
+      "name": "Logout/account switch does not send previous user notices",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "NTF-048",
+      "group": "NTF",
+      "name": "Crash after provider success before receipt commit",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "NTF-049",
+      "group": "NTF",
+      "name": "Rotate token during invalidation and expired lease owner fencing",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "NTF-050",
+      "group": "NTF",
+      "name": "Missing FCM config must report failure not sent",
+      "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    }
+  ]
+}

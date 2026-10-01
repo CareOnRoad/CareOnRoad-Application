@@ -16,6 +16,7 @@ import {
 export type ServiceRequestRouteDependencies = {
   authenticate(request: Request): Promise<VerifiedSupabaseIdentity>;
   serviceRequestService: {
+    updateAppointment?(identity: VerifiedSupabaseIdentity, requestId: string, input: unknown, key: string): Promise<ServiceRequestResponse>;
     createServiceRequest(
       identity: VerifiedSupabaseIdentity,
       input: unknown,
@@ -41,6 +42,14 @@ export type ServiceRequestRouteDependencies = {
 
 export function createServiceRequestRouteHandlers(dependencies: ServiceRequestRouteDependencies) {
   return {
+    async updateAppointment(request: Request, requestId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        const key = requireIdempotencyKey(request);
+        if (!dependencies.serviceRequestService.updateAppointment) throw new Error("Appointment updates are not configured.");
+        return NextResponse.json(await dependencies.serviceRequestService.updateAppointment(identity, requestId, await readJson(request), key));
+      } catch (error) { return routeError(error); }
+    },
     async listServiceRequests(request: Request) {
       try {
         const identity = await dependencies.authenticate(request);

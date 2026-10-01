@@ -12,10 +12,19 @@ export function evaluateHealthConfiguration(
 ): HealthCheck[] {
   return [
     group("workers", [environment.INTERNAL_WORKER_SECRET], false),
-    group("notifications", [environment.FCM_PROJECT_ID, environment.FCM_CLIENT_EMAIL, environment.FCM_PRIVATE_KEY], true),
+    notificationGroup(environment),
     group("media", [environment.MEDIA_STORAGE_BUCKET, environment.SUPABASE_URL, environment.SUPABASE_SERVICE_ROLE_KEY], true),
     paymentGroup(environment)
   ];
+}
+
+function notificationGroup(environment: HealthEnvironment): HealthCheck {
+  const result = group("notifications", [environment.FCM_PROJECT_ID, environment.FCM_CLIENT_EMAIL,
+    environment.FCM_PRIVATE_KEY, environment.PUSH_TOKEN_ENCRYPTION_KEY], true);
+  if (result.status === "configured" && Buffer.from(environment.PUSH_TOKEN_ENCRYPTION_KEY!, "base64").length !== 32) {
+    return { name: "notifications", status: "invalid" };
+  }
+  return result;
 }
 
 function group(

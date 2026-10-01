@@ -53,6 +53,7 @@ export type MechanicOperationsRouteDependencies = {
     ): Promise<AssignmentMediaMetadataResponse>;
   };
   completionChecklistService?: {
+    getCompletionChecklist?(identity: VerifiedSupabaseIdentity, assignmentId: string): Promise<AssignmentCompletionChecklistResponse>;
     submitCompletionChecklist(
       identity: VerifiedSupabaseIdentity,
       assignmentId: string,
@@ -66,6 +67,13 @@ export function createMechanicOperationsRouteHandlers(
   dependencies: MechanicOperationsRouteDependencies
 ) {
   return {
+    async getCompletionChecklist(request: Request, assignmentId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        if (!dependencies.completionChecklistService?.getCompletionChecklist) throw new Error("Completion checklist service is not configured.");
+        return NextResponse.json(await dependencies.completionChecklistService.getCompletionChecklist(identity, assignmentId));
+      } catch (error) { return routeError(error); }
+    },
     async getDashboard(request: Request) {
       try {
         const identity = await dependencies.authenticate(request);

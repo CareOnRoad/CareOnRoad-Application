@@ -38,7 +38,7 @@ export function createDefaultOutboxRouteHandlers() {
   const deliveryService = new NotificationDeliveryService(
     unitOfWork,
     createNotificationProvider(),
-    createPushTokenCipher()
+    () => createPushTokenCipher()
   );
   const dispatchService = new DispatchService(unitOfWork);
   return createOutboxRouteHandlers({
@@ -55,6 +55,11 @@ export function createDefaultOutboxRouteHandlers() {
                 ...(result.errorCode ? { errorCode: result.errorCode } : {})
               };
             },
+            "maintenance.dispatch.requested": async (event) => {
+              const request = await unitOfWork.execute(({ serviceRequests }) => serviceRequests.findById(event.aggregateId));
+              if (!request || request.serviceType !== "periodic_maintenance") return;
+              await dispatchService.restartRecoveredRequest(request.id);
+            },
             "assignment.recovery.requested": async (event) => {
               const requestId = event.payload.request_id;
               if (typeof requestId !== "string" || requestId.length === 0) {
@@ -67,7 +72,7 @@ export function createDefaultOutboxRouteHandlers() {
       });
       return { processBatch: () => recordWorkerRun({
         unitOfWork, workerName: "outbox", run: () => worker.processBatch(),
-        summarize: (result) => ({ claimed: result.claimed, succeeded: result.processed + result.retried + result.deadLettered, failed: 0 })
+        summarize: (result) => ({ claimed: result.claimed, succeeded: result.processed, failed: result.retried + result.deadLettered + (result.leaseLost ?? 0) })
       }) };
     }
   });

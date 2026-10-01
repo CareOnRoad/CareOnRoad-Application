@@ -8,11 +8,14 @@ import type {
   QuoteRepository,
   QuoteStatus
 } from "../contracts/quote.repository";
+import type { QuotePurpose, RescueLaborPricing } from "../contracts/quote.repository";
 
 type QuoteRow = {
   id: string;
   request_id: string;
   assignment_id: string;
+  purpose: QuotePurpose;
+  labor_pricing: RescueLaborPricing | null;
   diagnosis_id: string | null;
   version: number;
   status: QuoteStatus;
@@ -46,14 +49,15 @@ export class PostgresQuoteRepository implements QuoteRepository {
       insert into quotes (
         id, request_id, assignment_id, diagnosis_id, version, status, currency,
         subtotal_amount, discount_amount, total_amount, notes, expires_at,
-        created_by, created_at, responded_at
+        created_by, created_at, responded_at, purpose, labor_pricing
       )
       values (
         ${input.id}, ${input.requestId}, ${input.assignmentId},
         ${input.diagnosisId ?? null}, ${input.version}, ${input.status ?? "pending"},
         ${input.currency ?? "VND"}, ${input.subtotalAmount}, ${input.discountAmount},
         ${input.totalAmount}, ${input.notes ?? null}, ${input.expiresAt ?? null},
-        ${input.createdBy}, ${input.createdAt}, ${input.respondedAt ?? null}
+        ${input.createdBy}, ${input.createdAt}, ${input.respondedAt ?? null},
+        ${input.purpose ?? "standard"}, ${input.laborPricing ? this.sql.json(input.laborPricing) : null}
       )
       returning *
     `;
@@ -116,6 +120,14 @@ export class PostgresQuoteRepository implements QuoteRepository {
     return Promise.all(rows.map((row) => this.withLines(mapQuote(row))));
   }
 
+  async findLatestApprovedByAssignment(assignmentId: string, purpose: QuotePurpose): Promise<Quote | undefined> {
+    const rows = await this.sql<QuoteRow[]>`
+      select * from quotes where assignment_id = ${assignmentId} and purpose = ${purpose} and status = 'approved'
+      order by version desc limit 1
+    `;
+    return rows[0] ? this.withLines(mapQuote(rows[0])) : undefined;
+  }
+
   async hasAnyByDiagnosis(diagnosisId: string): Promise<boolean> {
     const rows = await this.sql<{ exists: boolean }[]>`
       select exists(select 1 from quotes where diagnosis_id = ${diagnosisId}) as exists
@@ -153,6 +165,8 @@ function mapQuote(row: QuoteRow): Omit<Quote, "lines"> {
     id: row.id,
     requestId: row.request_id,
     assignmentId: row.assignment_id,
+    purpose: row.purpose,
+    laborPricing: row.labor_pricing ?? undefined,
     diagnosisId: row.diagnosis_id ?? undefined,
     version: row.version,
     status: row.status,

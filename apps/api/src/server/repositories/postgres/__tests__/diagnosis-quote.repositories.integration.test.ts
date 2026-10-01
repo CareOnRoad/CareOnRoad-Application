@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { MechanicDiagnosisService } from "@/features/mechanic-diagnosis/mechanic-diagnosis.service";
+import { MechanicAssignmentMetadataService } from "@/features/mechanic-operations/mechanic-assignment-metadata.service";
 import { QuoteService } from "@/features/quotes/quote.service";
 import {
   cleanupPostgresTables,
@@ -264,6 +265,72 @@ describeDatabase("diagnosis and quote repository integration", () => {
     await expect(counts()).resolves.toEqual(before);
   }, 30_000);
 
+  it("persists approved rescue labor and protects agreement and pricing from mutation", async () => {
+    await sql`update service_requests set service_type = 'emergency_rescue', status = 'assigned' where id = ${requestId}`;
+    await sql`update assignments set status = 'accepted' where id = ${assignmentId}`;
+    const service = new QuoteService(new PostgresUnitOfWork(sql), { now: () => now });
+    const labor = await service.createQuote(identity(mechanicId), requestId, {
+      assignment_id: assignmentId, purpose: "rescue_labor",
+      labor_pricing: { base_amount: 100000, distance_amount: 20000, weather_amount: 10000, time_amount: 30000, weather: "rain" }
+    });
+    await service.approveQuote(identity(riderId), labor.id, { payment_timing: "after_repair" });
+    await expect(sql`select rescue_labor_quote_id, rescue_payment_timing, status from assignments where id = ${assignmentId}`)
+      .resolves.toEqual([{ rescue_labor_quote_id: labor.id, rescue_payment_timing: "after_repair", status: "accepted" }]);
+    await expect(sql`update assignments set rescue_payment_timing = 'labor_upfront' where id = ${assignmentId}`).rejects.toBeDefined();
+    await expect(sql`update quotes set labor_pricing = '{}'::jsonb where id = ${labor.id}`).rejects.toBeDefined();
+  }, 90_000);
+
+  it("persists immutable maintenance labor and binds the completion checklist to approved work", async () => {
+    await sql`update service_requests set service_type = 'periodic_maintenance', scheduled_start_at = ${new Date(now.getTime() + 3600_000)}, status = 'assigned' where id = ${requestId}`;
+    await sql`update assignments set status = 'accepted' where id = ${assignmentId}`;
+    const unitOfWork = new PostgresUnitOfWork(sql);
+    const service = new QuoteService(unitOfWork, { now: () => now });
+    const labor = await service.createQuote(identity(mechanicId), requestId, {
+      assignment_id: assignmentId, purpose: "maintenance_labor",
+      lines: [{ line_type: "labor", description: "Cong bao duong", quantity: 1, unit_amount: 100000 }]
+    });
+    await service.approveQuote(identity(riderId), labor.id);
+    await expect(sql`select maintenance_labor_quote_id, status from assignments where id = ${assignmentId}`)
+      .resolves.toEqual([{ maintenance_labor_quote_id: labor.id, status: "accepted" }]);
+    await expect(sql`update assignments set maintenance_labor_quote_id = null where id = ${assignmentId}`).rejects.toBeDefined();
+    await sql`update assignments set status = 'diagnosis' where id = ${assignmentId}`;
+    await sql`update service_requests set status = 'in_service' where id = ${requestId}`;
+    const work = await service.createQuote(identity(mechanicId), requestId, {
+      assignment_id: assignmentId, purpose: "maintenance_work",
+      lines: [{ line_type: "part", description: "Dau dong co", quantity: 1, unit_amount: 120000 }]
+    });
+    await service.approveQuote(identity(riderId), work.id);
+    await expect(unitOfWork.execute((repositories) => repositories.quotes.findLatestApprovedByAssignment(assignmentId, "maintenance_work")))
+      .resolves.toMatchObject({ id: work.id, totalAmount: 220000 });
+    await sql`update assignments set status = 'in_progress' where id = ${assignmentId}`;
+    const metadata = new MechanicAssignmentMetadataService(unitOfWork, { now: () => now });
+    const checklist = await metadata.submitCompletionChecklist(identity(mechanicId), assignmentId, {
+      work_summary: "Da bao duong va thay dau theo bao gia duyet.",
+      safety_checklist: { test_ride_completed: true, tools_removed: true, area_safe: true, rider_briefed: true, no_fluid_leak: true }
+    }, "maintenance-persisted-checklist");
+    expect(checklist.approved_quote_id).toBe(work.id);
+    await expect(metadata.getCompletionChecklist(identity(riderId), assignmentId))
+      .resolves.toMatchObject({ id: checklist.id, approved_quote_id: work.id });
+    await expect(sql`select approved_quote_id from assignment_completion_checklists where id = ${checklist.id}`)
+      .resolves.toEqual([{ approved_quote_id: work.id }]);
+    await expect(sql`update quotes set total_amount = 1 where id = ${work.id}`).rejects.toBeDefined();
+  }, 120_000);
+
+  it("releases rejected rescue assignments with a cancellation timestamp and durable redispatch event", async () => {
+    await sql`update service_requests set service_type = 'emergency_rescue', status = 'assigned' where id = ${requestId}`;
+    await sql`update assignments set status = 'accepted' where id = ${assignmentId}`;
+    const service = new QuoteService(new PostgresUnitOfWork(sql), { now: () => now });
+    const labor = await service.createQuote(identity(mechanicId), requestId, {
+      assignment_id: assignmentId, purpose: "rescue_labor",
+      labor_pricing: { base_amount: 100000, distance_amount: 0, weather_amount: 0, time_amount: 0, weather: "sunny" }
+    });
+    await service.rejectQuote(identity(riderId), labor.id);
+    await expect(sql`select status, canceled_at from assignments where id = ${assignmentId}`)
+      .resolves.toEqual([{ status: "recovery_canceled", canceled_at: now }]);
+    await expect(sql`select status from service_requests where id = ${requestId}`).resolves.toEqual([{ status: "submitted" }]);
+    await expect(sql`select count(*)::int as count from outbox_events where topic = 'assignment.recovery.requested'`).resolves.toEqual([{ count: 1 }]);
+  }, 90_000);
+
   async function seedActor(id: string, role: "rider" | "mechanic" | "admin") {
     await sql`insert into auth.users (id, created_at, updated_at) values (${id}, now(), now())`;
     await sql`
@@ -388,16 +455,8 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
 }
 
 function legacyCompatibleMigrationFiles(): string[] {
-  const files = readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
-    .sort();
-  return [
-    ...files,
-    "202606250014_indexes_constraints_rls.sql",
-    "202606250020_payments.sql"
-  ];
+  return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
+    .filter((name) => name.endsWith(".sql")).sort();
 }
 
 function identity(subject: string): VerifiedSupabaseIdentity {

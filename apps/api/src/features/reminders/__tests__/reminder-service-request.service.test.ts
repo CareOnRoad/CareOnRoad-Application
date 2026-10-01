@@ -31,6 +31,7 @@ describe("reminder-originated service requests", () => {
     const input = {
       motorcycle_id: motorcycleId,
       service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 },
       problem_description: "Bao duong tu lich hen",
       reminder_id: reminderId,
       reminder_context_id: occurrenceId
@@ -62,7 +63,7 @@ describe("reminder-originated service requests", () => {
     });
     expect(snapshot.reminderOccurrences[0]).toMatchObject({ id: occurrenceId, status: "dismissed" });
     expect(snapshot.requestStatusHistory).toHaveLength(1);
-    expect(snapshot.outboxEvents).toHaveLength(1);
+    expect(snapshot.outboxEvents).toHaveLength(2);
     expect(snapshot.auditLogs).toHaveLength(1);
   });
 
@@ -71,6 +72,7 @@ describe("reminder-originated service requests", () => {
     const baseInput = {
       motorcycle_id: motorcycleId,
       service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 },
       problem_description: "Bao duong"
     };
 

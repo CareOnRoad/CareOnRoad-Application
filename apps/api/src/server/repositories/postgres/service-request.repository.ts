@@ -51,6 +51,14 @@ type RequestStatusHistoryRow = {
 export class PostgresServiceRequestRepository implements ServiceRequestRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async updateAppointment(input: Parameters<ServiceRequestRepository["updateAppointment"]>[0]) {
+    const rows = await this.sql<ServiceRequestRow[]>`update service_requests
+      set service_location = ST_SetSRID(ST_MakePoint(${input.location.longitude}, ${input.location.latitude}), 4326)::geography,
+        address_text = ${input.addressText ?? null}, scheduled_start_at = ${input.scheduledStartAt ?? null},
+        updated_at = ${input.updatedAt} where id = ${input.id} returning ${this.selection()}`;
+    return mapRequest(rows[0]!);
+  }
+
   async create(input: CreateServiceRequest): Promise<ServiceRequest> {
     try {
       const rows = await this.sql<ServiceRequestRow[]>`

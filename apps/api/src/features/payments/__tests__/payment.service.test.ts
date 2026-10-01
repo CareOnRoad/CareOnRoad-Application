@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { AssignmentService } from "@/features/assignments/assignment.service";
@@ -23,6 +23,143 @@ const quoteId = "77777777-7777-4777-8777-777777777777";
 const now = new Date("2026-07-08T03:00:00.000Z");
 
 describe("payment service", () => {
+  it("holds a verified payment for a canceled job for investigation", async () => {
+    const provider = new FakeProvider();
+    const state = createUnitOfWork().snapshot();
+    state.serviceRequests[0]!.status = "canceled";
+    state.assignments[0]!.status = "canceled";
+    state.paymentOrders.push({ id: "99999999-9999-4999-8999-999999999999", quoteId, requestId, assignmentId, riderId,
+      provider: "payos", providerOrderCode: 100001, amount: 150000, currency: "VND", status: "pending", description: "COR100001", createdAt: now, updatedAt: now });
+    const unitOfWork = new InMemoryUnitOfWork(state);
+    const service = createPaymentService(unitOfWork, provider);
+    provider.nextWebhook = { kind: "valid", eventDedupeKey: "canceled-job-receipt", success: true,
+      orderCode: 100001, amount: 150000, currency: "VND", status: "00" };
+    expect(await service.handlePayosWebhook({})).toMatchObject({ status: "needs_review" });
+    expect(unitOfWork.snapshot().paymentOrders[0]?.reviewReason).toBe("paid_for_inactive_workflow");
+  });
+  it("closes review only when the provider proves the terminal order received zero money", async () => {
+    const provider = new FakeProvider();
+    const state = createUnitOfWork().snapshot();
+    state.userRoles.push({ userId: otherRiderId, role: "admin" });
+    const unitOfWork = new InMemoryUnitOfWork(state);
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "unpaid-review-order");
+    provider.nextWebhook = { kind: "valid", eventDedupeKey: "unpaid-mismatch", success: true,
+      orderCode: order.provider_order_code, amount: 1, currency: "VND", status: "00" };
+    await service.handlePayosWebhook({});
+    const status = vi.spyOn(provider, "getPaymentStatus").mockResolvedValue({ orderCode: order.provider_order_code,
+      paymentLinkId: order.provider_payment_link_id, amount: order.amount, amountPaid: 1, currency: "VND", status: "CANCELLED" });
+    const input = { action: "close_unpaid", reason: "Verified provider cancellation" };
+    await expect(service.resolvePaymentReview(identity(otherRiderId), order.id, input, "close-review-key")).rejects.toMatchObject({ status: 409 });
+    status.mockResolvedValue({ orderCode: order.provider_order_code, paymentLinkId: order.provider_payment_link_id,
+      amount: order.amount, amountPaid: 0, currency: "VND", status: "CANCELLED" });
+    expect(await service.resolvePaymentReview(identity(otherRiderId), order.id, input, "close-review-key")).toMatchObject({ status: "canceled" });
+    await expect(service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "new-after-review-key")).resolves.toMatchObject({ status: "pending" });
+  });
+
+  it("does not credit a late old payment while a replacement link is active", async () => {
+    const provider = new FakeProvider();
+    const state = createUnitOfWork().snapshot();
+    state.userRoles.push({ userId: otherRiderId, role: "admin" });
+    const unitOfWork = new InMemoryUnitOfWork(state);
+    const service = createPaymentService(unitOfWork, provider);
+    const old = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "old-replacement-key");
+    await service.cancelPaymentOrder(identity(riderId), old.id);
+    await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "new-replacement-key");
+    provider.nextWebhook = { kind: "valid", eventDedupeKey: "old-late-receipt", success: true,
+      orderCode: old.provider_order_code, amount: old.amount, currency: "VND", status: "00" };
+    await service.handlePayosWebhook({});
+    vi.spyOn(provider, "getPaymentStatus").mockResolvedValue({ orderCode: old.provider_order_code,
+      paymentLinkId: old.provider_payment_link_id, amount: old.amount, amountPaid: old.amount, currency: "VND", status: "PAID" });
+    await expect(service.resolvePaymentReview(identity(otherRiderId), old.id,
+      { action: "confirm_received", reason: "Verified old payment receipt" }, "replacement-review-key")).rejects.toMatchObject({ status: 409 });
+    expect(unitOfWork.snapshot().paymentOrders.map((order) => order.status)).toEqual(["needs_review", "pending"]);
+  });
+
+  it("records a provider failure without starving the next stale order", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    vi.spyOn(provider, "createPaymentLink").mockRejectedValue(new Error("offline"));
+    const service = createPaymentService(unitOfWork, provider);
+    await expect(service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "offline-worker-key")).rejects.toThrow();
+    const later = new Date(now.getTime() + 180_000);
+    const worker = new PaymentService(unitOfWork, { now: () => later, providerFactory: () => provider,
+      returnUrl: () => "https://example.test/return", cancelUrl: () => "https://example.test/cancel" });
+    expect(await worker.reconcilePendingPayments()).toMatchObject({ claimed: 1, failed: 1 });
+    expect(unitOfWork.snapshot().paymentOrders[0]?.updatedAt).toEqual(later);
+    expect(await worker.reconcilePendingPayments()).toMatchObject({ claimed: 0, failed: 0 });
+  });
+  it("keeps the order and code after a provider timeout, and retries the same durable order", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const create = vi.spyOn(provider, "createPaymentLink").mockRejectedValueOnce(new Error("timeout"));
+    await expect(service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "durable-payment-key")).rejects.toThrow("timeout");
+    const reserved = unitOfWork.snapshot().paymentOrders[0]!;
+    expect(reserved.status).toBe("created");
+    expect(unitOfWork.snapshot().idempotencyRecords[0]?.resourceId).toBe(reserved.id);
+    const restored = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "durable-payment-key");
+    expect(restored).toMatchObject({ id: reserved.id, provider_order_code: reserved.providerOrderCode, status: "pending" });
+    expect(create.mock.calls.map(([input]) => input.orderCode)).toEqual([reserved.providerOrderCode, reserved.providerOrderCode]);
+    expect(unitOfWork.snapshot().paymentOrders).toHaveLength(1);
+  });
+
+  it("recovers a created order through reconciliation without a client retry", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    vi.spyOn(provider, "createPaymentLink").mockRejectedValueOnce(new Error("timeout"));
+    const service = createPaymentService(unitOfWork, provider);
+    await expect(service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "worker-recovery-key")).rejects.toThrow();
+    const worker = new PaymentService(unitOfWork, { now: () => new Date(now.getTime() + 180_000), providerFactory: () => provider,
+      returnUrl: () => "https://example.test/return", cancelUrl: () => "https://example.test/cancel" });
+    expect(await worker.reconcilePendingPayments()).toMatchObject({ claimed: 1, succeeded: 1, failed: 0 });
+    expect(unitOfWork.snapshot().paymentOrders).toHaveLength(1);
+    expect(unitOfWork.snapshot().paymentOrders[0]?.status).toBe("succeeded");
+  });
+
+  it("preserves a webhook success received during link creation", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const original = provider.createPaymentLink.bind(provider);
+    vi.spyOn(provider, "createPaymentLink").mockImplementation(async (input) => {
+      provider.nextWebhook = { kind: "valid", eventDedupeKey: "early-webhook", success: true, orderCode: input.orderCode,
+        amount: input.amount, currency: "VND", status: "00" };
+      await service.handlePayosWebhook({});
+      return original(input);
+    });
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "early-webhook-key");
+    expect(order.status).toBe("succeeded");
+    expect(unitOfWork.snapshot().outboxEvents.filter((event) => event.topic === "payment.succeeded")).toHaveLength(1);
+  });
+
+  it("authorizes and idempotently resolves review only after provider confirmation", async () => {
+    const provider = new FakeProvider();
+    const state = createUnitOfWork().snapshot();
+    state.userRoles.push({ userId: otherRiderId, role: "admin" });
+    const unitOfWork = new InMemoryUnitOfWork(state);
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "admin-review-order");
+    await service.cancelPaymentOrder(identity(riderId), order.id);
+    provider.nextWebhook = { kind: "valid", eventDedupeKey: "late-review", success: true,
+      orderCode: order.provider_order_code, amount: order.amount, currency: "VND", status: "00" };
+    await service.handlePayosWebhook({});
+    const input = { action: "confirm_received", reason: "Verified late receipt" };
+    await expect(service.resolvePaymentReview(identity(riderId), order.id, input, "admin-review-key")).rejects.toMatchObject({ status: 403 });
+    const status = vi.spyOn(provider, "getPaymentStatus").mockResolvedValue({ orderCode: order.provider_order_code,
+      paymentLinkId: order.provider_payment_link_id, amount: order.amount, amountPaid: order.amount - 1, currency: "VND", status: "PAID" });
+    await expect(service.resolvePaymentReview(identity(otherRiderId), order.id, input, "admin-review-key")).rejects.toMatchObject({ status: 409 });
+    expect(unitOfWork.snapshot().paymentOrders[0]?.status).toBe("needs_review");
+    status.mockResolvedValue({ orderCode: order.provider_order_code, paymentLinkId: order.provider_payment_link_id,
+      amount: order.amount, amountPaid: order.amount, currency: "VND", status: "PAID" });
+    const resolved = await service.resolvePaymentReview(identity(otherRiderId), order.id, input, "admin-review-key");
+    expect(resolved.status).toBe("succeeded");
+    status.mockRejectedValue(new Error("offline"));
+    expect(await service.resolvePaymentReview(identity(otherRiderId), order.id, input, "admin-review-key")).toEqual(resolved);
+    expect(unitOfWork.snapshot().auditLogs.filter((event) => event.action === "payment.review.resolved")).toHaveLength(1);
+    expect(JSON.stringify(unitOfWork.snapshot().auditLogs)).not.toContain(input.reason);
+    expect(resolved).not.toHaveProperty("checkout_url");
+  });
   it("creates a payOS payment order and replays idempotently", async () => {
     const provider = new FakeProvider();
     const unitOfWork = createUnitOfWork();
@@ -145,6 +282,20 @@ describe("payment service", () => {
       status: "needs_review",
       reviewReason: "provider_payment_mismatch"
     });
+    await expect(service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "mismatch-retry-key")).rejects.toMatchObject({ status: 409 });
+    expect(provider.createdLinks).toHaveLength(1);
+  });
+
+  it("holds payments received after cancellation for review and blocks recollection", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "cancel-order-key");
+    await service.cancelPaymentOrder(identity(riderId), order.id);
+    provider.nextWebhook = { kind: "valid", eventDedupeKey: "late-paid", success: true, orderCode: order.provider_order_code, amount: order.amount, currency: "VND", status: "00" };
+    await expect(service.handlePayosWebhook({})).resolves.toMatchObject({ status: "needs_review" });
+    await expect(service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "late-paid-retry-key")).rejects.toMatchObject({ status: 409 });
+    expect(unitOfWork.snapshot().paymentOrders[0]).toMatchObject({ reviewReason: "paid_after_cancellation", canceledAt: undefined });
   });
 });
 

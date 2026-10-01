@@ -34,7 +34,8 @@ export type DiagnosisQuoteRouteDependencies = {
     ): Promise<{ items: QuoteResponse[] }>;
     approveQuote(
       identity: VerifiedSupabaseIdentity,
-      quoteId: string
+      quoteId: string,
+      input?: unknown
     ): Promise<QuoteResponse>;
     rejectQuote(
       identity: VerifiedSupabaseIdentity,
@@ -94,7 +95,7 @@ export function createDiagnosisQuoteRouteHandlers(
       try {
         const identity = await dependencies.authenticate(request);
         return NextResponse.json(
-          await dependencies.quoteService.approveQuote(identity, quoteId)
+          await dependencies.quoteService.approveQuote(identity, quoteId, await readJson(request))
         );
       } catch (error) {
         return routeError(error);

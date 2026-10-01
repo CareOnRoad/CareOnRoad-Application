@@ -17,7 +17,7 @@ import {
 export type AssignmentRouteDependencies = {
   authenticate(request: Request): Promise<VerifiedSupabaseIdentity>;
   acceptService: {
-    acceptOffer(identity: VerifiedSupabaseIdentity, offerId: string): Promise<AssignmentResponse>;
+    acceptOffer(identity: VerifiedSupabaseIdentity, offerId: string, input?: unknown): Promise<AssignmentResponse>;
   };
   assignmentService: {
     listAssignments(identity: VerifiedSupabaseIdentity): Promise<{ items: AssignmentResponse[] }>;
@@ -42,7 +42,11 @@ export function createAssignmentRouteHandlers(dependencies: AssignmentRouteDepen
     async acceptOffer(request: Request, offerId: string) {
       try {
         const identity = await dependencies.authenticate(request);
-        return NextResponse.json(await dependencies.acceptService.acceptOffer(identity, offerId), {
+        const text = await request.text();
+        let input: unknown = {};
+        try { if (text.trim()) input = JSON.parse(text); }
+        catch { return jsonError(400, "INVALID_INPUT", "Offer acceptance JSON is invalid."); }
+        return NextResponse.json(await dependencies.acceptService.acceptOffer(identity, offerId, input), {
           status: 201
         });
       } catch (error) {

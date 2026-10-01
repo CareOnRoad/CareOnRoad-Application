@@ -5,6 +5,7 @@ import { prepareIdempotency } from "@/lib/idempotency";
 import type { ServiceType } from "@/features/motorcycles/motorcycle.schemas";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { requireActorRole } from "@/features/auth/authorization";
+import { persistNotification } from "@/features/notifications/notification.service";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 import type { Motorcycle } from "@/server/repositories/contracts/motorcycle.repository";
 import type {
@@ -17,6 +18,7 @@ import type { RequestMediaMetadata } from "@/server/repositories/contracts/reque
 import { RequestCodeService } from "./request-code.service";
 import {
   cancelServiceRequestInputSchema,
+  appointmentUpdateSchema,
   requestMediaMetadataInputSchema,
   serviceRequestInputSchema,
   type RequestMediaMetadataInput,
@@ -98,6 +100,54 @@ export class ServiceRequestService {
     });
   }
 
+  async updateAppointment(identity: VerifiedSupabaseIdentity, requestId: string, input: unknown, key: string) {
+    if (!serviceRequestInputSchema.shape.motorcycle_id.safeParse(requestId).success) throw invalidMatrix("Request ID must be a UUID.");
+    const parsed = appointmentUpdateSchema.safeParse(input);
+    if (!parsed.success) throw invalidMatrix("Appointment update input is invalid.");
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadRiderActor(repositories.users, identity.subject);
+      const now = this.options.now?.() ?? new Date();
+      const createId = this.options.createId ?? randomUUID;
+      const scope = `PATCH /api/v1/service-requests/${requestId}`;
+      const decision = await prepareIdempotency(repositories.idempotency, {
+        actorId: actor.id, scope, idempotencyKey: key, request: parsed.data,
+        expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS), id: createId()
+      });
+      if (decision.action === "replay") return decision.responseBody as unknown as ServiceRequestResponse;
+      if (decision.action !== "execute") throw new ServiceRequestError("CONFLICT", "Idempotency key is conflicting or in progress.", 409);
+      const existing = await repositories.serviceRequests.findByIdForUpdate(requestId);
+      if (!existing) throw new ServiceRequestError("NOT_FOUND", "Service request not found.", 404);
+      if (existing.riderId !== actor.id) throw new ServiceRequestError("FORBIDDEN", "Request ownership is required.", 403);
+      if (existing.serviceType !== "periodic_maintenance" || existing.status !== "submitted" ||
+        (await repositories.dispatch.listRoundsByRequest(existing.id)).length ||
+        await repositories.assignments.findActiveByRequestForUpdate(existing.id)) {
+        throw new ServiceRequestError("CONFLICT", "Only maintenance requests before matching can be edited.", 409);
+      }
+      await loadOwnedMotorcycle(repositories.motorcycles, existing.motorcycleId, actor.id);
+      const location = parsed.data.location ?? existing.serviceLocation;
+      const start = parsed.data.scheduled_start_at === null ? undefined :
+        parsed.data.scheduled_start_at ? new Date(parsed.data.scheduled_start_at) : existing.scheduledStartAt;
+      if (!location || (start && start <= now) || (!start && !existing.reminderContextId)) {
+        throw invalidMatrix("A location and a future appointment or reminder origin are required.");
+      }
+      const updated = await repositories.serviceRequests.updateAppointment({
+        id: existing.id, location, addressText: parsed.data.address_text ?? existing.addressText,
+        scheduledStartAt: start, updatedAt: now
+      });
+      await appendRequestMutationAuditOutbox({ action: "service_request.appointment_updated", request: updated,
+        actorId: actor.id, audit: repositories.audit, outbox: repositories.outbox, now, createId });
+      const eventId = createId();
+      await repositories.outbox.append({ id: eventId, topic: "maintenance.dispatch.requested", aggregateType: "service_request",
+        aggregateId: existing.id, dedupeKey: `maintenance.dispatch.requested:${existing.id}:${eventId}`,
+        payload: { request_id: existing.id }, createdAt: now, nextAttemptAt: now });
+      const response = toServiceRequestResponse(updated);
+      await repositories.idempotency.complete({ actorId: actor.id, scope, idempotencyKey: key,
+        responseStatus: 200, responseBody: response as unknown as Record<string, unknown>,
+        resourceType: "service_request", resourceId: existing.id, completedAt: now });
+      return response;
+    });
+  }
+
   getServiceRequest(
     identity: VerifiedSupabaseIdentity,
     requestId: string
@@ -121,14 +171,15 @@ export class ServiceRequestService {
       });
     }
 
-    return this.unitOfWork.execute(async ({
-      assignments,
-      audit,
-      dispatch,
-      outbox,
-      serviceRequests,
-      users
-    }) => {
+    return this.unitOfWork.execute(async (repositories) => {
+      const {
+        assignments,
+        audit,
+        dispatch,
+        outbox,
+        serviceRequests,
+        users
+      } = repositories;
       const actor = await loadRiderActor(users, identity.subject);
       const existing = await serviceRequests.findByIdForUpdate(requestId);
       if (!existing) {
@@ -151,6 +202,9 @@ export class ServiceRequestService {
 
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
+      const offeredMechanics = existing.serviceType === "periodic_maintenance" ?
+        [...new Set((await dispatch.listCandidatesByRequest(existing.id))
+          .filter((candidate) => candidate.status === "offered").map((candidate) => candidate.mechanicId))] : [];
       const reconciliation = await dispatch.cancelOpenDispatchForRequest({
         requestId: existing.id,
         now
@@ -186,6 +240,13 @@ export class ServiceRequestService {
           canceled_candidates: reconciliation.canceledCandidates
         }
       });
+
+      for (const mechanicId of offeredMechanics) await persistNotification(repositories, {
+        userId: mechanicId, type: "maintenance.booking.canceled", title: "Khách đã hủy yêu cầu bảo dưỡng",
+        body: "Yêu cầu này không còn nhận thợ. Kiểm tra danh sách lời mời để xem yêu cầu khác.",
+        data: { request_id: updated.id }, dedupeKey: `maintenance.booking.canceled:${updated.id}:${mechanicId}`,
+        requestId: updated.id
+      }, now, createId);
 
       return toServiceRequestResponse(updated);
     });
@@ -258,6 +319,7 @@ export class ServiceRequestService {
         return decision.responseBody as ServiceRequestResponse;
       }
 
+      validateServiceTypeMatrix(parsed, now);
       const motorcycle = await loadOwnedMotorcycle(motorcycles, parsed.motorcycle_id, actor.id);
       const reminderContext = await validateReminderOrigin(repositories.reminders, {
         actorId: actor.id,
@@ -331,6 +393,11 @@ export class ServiceRequestService {
         extraPayload: { media_count: media.length }
       });
 
+      if (request.serviceType === "periodic_maintenance") await outbox.append({
+        id: createId(), topic: "maintenance.dispatch.requested", aggregateType: "service_request",
+        aggregateId: request.id, dedupeKey: `maintenance.dispatch.requested:${request.id}`,
+        payload: { request_id: request.id }, createdAt: now, nextAttemptAt: now
+      });
       const response = toServiceRequestResponse(request, media);
       await idempotency.complete({
         actorId: actor.id,
@@ -353,7 +420,8 @@ export class ServiceRequestService {
         issues: parsed.error.issues
       });
     }
-    validateServiceTypeMatrix(parsed.data, this.options.now?.() ?? new Date());
+    // Validate structure before allocating idempotency IDs; validate the current time after replay.
+    validateServiceTypeMatrix(parsed.data, new Date(0));
     return parsed.data;
   }
 }
@@ -398,10 +466,11 @@ function validateServiceTypeMatrix(input: ServiceRequestInput, now: Date): void 
       requireFutureSchedule(input, now);
       return;
     case "periodic_maintenance":
+      requireLocation(input);
       if (!input.reminder_id && !input.reminder_context_id) {
         requireFutureSchedule(input, now);
       } else if (input.scheduled_start_at) {
-        throw invalidMatrix("Reminder-originated periodic maintenance must omit scheduled_start_at.");
+        requireFutureSchedule(input, now);
       }
       return;
     case "other":
@@ -448,7 +517,7 @@ async function validateReminderOrigin(
       409
     );
   }
-  if (occurrence.dueAt.getTime() > input.now.getTime() || !["due", "sent"].includes(occurrence.status)) {
+  if (occurrence.dueAt.getTime() > input.now.getTime() || !["due", "queued", "sent"].includes(occurrence.status)) {
     throw new ServiceRequestError("CONFLICT", "Reminder occurrence is not due.", 409);
   }
 

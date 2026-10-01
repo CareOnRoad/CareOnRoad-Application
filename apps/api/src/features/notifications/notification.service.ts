@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { sanitizeAuditMetadata } from "@/features/audit/audit-sanitizer";
+import { sanitizeNotificationData } from "./notification-data";
 import type { AuditActorRole } from "@/server/repositories/contracts/audit.repository";
 import type { JsonObject } from "@/server/repositories/contracts/idempotency.repository";
 import type { Notification } from "@/server/repositories/contracts/notification.repository";
-import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 
 export type CreateNotificationInput = {
   userId: string;
@@ -37,50 +37,7 @@ export class NotificationService {
     const now = this.options.now?.() ?? new Date();
     const createId = this.options.createId ?? randomUUID;
 
-    return this.unitOfWork.execute(async ({ audit, notifications, outbox }) => {
-      const result = await notifications.createIfAbsent({
-        id: createId(),
-        userId: input.userId,
-        type: input.type,
-        title: input.title,
-        body: input.body,
-        data: sanitizeAuditMetadata(input.data ?? {}),
-        dedupeKey: input.dedupeKey,
-        createdAt: now
-      });
-      if (!result.created) {
-        return result;
-      }
-
-      const payload = {
-        resource_id: result.notification.id,
-        actor_id: input.actorId ?? input.userId,
-        event_type: input.type,
-        status: "pending"
-      };
-      await outbox.append({
-        id: createId(),
-        topic: "notification.created",
-        aggregateType: "notification",
-        aggregateId: result.notification.id,
-        dedupeKey: `notification.created:${input.dedupeKey}`,
-        payload,
-        createdAt: now,
-        nextAttemptAt: now
-      });
-      await audit.append({
-        id: createId(),
-        actorId: input.actorId,
-        actorRole: input.actorRole,
-        action: "notification.created",
-        entityType: "notification",
-        entityId: result.notification.id,
-        requestId: input.requestId,
-        metadata: payload,
-        createdAt: now
-      });
-      return result;
-    });
+    return this.unitOfWork.execute((repositories) => persistNotification(repositories, input, now, createId));
   }
 
   markSent(notificationId: string): Promise<Notification> {
@@ -118,6 +75,30 @@ export class NotificationService {
       return notification;
     });
   }
+}
+
+export async function persistNotification(
+  { audit, notifications, outbox }: FoundationRepositories,
+  input: CreateNotificationInput,
+  now: Date,
+  createId: () => string
+): Promise<NotificationCreationResult> {
+  validateInput(input);
+  const result = await notifications.createIfAbsent({
+    id: createId(), userId: input.userId, type: input.type, title: input.title, body: input.body,
+    data: sanitizeNotificationData(input.data ?? {}), dedupeKey: input.dedupeKey, createdAt: now
+  });
+  if (!result.created) return result;
+  const payload = { resource_id: result.notification.id, actor_id: input.actorId ?? input.userId, event_type: input.type, status: "pending" };
+  await outbox.append({
+    id: createId(), topic: "notification.created", aggregateType: "notification", aggregateId: result.notification.id,
+    dedupeKey: `notification.created:${input.dedupeKey}`, payload, createdAt: now, nextAttemptAt: now
+  });
+  await audit.append({
+    id: createId(), actorId: input.actorId, actorRole: input.actorRole, action: "notification.created", entityType: "notification",
+    entityId: result.notification.id, requestId: input.requestId, metadata: payload, createdAt: now
+  });
+  return result;
 }
 
 function validateInput(input: CreateNotificationInput): void {

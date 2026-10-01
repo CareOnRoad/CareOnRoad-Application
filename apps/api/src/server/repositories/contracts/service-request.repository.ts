@@ -60,6 +60,7 @@ export type CreateRequestStatusHistory = Omit<RequestStatusHistory, "createdAt">
 };
 
 export interface ServiceRequestRepository {
+  updateAppointment(input: { id: string; location: GeoPoint; addressText?: string; scheduledStartAt?: Date; updatedAt: Date }): Promise<ServiceRequest>;
   create(input: CreateServiceRequest): Promise<ServiceRequest>;
   listByRider(riderId: string): Promise<ServiceRequest[]>;
   findById(id: string): Promise<ServiceRequest | undefined>;

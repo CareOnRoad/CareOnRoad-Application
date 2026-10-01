@@ -18,15 +18,34 @@ export type OutboxConsumerDependencies = {
   defaultHandler?: OutboxDeliveryHandler;
 };
 
+// These events preserve domain history; their notifications are persisted in the source transaction.
+const domainOnlyTopics = new Set([
+  "user.profile.bootstrapped", "user.device.registered", "user.device.push_token.registered",
+  "user.device.push_token.rotated", "user.device.push_token.revoked", "user.device.push_token.invalidated",
+  "motorcycle.created", "motorcycle.updated", "motorcycle.archived",
+  "mechanic.profile.updated", "mechanic.location.updated", "mechanic.availability.updated",
+  "service_request.created", "service_request.canceled", "service_request.media_added", "service_request.media_uploaded", "service_request.appointment_updated",
+  "dispatch.round.started", "dispatch.round.expired", "dispatch.candidate.rejected", "dispatch.request.manual_escalated",
+  "assignment.accepted", "assignment.status_changed", "assignment.payment_verified", "assignment.eta_updated",
+  "assignment.media_added", "assignment.media_uploaded", "assignment.completion_checklist_submitted",
+  "mechanic_diagnosis.created", "mechanic_diagnosis.revised",
+  "quote.created", "quote.approved", "quote.rejected",
+  "payment.created", "payment.pending", "payment.canceled", "payment.failed", "payment.succeeded", "payment.needs_review", "payment.review.resolved",
+  "reminder.rule.created", "reminder.rule.updated", "reminder.rule.snoozed", "reminder.rule.disabled",
+  "reminder.job.generated", "reminder.job.sent", "review.created",
+  "chatbot.session.created", "chatbot.session.claimed", "chatbot.message.persisted", "chatbot.diagnosis.persisted",
+  "admin.user.suspended", "admin.user.reactivated", "admin.user.archived", "admin.device.revoked", "admin.user.role.granted", "admin.user.role.revoked",
+  "admin.mechanic.approved", "admin.mechanic.rejected", "admin.mechanic.suspended", "admin.mechanic.banned",
+  "admin.mechanic.reactivated", "admin.mechanic.skills_updated", "admin.mechanic.radius_updated", "admin.mechanic.forced_unavailable",
+  "admin.service_request.canceled", "admin.service_request.manual_escalated", "admin.service_request.note_added"
+]);
+
 export async function deliverOutboxEvent(
   event: OutboxEvent,
   dependencies: OutboxConsumerDependencies = {}
 ): Promise<OutboxDeliveryResult | void> {
   const handler = dependencies.handlers?.[event.topic] ?? dependencies.defaultHandler;
-  if (!handler && isNotificationCreation(event)) {
-    throw new OutboxHandlerNotConfiguredError();
-  }
-  if (!handler && event.topic === "assignment.recovery.requested") {
+  if (!handler && !domainOnlyTopics.has(event.topic)) {
     throw new OutboxHandlerNotConfiguredError();
   }
   return handler?.(event);

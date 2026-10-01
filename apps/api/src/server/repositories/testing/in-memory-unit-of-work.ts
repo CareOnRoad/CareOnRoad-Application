@@ -219,7 +219,8 @@ export class InMemoryUnitOfWork implements UnitOfWork {
         assignments: new InMemoryAssignmentRepository(
           draft.assignments,
           draft.assignmentStatusHistory,
-          draft.serviceRequests
+          draft.serviceRequests,
+          draft.notifications
         ),
         diagnoses: new InMemoryDiagnosisRepository(draft.mechanicDiagnoses),
         quotes: new InMemoryQuoteRepository(draft.quotes, draft.quoteLines),

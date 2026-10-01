@@ -5,6 +5,7 @@ import { authenticateSupabaseRequest } from "@/server/auth/request-actor";
 import { DatabaseError } from "@/server/db/database-errors";
 import { getPostgresClient } from "@/server/db/postgres-client";
 import { PostgresUnitOfWork } from "@/server/repositories/postgres/postgres-unit-of-work";
+import { z } from "zod";
 
 import type { VerifiedSupabaseIdentity } from "../auth/auth.types";
 import {
@@ -19,11 +20,20 @@ export type DispatchRouteDependencies = {
     startDispatch(identity: VerifiedSupabaseIdentity, requestId: string): Promise<DispatchRoundResponse>;
     listMyOffers(identity: VerifiedSupabaseIdentity): Promise<{ items: DispatchCandidateResponse[] }>;
     declineOffer(identity: VerifiedSupabaseIdentity, offerId: string): Promise<void>;
+    recallRescueMechanic?(identity: VerifiedSupabaseIdentity, requestId: string, mechanicId: string): Promise<DispatchRoundResponse>;
   };
 };
 
 export function createDispatchRouteHandlers(dependencies: DispatchRouteDependencies) {
   return {
+    async recallRescueMechanic(request: Request, requestId: string, mechanicId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        if (!z.string().uuid().safeParse(requestId).success || !z.string().uuid().safeParse(mechanicId).success) return jsonError(400, "INVALID_INPUT", "Request and mechanic ids must be UUIDs.");
+        if (!dependencies.dispatchService.recallRescueMechanic) throw new Error("Rescue recall is not configured.");
+        return NextResponse.json(await dependencies.dispatchService.recallRescueMechanic(identity, requestId, mechanicId), { status: 202 });
+      } catch (error) { return routeError(error); }
+    },
     async startDispatch(request: Request, requestId: string) {
       try {
         const identity = await dependencies.authenticate(request);

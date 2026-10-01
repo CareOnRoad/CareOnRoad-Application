@@ -38,7 +38,7 @@ describeDatabase("assignment acceptance integration", () => {
     context = await createIsolatedPostgresTestContext(process.env, { maxConnections: 5 });
     sql = context.sql;
     await applyMigrations(sql);
-  }, 30_000);
+  }, 180_000);
 
   beforeEach(async () => {
     now = new Date("2026-06-25T05:00:00Z");
@@ -228,8 +228,8 @@ describeDatabase("assignment acceptance integration", () => {
         assignments: 1,
         assignment_history: 1,
         request_history: 1,
-        audit: 1,
-        outbox: 1
+        audit: 2,
+        outbox: 2
       }
     ]);
 
@@ -412,12 +412,8 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
 }
 
 function legacyCompatibleMigrationFiles(): string[] {
-  const legacy = readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
-    .sort();
-  return [...legacy, "202606250021_dispatch_round_leases.sql"];
+  return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
+    .filter((name) => name.endsWith(".sql")).sort();
 }
 
 function identity(subject: string): VerifiedSupabaseIdentity {

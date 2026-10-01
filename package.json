@@ -4,6 +4,8 @@
   "private": true,
   "packageManager": "pnpm@11.22.0",
   "scripts": {
+    "workers:payments": "node apps/api/scripts/run-payment-workers.mjs",
+    "workers:payments:watch": "node apps/api/scripts/run-payment-workers.mjs --watch",
     "dev:api": "pnpm --filter @careonroad/api dev",
     "dev:mobile": "pnpm --dir apps/mobile start",
     "dev:web": "pnpm --filter @careonroad/web dev",

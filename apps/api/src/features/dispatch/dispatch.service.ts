@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ApiErrorCode } from "@/lib/api-error";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { requireActorRole } from "@/features/auth/authorization";
+import { persistNotification } from "@/features/notifications/notification.service";
 import type {
   DispatchCandidate,
   DispatchRound
@@ -41,6 +42,11 @@ export type DispatchCandidateResponse = {
   distance_m?: number;
   status: DispatchCandidate["status"];
   expires_at?: string;
+  service_type?: ServiceRequest["serviceType"];
+  scheduled_start_at?: string;
+  problem_description?: string;
+  address_text?: string;
+  location?: ServiceRequest["serviceLocation"];
 };
 
 export type ProcessClaimedDispatchRoundResult = "advanced" | "escalated" | "skipped";
@@ -92,7 +98,8 @@ export class DispatchService {
 
       const now = nowOf(this.options);
       const rounds = await dispatch.listRoundsByRequest(request.id);
-      if (rounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(rounds, now)) {
+      const searchRounds = await currentSearchRounds(repositories, request, rounds);
+      if (searchRounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(searchRounds, now)) {
         await this.manualEscalate(repositories, {
           requestId: request.id,
           fromStatus: request.status,
@@ -107,6 +114,7 @@ export class DispatchService {
       return createDispatchRound(repositories, {
         request,
         roundNumber,
+        radiusStep: searchRounds.length + 1,
         now,
         createId: this.options.createId ?? randomUUID,
         actorId: actor.id,
@@ -133,7 +141,8 @@ export class DispatchService {
 
       const now = nowOf(this.options);
       const createId = this.options.createId ?? randomUUID;
-      if (rounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(rounds, now)) {
+      const searchRounds = await currentSearchRounds(repositories, request, rounds);
+      if (searchRounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(searchRounds, now)) {
         const escalated = await this.manualEscalate(repositories, {
           requestId: request.id,
           fromStatus: request.status,
@@ -158,6 +167,7 @@ export class DispatchService {
       await createDispatchRound(repositories, {
         request,
         roundNumber: rounds.length + 1,
+        radiusStep: searchRounds.length + 1,
         now,
         createId
       });
@@ -214,7 +224,8 @@ export class DispatchService {
         createId
       });
 
-      if (rounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(rounds, now)) {
+      const searchRounds = await currentSearchRounds(repositories, request, rounds);
+      if (searchRounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(searchRounds, now)) {
         const escalated = await this.manualEscalate(repositories, {
           requestId: request.id,
           fromStatus: request.status,
@@ -238,6 +249,7 @@ export class DispatchService {
       await createDispatchRound(repositories, {
         request,
         roundNumber: round.roundNumber + 1,
+        radiusStep: searchRounds.length + 1,
         now,
         createId
       });
@@ -252,7 +264,50 @@ export class DispatchService {
         actor.id,
         nowOf(this.options)
       );
-      return { items: offers.map(toCandidateResponse) };
+      const requests = new Map<string, ServiceRequest | undefined>();
+      const items: DispatchCandidateResponse[] = [];
+      for (const offer of offers) {
+        if (!requests.has(offer.requestId)) requests.set(offer.requestId, await repositories.serviceRequests.findById(offer.requestId));
+        const request = requests.get(offer.requestId);
+        items.push({ ...toCandidateResponse(offer), ...(request ? {
+          service_type: request.serviceType, scheduled_start_at: request.scheduledStartAt?.toISOString(),
+          problem_description: request.problemDescription, address_text: request.addressText, location: request.serviceLocation
+        } : {}) });
+      }
+      return { items };
+    });
+  }
+
+  recallRescueMechanic(identity: VerifiedSupabaseIdentity, requestId: string, mechanicId: string): Promise<DispatchRoundResponse> {
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActor(repositories, identity.subject, "rider");
+      const request = await repositories.serviceRequests.findByIdForUpdate(requestId);
+      if (!request) throw new DispatchError("NOT_FOUND", "Service request not found.", 404);
+      if (request.riderId !== actor.id) throw new DispatchError("FORBIDDEN", "Request ownership is required.", 403);
+      if (request.serviceType !== "emergency_rescue" || !["submitted", "dispatching", "offered", "manual_escalation"].includes(request.status)) throw new DispatchError("CONFLICT", "Only an unassigned rescue search may recall a mechanic.", 409);
+      if (await repositories.assignments.findActiveByRequestForUpdate(request.id)) throw new DispatchError("CONFLICT", "Resolve the current labor offer before recalling another mechanic.", 409);
+      const quotes = await repositories.quotes.listByRequest(request.id);
+      let previouslyRejected = false;
+      for (const quote of quotes.filter((quote) => quote.purpose === "rescue_labor" && quote.status === "rejected")) {
+        const previous = await repositories.assignments.findById(quote.assignmentId);
+        if (previous?.mechanicId === mechanicId) previouslyRejected = true;
+      }
+      if (!previouslyRejected) throw new DispatchError("CONFLICT", "Mechanic has no rider-rejected rescue labor offer for this request.", 409);
+      const rounds = await repositories.dispatch.listRoundsByRequestForUpdate(request.id);
+      const active = rounds.find((round) => round.status === "active");
+      if (active && active.expiresAt > nowOf(this.options)) {
+        const candidates = await repositories.dispatch.listCandidatesByRequest(request.id);
+        if (candidates.some((candidate) => candidate.roundId === active.id && candidate.mechanicId === mechanicId && candidate.status === "offered")) return toRoundResponse(active, candidates.filter((candidate) => candidate.roundId === active.id));
+      }
+      const now = nowOf(this.options);
+      await repositories.dispatch.cancelOpenDispatchForRequest({ requestId: request.id, now });
+      if (request.status === "manual_escalation") {
+        assertRequestStatusTransition(request.status, "submitted");
+        await repositories.serviceRequests.updateStatus({ id: request.id, status: "submitted", updatedAt: now });
+        await repositories.serviceRequests.appendStatusHistory({ id: (this.options.createId ?? randomUUID)(), requestId: request.id, fromStatus: request.status, toStatus: "submitted", actorId: actor.id, reason: "rescue_mechanic_recalled", createdAt: now });
+        request.status = "submitted";
+      }
+      return createDispatchRound(repositories, { request, roundNumber: rounds.length + 1, radiusStep: 4, targetMechanicId: mechanicId, now, createId: this.options.createId ?? randomUUID, actorId: actor.id, actorRole: "rider" });
     });
   }
 
@@ -322,7 +377,8 @@ export class DispatchService {
       const request = await repositories.serviceRequests.findByIdForUpdate(round.requestId);
       if (request) {
         const rounds = await repositories.dispatch.listRoundsByRequest(request.id);
-        if (rounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(rounds, now)) {
+        const searchRounds = await currentSearchRounds(repositories, request, rounds);
+        if (searchRounds.length >= DISPATCH_MAX_ROUNDS || isTotalWaitExceeded(searchRounds, now)) {
           await this.manualEscalate(repositories, {
             requestId: request.id,
             fromStatus: request.status,
@@ -383,7 +439,7 @@ export class DispatchService {
       return false;
     }
     assertRequestStatusTransition(input.fromStatus, "manual_escalation");
-    await repositories.serviceRequests.updateStatus({
+    const updated = await repositories.serviceRequests.updateStatus({
       id: input.requestId,
       status: "manual_escalation",
       updatedAt: input.now,
@@ -398,6 +454,12 @@ export class DispatchService {
       reason: input.reason,
       createdAt: input.now
     });
+    if (updated?.serviceType === "periodic_maintenance") await persistNotification(repositories, {
+      userId: updated.riderId, type: "maintenance.booking.needs_support", title: "Chưa tìm được thợ bảo dưỡng",
+      body: "Yêu cầu chưa được xác nhận. Mở yêu cầu để kiểm tra và liên hệ hỗ trợ.",
+      data: { request_id: updated.id, status: "manual_escalation" },
+      dedupeKey: `maintenance.booking.needs_support:${updated.id}`, requestId: updated.id
+    }, input.now, this.options.createId ?? randomUUID);
     return true;
   }
 }
@@ -407,13 +469,17 @@ async function createDispatchRound(
   input: {
     request: ServiceRequest;
     roundNumber: number;
+    radiusStep?: number;
+    targetMechanicId?: string;
     now: Date;
     createId: () => string;
     actorId?: string;
     actorRole?: AuditActorRole;
   }
 ): Promise<DispatchRoundResponse> {
-  const radiusKm = DISPATCH_RADIUS_STEPS_KM[input.roundNumber - 1];
+  const radiusKm = DISPATCH_RADIUS_STEPS_KM[(input.radiusStep ?? input.roundNumber) - 1];
+  // ponytail: cap user-driven rescue search history at 64 rounds; add a paginated search-cycle model if needed.
+  if (input.roundNumber > 64) throw new DispatchError("CONFLICT", "Dispatch history limit reached; contact support.", 409);
   if (!radiusKm || !input.request.serviceLocation) {
     throw new DispatchError("CONFLICT", "Dispatch cannot create another round.", 409);
   }
@@ -428,10 +494,10 @@ async function createDispatchRound(
     input.request.id
   );
   const existingMechanicIds = new Set(
-    existingCandidates.map((candidate) => candidate.mechanicId)
+    existingCandidates.filter((candidate) => input.request.serviceType !== "emergency_rescue" || candidate.status !== "cancelled").map((candidate) => candidate.mechanicId)
   );
   const newMechanics = mechanics.filter(
-    (mechanic) => !existingMechanicIds.has(mechanic.mechanicId)
+    (mechanic) => input.targetMechanicId ? mechanic.mechanicId === input.targetMechanicId : !existingMechanicIds.has(mechanic.mechanicId)
   );
   const activeWorkloads = await repositories.assignments.listActiveWorkloadsByMechanicIds(
     newMechanics.map((mechanic) => mechanic.mechanicId)
@@ -444,9 +510,11 @@ async function createDispatchRound(
   );
   const ranked = rankDispatchCandidates(
     newMechanics,
-    workloads,
+    input.request.serviceType === "periodic_maintenance" && input.request.scheduledStartAt &&
+      input.request.scheduledStartAt.getTime() > input.now.getTime() + 30 * 60_000 ? new Map() : workloads,
     DISPATCH_CANDIDATE_BATCH_SIZE
   );
+  if (input.targetMechanicId && !ranked.length) throw new DispatchError("CONFLICT", "The recalled mechanic is unavailable, busy, outside the radius, or has a stale location.", 409);
   const expiresAt = new Date(
     input.now.getTime() + DISPATCH_OFFER_EXPIRY_SECONDS * 1000
   );
@@ -523,7 +591,28 @@ async function createDispatchRound(
     now: input.now,
     createId: input.createId
   });
+  if (["emergency_rescue", "periodic_maintenance"].includes(input.request.serviceType)) {
+    for (const candidate of result.candidates) await persistNotification(repositories, {
+      userId: candidate.mechanicId,
+      type: input.request.serviceType === "periodic_maintenance" ? "maintenance.offer" : "rescue.offer",
+      title: input.request.serviceType === "periodic_maintenance" ? "Có lịch bảo dưỡng cần thợ" : "Có yêu cầu cứu hộ gần bạn",
+      body: "Xem yêu cầu, nhận lời mời và gửi báo giá tiền công trước khi di chuyển.",
+      data: { request_id: input.request.id, candidate_id: candidate.id,
+        ...(input.request.scheduledStartAt ? { scheduled_start_at: input.request.scheduledStartAt.toISOString() } : {}) },
+      dedupeKey: `dispatch.offer:${candidate.id}`, requestId: input.request.id
+    }, input.now, input.createId);
+  }
   return toRoundResponse(result.round, result.candidates);
+}
+
+async function currentSearchRounds(repositories: FoundationRepositories, request: ServiceRequest, rounds: DispatchRound[]): Promise<DispatchRound[]> {
+  if (request.serviceType !== "emergency_rescue") return rounds;
+  const rejected = (await repositories.quotes.listByRequest(request.id)).find((quote) => quote.purpose === "rescue_labor" && quote.status === "rejected");
+  if (!rejected) return rounds;
+  const assignment = await repositories.assignments.findById(rejected.assignmentId);
+  const candidate = assignment ? await repositories.dispatch.findCandidateById(assignment.acceptedCandidateId) : undefined;
+  const rejectedRound = rounds.find((round) => round.id === candidate?.roundId);
+  return rejectedRound ? rounds.filter((round) => round.roundNumber > rejectedRound.roundNumber) : rounds;
 }
 
 export class DispatchError extends Error {

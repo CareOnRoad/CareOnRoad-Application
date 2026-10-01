@@ -23,6 +23,7 @@ export type ReminderRuleResponse = {
   snoozed_until?: string;
   enabled: boolean;
   last_completed_at?: string;
+  last_processed_at?: string;
   created_at: string;
   updated_at: string;
 };
@@ -129,8 +130,8 @@ export class ReminderService {
       const existing = await loadOwnedReminderRule(reminders, reminderId, actor.id);
       const now = this.options.now?.() ?? new Date();
       const snoozedUntil = new Date(parsed.data.until);
-      if (snoozedUntil.getTime() <= now.getTime()) {
-        throw new ReminderError("INVALID_INPUT", "Snooze time must be in the future.", 400);
+      if (snoozedUntil.getTime() <= Math.max(now.getTime(), (existing.snoozedUntil ?? existing.nextDueAt).getTime())) {
+        throw new ReminderError("INVALID_INPUT", "Snooze must postpone the effective due time.", 400);
       }
       const updated = await reminders.snoozeRule({
         id: existing.id,
@@ -303,6 +304,7 @@ export function toReminderRuleResponse(rule: ReminderRule): ReminderRuleResponse
     ...(rule.snoozedUntil ? { snoozed_until: rule.snoozedUntil.toISOString() } : {}),
     enabled: rule.enabled,
     ...(rule.lastCompletedAt ? { last_completed_at: rule.lastCompletedAt.toISOString() } : {}),
+    ...(rule.lastCompletedAt ? { last_processed_at: rule.lastCompletedAt.toISOString() } : {}),
     created_at: rule.createdAt.toISOString(),
     updated_at: rule.updatedAt.toISOString()
   };

@@ -22,3 +22,13 @@ coverage/
 .pnpm-store/
 supabase/.temp/
 .DS_Store
+
+# Local acceptance-test output (source runners and case catalogues are tracked)
+/tests/http/reports/
+/tests/http/progress.json
+/tests/http/assessment.json
+/tests/http/LATEST.md
+/tests/workflows/reports/
+/tests/workflows/LATEST.md
+/apps/api/audit/schema-evidence.json
+/.tmp/push-validation-*/

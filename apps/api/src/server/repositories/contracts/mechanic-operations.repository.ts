@@ -128,6 +128,7 @@ export type AssignmentCompletionChecklist = {
   requestId: string;
   mechanicId: string;
   revision: number;
+  approvedQuoteId?: string;
   workSummary: string;
   safetyChecklist: AssignmentSafetyChecklist;
   notes?: string;
@@ -165,6 +166,7 @@ export type CreateAssignmentCompletionChecklist = {
   assignmentId: string;
   requestId: string;
   mechanicId: string;
+  approvedQuoteId?: string;
   workSummary: string;
   safetyChecklist: AssignmentSafetyChecklist;
   notes?: string;

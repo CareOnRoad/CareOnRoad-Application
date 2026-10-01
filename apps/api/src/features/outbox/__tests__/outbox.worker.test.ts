@@ -9,6 +9,40 @@ const now = new Date("2026-06-30T03:00:00.000Z");
 const notificationId = "22222222-2222-4222-8222-222222222222";
 
 describe("OutboxWorker", () => {
+  it("does not overwrite a completed event after its lease has been reclaimed", async () => {
+    const uow = createUnitOfWork();
+    let time = now;
+    let started!: () => void; let release!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const paused = new Promise<void>((resolve) => { release = resolve; });
+    const running = new OutboxWorker(uow, { now: () => time, workerId: "same-header", consumers: { handlers: {
+      "notification.created": async () => { started(); await paused; }
+    } } }).processBatch();
+    await entered;
+    time = new Date(now.getTime() + 61_000);
+    const recovered = await new OutboxWorker(uow, { now: () => time, workerId: "same-header", consumers: { handlers: {
+      "notification.created": async () => undefined
+    } } }).processBatch();
+    expect(recovered.processed).toBe(1);
+    release();
+    expect(await running).toMatchObject({ processed: 0, leaseLost: 1, retried: 0 });
+    expect(uow.snapshot().outboxEvents[0]).toMatchObject({ status: "processed", attemptCount: 2 });
+    expect(uow.snapshot().auditLogs).toHaveLength(1);
+  });
+
+  it("honors Retry-After and does not acknowledge an unknown topic", async () => {
+    const retryAfter = new Date(now.getTime() + 90_000);
+    const uow = createUnitOfWork();
+    const worker = new OutboxWorker(uow, { now: () => now, consumers: { handlers: {
+      "notification.created": async () => { throw Object.assign(new Error("retry"), { errorCode: "FCM_THROTTLED", retryAfter }); }
+    } } });
+    await worker.processBatch();
+    expect(uow.snapshot().outboxEvents[0]?.nextAttemptAt).toEqual(retryAfter);
+    const unknown = createUnitOfWork({ outboxEvents: [outboxEvent({ topic: "new.action.requires_delivery", aggregateType: "new" })] });
+    expect(await new OutboxWorker(unknown, { now: () => now }).processBatch()).toMatchObject({ processed: 0, retried: 1 });
+    expect(unknown.snapshot().outboxEvents[0]?.lastErrorCode).toBe("OUTBOX_HANDLER_NOT_CONFIGURED");
+  });
+
   it("leases and processes an event, marks notification sent, audits, and emits no recursive event", async () => {
     const delivered: string[] = [];
     const unitOfWork = createUnitOfWork();

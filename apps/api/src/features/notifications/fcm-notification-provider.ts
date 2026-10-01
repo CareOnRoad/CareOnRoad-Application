@@ -179,7 +179,7 @@ function classifyFcmFailure(response: Response, payload: unknown): NotificationP
     return { kind: "timeout", errorCode: "FCM_TIMEOUT" };
   }
   if (response.status >= 500 || providerCode === "UNAVAILABLE" || providerCode === "INTERNAL") {
-    return { kind: "temporary_failure", errorCode: "FCM_UNAVAILABLE" };
+    return { kind: "temporary_failure", errorCode: "FCM_UNAVAILABLE", retryAfter: parseRetryAfter(response.headers.get("retry-after")) };
   }
   return { kind: "permanent_failure", errorCode: "FCM_REJECTED" };
 }
@@ -188,15 +188,16 @@ function extractProviderCode(payload: unknown): string | undefined {
   if (!payload || typeof payload !== "object" || !("error" in payload)) return undefined;
   const error = payload.error;
   if (!error || typeof error !== "object") return undefined;
-  if ("status" in error && typeof error.status === "string") return error.status;
   if ("details" in error && Array.isArray(error.details)) {
     for (const detail of error.details) {
-      if (detail && typeof detail === "object" && "errorCode" in detail && typeof detail.errorCode === "string") {
+      if (detail && typeof detail === "object" && "@type" in detail &&
+        detail["@type"] === "type.googleapis.com/google.firebase.fcm.v1.FcmError" &&
+        "errorCode" in detail && typeof detail.errorCode === "string") {
         return detail.errorCode;
       }
     }
   }
-  return undefined;
+  return "status" in error && typeof error.status === "string" ? error.status : undefined;
 }
 
 function stringifyData(data: Record<string, unknown>): Record<string, string> {

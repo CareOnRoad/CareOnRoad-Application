@@ -21,7 +21,8 @@ describe("service request creation idempotency", () => {
       },
       { service_type: "mobile_repair", address_text: "1 Nguyen Trai" },
       { service_type: "at_home_service", address_text: "1 Nguyen Trai", scheduled_start_at: future() },
-      { service_type: "periodic_maintenance", scheduled_start_at: future() },
+      { service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 }, scheduled_start_at: future() },
       { service_type: "other", fulfillment_mode: "immediate_location", address_text: "1 Nguyen Trai" }
     ] as const;
 

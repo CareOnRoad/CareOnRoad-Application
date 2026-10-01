@@ -1,5 +1,7 @@
 # CareOnRoad AI Chatbot and Backend MVP
 
+Payment setup and remaining external steps: [PAYMENT-SETUP.md](PAYMENT-SETUP.md).
+
 Run the workspace commands below from the monorepo root
 `D:\fpt\subject\EXE101\CareOnRoad-Application`.
 
@@ -25,8 +27,16 @@ metadata, and completion checklist metadata.
   refunds, settlement, payout, invoice, or card-storage scope is included.
 - Optional PostgreSQL chatbot persistence through
   `CHATBOT_PERSISTENCE_MODE=postgres`; the default remains `memory`.
-- Quote approval moves workflows to `awaiting_payment`; verified payOS payment
-  success is required before assignment work can start.
+- Standard quote approval moves workflows to `awaiting_payment`; verified payOS
+  payment success is required before work starts for those services.
+- Emergency rescue uses a pre-travel labor agreement with either upfront labor
+  payment or labor plus parts payment after repair. Approved labor is fixed;
+  parts require a separate approval. See [the rescue API workflow](RESCUE-WORKFLOW.md).
+- New periodic maintenance agrees labor before travel, approves materials before
+  work and additions separately, then collects payment after a completion checklist.
+  Full verified payment is required before closing the job. Existing `standard`
+  maintenance quotes retain their previous payment behavior. See
+  [the maintenance API workflow](MAINTENANCE-WORKFLOW.md); apply migrations through 034.
 
 ## Local Setup
 

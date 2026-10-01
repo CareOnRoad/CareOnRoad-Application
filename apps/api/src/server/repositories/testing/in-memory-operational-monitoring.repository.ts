@@ -37,8 +37,10 @@ export class InMemoryOperationalMonitoringRepository implements OperationalMonit
   async listStuckDispatch(input: OperationalPageInput & { staleBefore: Date; now: Date }): Promise<StuckDispatchItem[]> {
     const active = new Set(this.state.dispatchRounds.filter((x) => x.status === "active" && x.expiresAt > input.now).map((x) => x.requestId));
     return page(this.state.serviceRequests.filter((x) =>
-      (x.status === "dispatching" || x.status === "offered") && x.updatedAt < input.staleBefore && !active.has(x.id)
-    ).map((x) => ({ id: x.id, requestCode: x.requestCode, status: x.status as "dispatching" | "offered", updatedAt: x.updatedAt })), input, (x) => x.updatedAt);
+      (((x.status === "dispatching" || x.status === "offered") && x.updatedAt < input.staleBefore) ||
+        (x.status === "submitted" && x.serviceType === "periodic_maintenance" && !x.serviceLocation)) && !active.has(x.id)
+    ).map((x) => ({ id: x.id, requestCode: x.requestCode, status: x.status as StuckDispatchItem["status"], updatedAt: x.updatedAt,
+      ...(!x.serviceLocation ? { reasonCode: "missing_location" as const } : {}) })), input, (x) => x.updatedAt);
   }
 
   async listWorkerRuns(input: OperationalPageInput): Promise<WorkerRunRecord[]> {

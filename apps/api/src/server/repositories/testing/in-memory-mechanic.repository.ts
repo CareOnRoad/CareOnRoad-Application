@@ -211,7 +211,7 @@ export class InMemoryMechanicRepository implements MechanicRepository {
     return {
       totalAssignments: assignments.length,
       activeAssignments: assignments.filter((assignment) =>
-        isActiveStatus(assignment.status)
+        isActiveStatus(assignment.status) && (!assignment.scheduledStartAt || Boolean(assignment.activatedAt))
       ).length,
       completedAssignments: assignments.filter(
         (assignment) => assignment.status === "completed"
@@ -227,7 +227,7 @@ export class InMemoryMechanicRepository implements MechanicRepository {
   private hasActiveAssignment(mechanicId: string): boolean {
     return this.assignments.some(
       (assignment) =>
-        assignment.mechanicId === mechanicId && isActiveStatus(assignment.status)
+        assignment.mechanicId === mechanicId && isActiveStatus(assignment.status) && (!assignment.scheduledStartAt || Boolean(assignment.activatedAt))
     );
   }
 }

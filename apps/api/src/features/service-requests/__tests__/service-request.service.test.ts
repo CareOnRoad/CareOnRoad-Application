@@ -23,7 +23,8 @@ describe("ServiceRequestService", () => {
       },
       { service_type: "mobile_repair", address_text: "1 Nguyen Trai" },
       { service_type: "at_home_service", address_text: "1 Nguyen Trai", scheduled_start_at: future },
-      { service_type: "periodic_maintenance", scheduled_start_at: future },
+      { service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 }, scheduled_start_at: future },
       {
         service_type: "other",
         fulfillment_mode: "immediate_location",
@@ -64,6 +65,7 @@ describe("ServiceRequestService", () => {
         {
           motorcycle_id: motorcycleId,
           service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 },
           problem_description: "Bao duong dinh ky"
         },
         "missing-schedule"
@@ -100,6 +102,7 @@ describe("ServiceRequestService", () => {
         {
           motorcycle_id: motorcycleId,
           service_type: "periodic_maintenance",
+          location: { latitude: 10.77, longitude: 106.69 },
           problem_description: "Bao duong",
           scheduled_start_at: "2026-06-24T03:00:00.000Z"
         },

@@ -16,11 +16,14 @@ import {
   type PaymentReconcileResult,
   type PaymentWebhookResponse
 } from "./payment.service";
+import type { PaymentSummaryResponse } from "./payment.service";
 
 export type PaymentRouteDependencies = {
   authenticate(request: Request): Promise<VerifiedSupabaseIdentity>;
   authenticateWorker(request: Request): WorkerAuthority;
   paymentService: {
+    resolvePaymentReview?(identity: VerifiedSupabaseIdentity, paymentOrderId: string, input: unknown, idempotencyKey: string): Promise<Record<string, unknown>>;
+    getPaymentSummary?(identity: VerifiedSupabaseIdentity, requestId: string): Promise<PaymentSummaryResponse>;
     createPaymentOrder(
       identity: VerifiedSupabaseIdentity,
       input: unknown,
@@ -42,6 +45,21 @@ export type PaymentRouteDependencies = {
 
 export function createPaymentRouteHandlers(dependencies: PaymentRouteDependencies) {
   return {
+    async resolvePaymentReview(request: Request, paymentOrderId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        if (!dependencies.paymentService.resolvePaymentReview) throw new Error("Payment review is not configured.");
+        return NextResponse.json(await dependencies.paymentService.resolvePaymentReview(identity, paymentOrderId,
+          await readJson(request), requireIdempotencyKey(request, "payment review resolution")));
+      } catch (error) { return routeError(error); }
+    },
+    async getPaymentSummary(request: Request, requestId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        if (!dependencies.paymentService.getPaymentSummary) throw new Error("Payment summary is not configured.");
+        return NextResponse.json(await dependencies.paymentService.getPaymentSummary(identity, requestId));
+      } catch (error) { return routeError(error); }
+    },
     async createPaymentOrder(request: Request) {
       try {
         const identity = await dependencies.authenticate(request);
@@ -93,7 +111,7 @@ export function createPaymentRouteHandlers(dependencies: PaymentRouteDependencie
         dependencies.authenticateWorker(request);
         const limit = Number(new URL(request.url).searchParams.get("limit") ?? "20");
         const run = () => dependencies.paymentService.reconcilePendingPayments(limit);
-        const summarize = (result: PaymentReconcileResult) => ({ claimed: result.claimed, succeeded: result.succeeded + result.needs_review + result.still_pending, failed: 0 });
+        const summarize = (result: PaymentReconcileResult) => ({ claimed: result.claimed, succeeded: result.succeeded + result.needs_review + result.still_pending, failed: result.failed ?? 0 });
         return NextResponse.json(
           dependencies.recordReconciliation ? await dependencies.recordReconciliation(run, summarize) : await run(),
           { status: 202 }

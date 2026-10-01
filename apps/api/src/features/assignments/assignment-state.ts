@@ -1,13 +1,13 @@
 import type { AssignmentStatus } from "@/server/repositories/contracts/assignment.repository";
 
 const TRANSITIONS: ReadonlyMap<AssignmentStatus, ReadonlySet<AssignmentStatus>> = new Map([
-  ["accepted", transitionSet(["en_route", "canceled", "recovery_canceled"])],
+  ["accepted", transitionSet(["quoted", "en_route", "canceled", "recovery_canceled"])],
   ["en_route", transitionSet(["on_site", "canceled", "recovery_canceled"])],
   ["on_site", transitionSet(["diagnosis", "canceled"])],
-  ["diagnosis", transitionSet(["quoted", "canceled"])],
-  ["quoted", transitionSet(["awaiting_payment", "canceled"])],
-  ["awaiting_payment", transitionSet(["in_progress", "canceled"])],
-  ["in_progress", transitionSet(["completed", "canceled"])],
+  ["diagnosis", transitionSet(["quoted", "in_progress", "canceled"])],
+  ["quoted", transitionSet(["accepted", "diagnosis", "awaiting_payment", "canceled", "recovery_canceled"])],
+  ["awaiting_payment", transitionSet(["in_progress", "completed", "canceled"])],
+  ["in_progress", transitionSet(["awaiting_payment", "completed", "canceled"])],
   ["completed", transitionSet([])],
   ["canceled", transitionSet([])],
   ["recovery_canceled", transitionSet([])]

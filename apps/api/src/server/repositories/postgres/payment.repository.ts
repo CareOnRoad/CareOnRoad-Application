@@ -53,6 +53,14 @@ type PaymentEventRow = {
 export class PostgresPaymentRepository implements PaymentRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async sumSucceededForAssignment(assignmentId: string): Promise<number> {
+    const rows = await this.sql<{ amount: string }[]>`
+      select coalesce(sum(amount), 0)::text as amount from payment_orders
+      where assignment_id = ${assignmentId} and status = 'succeeded'
+    `;
+    return Number(rows[0]!.amount);
+  }
+
   async allocateProviderOrderCode(): Promise<number> {
     const rows = await this.sql<{ value: string }[]>`
       select nextval('payment_order_code_seq')::text as value
@@ -93,12 +101,14 @@ export class PostgresPaymentRepository implements PaymentRepository {
     return rows[0] ? mapOrder(rows[0]) : undefined;
   }
 
-  async findActiveByQuoteForUpdate(quoteId: string): Promise<PaymentOrder | undefined> {
+  async findActiveByQuoteForUpdate(quoteId: string, excludingOrderId?: string): Promise<PaymentOrder | undefined> {
     const rows = await this.sql<PaymentOrderRow[]>`
       select *
       from payment_orders
       where quote_id = ${quoteId}
-        and status in ('created', 'pending', 'failed')
+        ${excludingOrderId ? this.sql`and id <> ${excludingOrderId}` : this.sql``}
+        and status in ('created', 'pending', 'failed', 'needs_review')
+      order by (status = 'needs_review') desc, created_at desc
       for update
       limit 1
     `;
@@ -147,7 +157,7 @@ export class PostgresPaymentRepository implements PaymentRepository {
       select *
       from payment_orders
       where provider = ${input.provider}
-        and status = 'pending'
+        and status in ('created', 'pending')
         and updated_at <= ${input.before}
       order by updated_at asc, id
       limit ${input.limit}
@@ -193,7 +203,7 @@ export class PostgresPaymentRepository implements PaymentRepository {
           failure_code = coalesce(${input.failureCode ?? null}, failure_code),
           review_reason = coalesce(${input.reviewReason ?? null}, review_reason),
           succeeded_at = coalesce(${input.succeededAt ?? null}, succeeded_at),
-          canceled_at = coalesce(${input.canceledAt ?? null}, canceled_at),
+          canceled_at = case when ${input.status} = 'canceled' then coalesce(${input.canceledAt ?? null}, canceled_at) else null end,
           updated_at = ${input.updatedAt}
       where id = ${input.id}
       returning *

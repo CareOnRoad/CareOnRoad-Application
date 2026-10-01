@@ -56,11 +56,11 @@ export class InMemoryMechanicOperationsRepository implements MechanicOperationsR
           candidate.expiresAt > input.now
       ).length,
       activeAssignment: mechanicAssignments
-        .filter((assignment) => isActiveStatus(assignment.status))
+        .filter((assignment) => isActiveStatus(assignment.status) && (!assignment.scheduledStartAt || Boolean(assignment.activatedAt)))
         .sort(compareAssignmentNewest)[0]
         ? this.toJob(
             mechanicAssignments
-              .filter((assignment) => isActiveStatus(assignment.status))
+              .filter((assignment) => isActiveStatus(assignment.status) && (!assignment.scheduledStartAt || Boolean(assignment.activatedAt)))
               .sort(compareAssignmentNewest)[0]!
           )
         : undefined,

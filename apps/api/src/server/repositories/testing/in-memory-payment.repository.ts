@@ -17,8 +17,13 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     private nextOrderCode = 100000
   ) {}
 
+  async sumSucceededForAssignment(assignmentId: string): Promise<number> {
+    return this.orders.filter((order) => order.assignmentId === assignmentId && order.status === "succeeded")
+      .reduce((amount, order) => amount + order.amount, 0);
+  }
+
   async allocateProviderOrderCode(): Promise<number> {
-    this.nextOrderCode += 1;
+    this.nextOrderCode = this.orders.reduce((maximum, order) => Math.max(maximum, order.providerOrderCode), this.nextOrderCode) + 1;
     return this.nextOrderCode;
   }
 
@@ -59,9 +64,9 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     return this.findById(id);
   }
 
-  async findActiveByQuoteForUpdate(quoteId: string): Promise<PaymentOrder | undefined> {
-    const order = this.orders.find(
-      (item) => item.quoteId === quoteId && ACTIVE_PAYMENT_STATUSES.has(item.status)
+  async findActiveByQuoteForUpdate(quoteId: string, excludingOrderId?: string): Promise<PaymentOrder | undefined> {
+    const order = this.orders.find((item) => item.id !== excludingOrderId && item.quoteId === quoteId && item.status === "needs_review") ?? this.orders.find(
+      (item) => item.id !== excludingOrderId && item.quoteId === quoteId && ACTIVE_PAYMENT_STATUSES.has(item.status)
     );
     return order ? cloneOrder(order) : undefined;
   }
@@ -99,7 +104,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       .filter(
         (order) =>
           order.provider === input.provider &&
-          order.status === "pending" &&
+          (order.status === "created" || order.status === "pending") &&
           order.updatedAt.getTime() <= input.before.getTime()
       )
       .slice(0, input.limit)
@@ -146,7 +151,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     order.failureCode = input.failureCode ?? order.failureCode;
     order.reviewReason = input.reviewReason ?? order.reviewReason;
     order.succeededAt = input.succeededAt ?? order.succeededAt;
-    order.canceledAt = input.canceledAt ?? order.canceledAt;
+    order.canceledAt = input.status === "canceled" ? input.canceledAt ?? order.canceledAt : undefined;
     return cloneOrder(order);
   }
 

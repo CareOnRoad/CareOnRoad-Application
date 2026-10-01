@@ -20,6 +20,53 @@ const encryptionKey = Buffer.alloc(32, 7).toString("base64");
 const cipher = createPushTokenCipher(encryptionKey);
 
 describe("NotificationDeliveryService", () => {
+  it("does not send an in-flight receipt concurrently and preserves a terminal success", async () => {
+    const uow = createUnitOfWork([credential("credential-a", "device-a", "token-a")]);
+    let release!: () => void;
+    let started!: () => void;
+    const sending = new Promise<void>((resolve) => { started = resolve; });
+    const paused = new Promise<void>((resolve) => { release = resolve; });
+    const send = vi.fn(async () => { started(); await paused; return { kind: "success" as const }; });
+    const service = new NotificationDeliveryService(uow, { send }, cipher, { now: () => now });
+    const first = service.deliver(notificationId);
+    await sending;
+    await expect(service.deliver(notificationId)).rejects.toMatchObject({ errorCode: "PUSH_DELIVERY_RETRYABLE" });
+    expect(send).toHaveBeenCalledTimes(1);
+    release(); await first;
+    await expect(uow.execute(({ notificationDeliveries }) => notificationDeliveries.recordOutcome({
+      id: uow.snapshot().notificationDeliveryReceipts[0]!.id, status: "retryable_failed", attemptedAt: now
+    }))).rejects.toThrow("NOTIFICATION_DELIVERY_LEASE_LOST");
+    expect(uow.snapshot().notificationDeliveryReceipts[0]?.status).toBe("sent");
+  });
+
+  it("fences stale receipt owners after expiry and carries provider retry time across service retries", async () => {
+    const uow = createUnitOfWork([credential("credential-a", "device-a", "token-a")]);
+    const retryAfter = new Date(now.getTime() + 120_000);
+    let time = now;
+    const send = vi.fn(async () => ({ kind: "throttled" as const, errorCode: "FCM_THROTTLED", retryAfter }));
+    const service = new NotificationDeliveryService(uow, { send }, cipher, { now: () => time });
+    await expect(service.deliver(notificationId)).rejects.toMatchObject({ retryAfter });
+    await expect(service.deliver(notificationId)).rejects.toMatchObject({ retryAfter });
+    expect(send).toHaveBeenCalledTimes(1);
+    const receipt = uow.snapshot().notificationDeliveryReceipts[0]!;
+    time = retryAfter;
+    await uow.execute(({ notificationDeliveries }) => notificationDeliveries.claim({ id: receipt.id, token: "old", now: time,
+      leaseUntil: new Date(time.getTime() + 1000) }));
+    time = new Date(time.getTime() + 1001);
+    await uow.execute(({ notificationDeliveries }) => notificationDeliveries.claim({ id: receipt.id, token: "new", now: time,
+      leaseUntil: new Date(time.getTime() + 1000) }));
+    await expect(uow.execute(({ notificationDeliveries }) => notificationDeliveries.recordOutcome({
+      id: receipt.id, leaseToken: "old", status: "sent", attemptedAt: time
+    }))).rejects.toThrow("NOTIFICATION_DELIVERY_LEASE_LOST");
+  });
+
+  it("keeps inbox-only delivery working without eagerly loading encryption configuration", async () => {
+    const getCipher = vi.fn(() => { throw new Error("not configured"); });
+    const service = new NotificationDeliveryService(createUnitOfWork([]), { send: vi.fn() }, getCipher);
+    expect(await service.deliver(notificationId)).toEqual({ status: "failed", errorCode: "NO_ACTIVE_DEVICE" });
+    expect(getCipher).not.toHaveBeenCalled();
+  });
+
   it("delivers all active devices once and skips terminal receipts on replay", async () => {
     const unitOfWork = createUnitOfWork([credential("credential-a", "device-a", "token-a"), credential("credential-b", "device-b", "token-b")]);
     const send = vi.fn(async (input: NotificationProviderInput) => {
