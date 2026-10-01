@@ -24,6 +24,7 @@ import {
 
 import { useAuth } from '@/contexts/auth-context';
 import { Banner } from '@/components/ui/banner';
+import { startGoogleSignIn } from '@/lib/auth-service';
 import { cn } from '@/lib/utils';
 import type { AuthRole } from '@/lib/auth-types';
 
@@ -43,6 +44,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [bypassing, setBypassing] = useState<AuthRole | null>(null);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Sau khi auth state đổi sang 'authenticated', chuyển sang nhóm role tương ứng.
@@ -78,6 +80,31 @@ export default function LoginScreen() {
       setError(e instanceof Error ? e.message : 'Đăng nhập thất bại');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /**
+   * Đăng nhập bằng Google thông qua Supabase OAuth web flow.
+   *
+   * Mở browser native để user chọn tài khoản Google → Supabase redirect
+   * về app qua deep link `careonroad://auth/callback`. AuthContext subscribe
+   * `onAuthStateChange` sẽ tự nhận diện session mới và cập nhật UI.
+   */
+  const onGoogleSignIn = async () => {
+    setError(null);
+    setGoogleSubmitting(true);
+    try {
+      await startGoogleSignIn();
+      // Session sẽ đến qua deep-link + onAuthStateChange. Không navigate ngay
+      // để tránh race condition - AuthContext sẽ tự điều hướng khi authenticated.
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Không thể mở trình duyệt để đăng nhập Google',
+      );
+    } finally {
+      setGoogleSubmitting(false);
     }
   };
 
@@ -213,6 +240,60 @@ export default function LoginScreen() {
                 <Text className="text-base font-semibold text-white">Đăng nhập</Text>
               )}
             </Pressable>
+
+            {/* Divider */}
+            <View className="my-2 flex-row items-center gap-3">
+              <View className="h-px flex-1 bg-white/15" />
+              <Text className="text-xs uppercase tracking-wider text-white/40">
+                hoặc
+              </Text>
+              <View className="h-px flex-1 bg-white/15" />
+            </View>
+
+            {/* Google sign-in - chỉ hiện khi backend đã cấu hình Supabase */}
+            {isBackendConfigured && (
+              <Pressable
+                onPress={onGoogleSignIn}
+                disabled={googleSubmitting || submitting}
+                accessibilityRole="button"
+                accessibilityLabel="Đăng nhập bằng Google"
+                className={cn(
+                  'flex-row items-center justify-center gap-3 rounded-2xl border border-white/15 bg-white py-4 active:scale-[0.98]',
+                  (googleSubmitting || submitting) && 'opacity-70',
+                )}
+              >
+                {googleSubmitting ? (
+                  <ActivityIndicator color="#1f2937" />
+                ) : (
+                  <>
+                    {/* Google "G" logo SVG inline */}
+                    <View className="size-5 items-center justify-center">
+                      <Text
+                        style={{ fontSize: 18, fontWeight: '700', color: '#4285F4' }}
+                      >
+                        G
+                      </Text>
+                    </View>
+                    <Text className="text-base font-semibold text-slate-900">
+                      Tiếp tục với Google
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            )}
+
+            {!isBackendConfigured && (
+              <Pressable
+                disabled
+                accessibilityRole="button"
+                accessibilityLabel="Google sign-in chưa khả dụng"
+                className="flex-row items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5 py-4 opacity-40"
+              >
+                <Text className="text-sm text-white/50">
+                  Google sign-in (cần cấu hình Supabase)
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Demo accounts - chỉ hiện khi chưa có backend */}

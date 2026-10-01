@@ -39,10 +39,12 @@ import { cn } from '@/lib/utils';
  */
 export default function RegisterScreen() {
   const { register, isBackendConfigured } = useAuth();
-  // Backend không có endpoint client-side grant role mechanic,
-  // nên khi đã wire BE ta ép role = rider và hiển thị banner.
+  // Backend đã hỗ trợ `account_type: 'rider' | 'mechanic'` trong POST
+  // /api/v1/auth/profile. Người dùng có thể chọn role ngay khi đăng ký; nếu
+  // chọn mechanic sẽ được gán role + tạo mechanic_profiles.pending (chờ admin duyệt).
   const [role, setRole] = useState<AuthRole>('rider');
-  const allowMechanicRole = !isBackendConfigured;
+  // Backend đã sẵn sàng nhận account_type nên luôn cho phép chọn cả 2 role.
+  const allowMechanicRole = true;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -108,7 +110,7 @@ export default function RegisterScreen() {
             <Text className="mt-1 text-sm text-white/60">Tham gia CareOnRoad ngay hôm nay</Text>
           </View>
 
-          {/* Role selector - chỉ hiển thị ở demo mode */}
+          {/* Role selector */}
           {allowMechanicRole ? (
             <View className="mt-6 flex-row gap-3">
               <RoleCard
@@ -134,8 +136,16 @@ export default function RegisterScreen() {
             <View className="mt-5">
               <Banner
                 tone="info"
-                title="Đăng ký tài khoản Rider"
-                description="Tài khoản thợ (Mechanic) cần admin duyệt sau khi đăng ký. Vui lòng liên hệ support nếu bạn là thợ sửa xe."
+                title={
+                  role === 'mechanic'
+                    ? 'Đăng ký tài khoản Mechanic'
+                    : 'Đăng ký tài khoản Rider'
+                }
+                description={
+                  role === 'mechanic'
+                    ? 'Tài khoản Mechanic sẽ được tạo với trạng thái "pending" và chờ admin phê duyệt trước khi có thể nhận đơn cứu hộ.'
+                    : 'Sau khi đăng ký, bạn có thể dùng chatbot AI để được tư vấn sự cố xe và gửi yêu cầu cứu hộ ngay.'
+                }
               />
             </View>
           )}

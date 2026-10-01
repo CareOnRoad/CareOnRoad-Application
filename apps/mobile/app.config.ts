@@ -34,6 +34,9 @@ const config: ExpoConfig = {
   version: '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
+  // URL scheme cho deep-link (vd: careonroad://auth/callback).
+  // Supabase OAuth redirect về scheme này sau khi user đăng nhập Google.
+  scheme: ['careonroad'],
   splash: {
     backgroundColor: '#16202f',
   },
@@ -57,6 +60,15 @@ const config: ExpoConfig = {
     },
     package: `com.careonroad.mobile${settings.packageSuffix}`,
     permissions: ['CAMERA', 'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'],
+    // Intent filter để Android nhận deep-link scheme careonroad://
+    // (vd: careonroad://auth/callback từ Google OAuth redirect).
+    intentFilters: [
+      {
+        action: 'VIEW',
+        category: ['DEFAULT', 'BROWSABLE'],
+        data: [{ scheme: 'careonroad' }],
+      },
+    ],
   },
   web: {
     bundler: 'metro',

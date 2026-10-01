@@ -10,7 +10,8 @@ import {
   bootstrapProfileSchema,
   registerDeviceSchema,
   rotatePushTokenSchema,
-  type BootstrapProfileInput
+  type BootstrapProfileInput,
+  type UpdateProfileInput,
   updateProfileSchema
 } from "./auth.schemas";
 import { AuthService } from "./auth.service";
@@ -27,21 +28,10 @@ export type AuthRouteDependencies = {
     bootstrapProfile(
       identity: VerifiedSupabaseIdentity,
       input: BootstrapProfileInput
-      input: {
-        display_name?: string;
-        phone?: string;
-        address?: string;
-        avatar_url?: string;
-      }
     ): Promise<RequestActor>;
     updateProfile(
       identity: VerifiedSupabaseIdentity,
-      input: {
-        display_name?: string;
-        phone?: string;
-        address?: string;
-        avatar_url?: string;
-      }
+      input: UpdateProfileInput
     ): Promise<RequestActor>;
     registerDevice(
       identity: VerifiedSupabaseIdentity,

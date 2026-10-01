@@ -15,6 +15,10 @@
 
 import type { Session, Subscription } from '@supabase/supabase-js';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Linking } from 'react-native';
+import { createURL } from 'expo-linking';
+
 import { ApiError, apiGet, apiPatch, apiPost, setAccessTokenProvider } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase-client';
 
@@ -88,11 +92,14 @@ async function ensureProfileWithRole(
   profilePayload: { displayName?: string; phone?: string; address?: string; avatarUrl?: string },
 ): Promise<AppActor> {
   // Bootstrapping: backend tạo app_user nếu chưa có (default role = rider).
+  // Truyền `account_type` để backend gán role mechanic ngay từ lúc tạo profile
+  // (xem POST /api/v1/auth/profile → auth.service.ts → bootstrapProfile).
   try {
     await apiPost<AppActor>(
       '/api/v1/auth/profile',
       {
         display_name: profilePayload.displayName ?? '',
+        account_type: desiredRole,
         ...(profilePayload.phone ? { phone: profilePayload.phone } : {}),
         ...(profilePayload.address ? { address: profilePayload.address } : {}),
         ...(profilePayload.avatarUrl ? { avatar_url: profilePayload.avatarUrl } : {}),
@@ -100,7 +107,7 @@ async function ensureProfileWithRole(
       { timeoutMs: 10000 },
     );
   } catch (err) {
-    // Nếu profile đã tồn tại với role khác, vẫn OK.
+    // Nếu profile đã tồn tại (vd qua Google OAuth trước đó), vẫn OK.
     if (err instanceof ApiError && err.status !== 409 && err.status !== 400) {
       throw err;
     }
@@ -109,16 +116,15 @@ async function ensureProfileWithRole(
   // Lấy actor sau khi bootstrap.
   const actor = await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 10000 });
 
-  // Đăng ký mới mặc định role = rider (backend tự set).
-  // Nếu muốn mechanic mà backend chưa có endpoint role-grant
-  // thì caller sẽ nhận role rider và phải dùng flow đặc biệt (hiện chưa impl).
+  // desiredRole đã được backend xử lý trong POST /api/v1/auth/profile
+  // (xem auth.service.ts → bootstrapProfile với input.account_type).
+  // Backend đã tự gán role + tạo mechanic_profiles.pending nếu chọn 'mechanic'.
+  // Tại client: chỉ cần đọc role thật từ actor và trả về cho AuthContext.
   if (desiredRole === 'mechanic' && !actor.roles.includes('mechanic')) {
-    // Trong prototype: chấp nhận role hiện tại nhưng ghi log để theo dõi.
     if (__DEV__) {
       // eslint-disable-next-line no-console
       console.warn(
-        '[auth-service] Đăng ký mechanic: backend chưa hỗ trợ gán role mechanic ' +
-          'từ client. Tài khoản sẽ ở role mặc định của backend.',
+        '[auth-service] Backend chưa gán role mechanic. Kiểm tra account_type trong payload.',
       );
     }
   }
@@ -270,6 +276,152 @@ export async function signOut(): Promise<void> {
   const client = getSupabase();
   if (client) await client.auth.signOut();
   setAccessTokenProvider(null);
+}
+
+/**
+ * Đăng nhập / đăng ký bằng Google thông qua Supabase OAuth (web-based flow).
+ *
+ * Flow:
+ *   1. Caller (login.tsx) gọi `startGoogleSignIn({ desiredRole })`.
+ *   2. Function lưu desiredRole vào AsyncStorage + gọi Supabase OAuth →
+ *      trả về URL để caller mở browser native.
+ *   3. User chọn tài khoản Google trong browser, Supabase redirect về app
+ *      qua deep link `careonroad://auth/callback?code=xxx`.
+ *   4. `auth-context.tsx` subscribe `Linking` events, khi nhận URL:
+ *      - Đọc desiredRole từ AsyncStorage.
+ *      - Gọi `completeGoogleSignIn(url, desiredRole)` để exchange code → session.
+ *      - Cập nhật auth state.
+ *
+ * Yêu cầu:
+ *   - Supabase project đã enable Google provider trong dashboard.
+ *   - App scheme `careonroad` đã được config trong app.json.
+ */
+export interface GoogleSignInOptions {
+  /** Role mong muốn sau khi bootstrap profile (rider | mechanic). */
+  desiredRole?: AuthRole;
+}
+
+/**
+ * Mở browser để user đăng nhập Google qua Supabase OAuth.
+ *
+ * Trả về URL browser sẽ redirect đến (để caller mở bằng WebBrowser).
+ *
+ * Caller phải subscribe `onAuthStateChange` hoặc deep-link handler trong
+ * `auth-context.tsx` để biết khi nào session được tạo.
+ */
+export async function startGoogleSignIn(
+  options: GoogleSignInOptions = {}
+): Promise<{ redirectUrl: string }> {
+  const client = getSupabase();
+  if (!client) {
+    throw new Error(
+      'Supabase chưa được cấu hình. Vui lòng set EXPO_PUBLIC_SUPABASE_URL/ANON_KEY.',
+    );
+  }
+
+  const redirectUrl = createURL('auth/callback');
+
+  // Lưu desiredRole vào AsyncStorage để deep-link handler đọc sau khi OAuth
+  // redirect về app. Không encode vào redirectTo vì Supabase OAuth chỉ chấp
+  // nhận known query params; unknown params sẽ gây lỗi ở một số providers.
+  // Storage key là session-scoped nên không leak giữa các user.
+  if (options.desiredRole) {
+    try {
+      await AsyncStorage.setItem(
+        'careonroad.oauth.desired_role',
+        options.desiredRole,
+      );
+    } catch {
+      // ignore storage error - role sẽ default về 'rider' nếu không đọc được
+    }
+  }
+
+  const { data, error } = await client.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: redirectUrl,
+      skipBrowserRedirect: true,
+    },
+  });
+
+  if (error || !data?.url) {
+    throw mapSupabaseError(error);
+  }
+  // Mở browser native để user đăng nhập Google.
+  // Dùng Linking.openURL thay cho expo-web-browser để tránh thêm dependency.
+  // Trên Android emulator cần set CHROME_PACKAGE hoặc cấu hình để mở Chrome.
+  const supported = await Linking.canOpenURL(data.url);
+  if (!supported) {
+    throw new Error('Thiết bị không thể mở trình duyệt để đăng nhập Google.');
+  }
+  await Linking.openURL(data.url);
+  return { redirectUrl: data.url };
+}
+
+/**
+ * Sau khi OAuth redirect về app, gọi hàm này để lấy session + bootstrap profile.
+ *
+ * Supabase PKCE flow: Supabase client tự động detect URL có chứa `code` và
+ * exchange lấy session. Nếu session tồn tại → bootstrap profile + lấy actor.
+ *
+ * Role được suy ra từ query `?desired_role=mechanic|rider` (nếu có).
+ */
+export async function completeGoogleSignIn(
+  callbackUrl: string,
+  desiredRole: AuthRole = 'rider'
+): Promise<SignInResult> {
+  const client = getSupabase();
+  if (!client) {
+    throw new Error('Supabase chưa được cấu hình.');
+  }
+
+  // Supabase PKCE: detect code trong URL và đổi lấy session.
+  // Nếu detectSessionInUrl=false, phải gọi exchangeCodeForSession thủ công.
+  // Client đã set detectSessionInUrl=false để tránh auto-handle; ta exchange thủ công.
+  const url = new URL(callbackUrl);
+  const code = url.searchParams.get('code');
+  if (!code) {
+    throw new Error('Callback URL thiếu authorization code.');
+  }
+  const { data: exchanged, error: exchangeError } =
+    await client.auth.exchangeCodeForSession(code);
+  if (exchangeError || !exchanged.session) {
+    throw mapSupabaseError(exchangeError);
+  }
+  const session = exchanged.session;
+
+  setAccessTokenProvider(() =>
+    client.auth.getSession().then((s) => s.data.session?.access_token ?? null)
+  );
+
+  // Lấy actor (sẽ tự bootstrap nếu chưa có nhờ POST /api/v1/auth/profile bên dưới).
+  try {
+    const actor = await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 10000 });
+
+    const user: PublicAuthUser = {
+      ...actorToPublicUser(actor),
+      email: session.user.email ?? '',
+    };
+    return { session, actor, user };
+  } catch (err) {
+    // 404 → user mới qua Google OAuth, cần bootstrap profile trước.
+    if (err instanceof ApiError && err.status === 404) {
+      const actor = await ensureProfileWithRole(session, desiredRole, {
+        displayName:
+          (session.user.user_metadata?.full_name as string | undefined) ??
+          (session.user.user_metadata?.name as string | undefined),
+        avatarUrl:
+          (session.user.user_metadata?.avatar_url as string | undefined) ??
+          (session.user.user_metadata?.picture as string | undefined),
+      });
+      const user: PublicAuthUser = {
+        ...actorToPublicUser(actor),
+        email: session.user.email ?? '',
+      };
+      return { session, actor, user };
+    }
+    throw err;
+  }
 }
 
 /**

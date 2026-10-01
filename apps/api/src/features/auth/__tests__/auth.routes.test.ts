@@ -56,15 +56,6 @@ describe("auth routes", () => {
     await expect(response.json()).resolves.toEqual(actor);
   });
 
-  it("accepts rider or mechanic account selection but rejects admin self-registration", async () => {
-    const unitOfWork = new InMemoryUnitOfWork();
-    const handlers = createAuthRouteHandlers({
-      authenticate: vi.fn(async () => identity),
-      authService: new AuthService(unitOfWork)
-    });
-    const mechanic = await handlers.bootstrapProfile(
-      new Request("http://localhost/api/v1/auth/profile", {
-        method: "POST",
   it("updates editable profile fields for PATCH /api/v1/auth/profile", async () => {
     const { handlers, deps } = createHandlers();
     const response = await handlers.updateProfile(
@@ -74,12 +65,6 @@ describe("auth routes", () => {
           authorization: "Bearer valid-token",
           "content-type": "application/json"
         },
-        body: JSON.stringify({ account_type: "mechanic" })
-      })
-    );
-    const admin = await handlers.bootstrapProfile(
-      new Request("http://localhost/api/v1/auth/profile", {
-        method: "POST",
         body: JSON.stringify({
           display_name: "Rider Updated",
           phone: "+84 90 555 1234",
@@ -108,6 +93,36 @@ describe("auth routes", () => {
           authorization: "Bearer valid-token",
           "content-type": "application/json"
         },
+        body: JSON.stringify({ phone: "abc" })
+      })
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
+  });
+
+  it("accepts rider or mechanic account selection but rejects admin self-registration", async () => {
+    const unitOfWork = new InMemoryUnitOfWork();
+    const handlers = createAuthRouteHandlers({
+      authenticate: vi.fn(async () => identity),
+      authService: new AuthService(unitOfWork)
+    });
+    const mechanic = await handlers.bootstrapProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ account_type: "mechanic" })
+      })
+    );
+    const admin = await handlers.bootstrapProfile(
+      new Request("http://localhost/api/v1/auth/profile", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid-token",
+          "content-type": "application/json"
+        },
         body: JSON.stringify({ account_type: "admin" })
       })
     );
@@ -120,11 +135,6 @@ describe("auth routes", () => {
     });
     expect(admin.status).toBe(400);
     await expect(admin.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
-        body: JSON.stringify({ phone: "abc" })
-      })
-    );
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({ error_code: "INVALID_INPUT" });
   });
 
   it("returns controlled errors for missing authentication and invalid input", async () => {

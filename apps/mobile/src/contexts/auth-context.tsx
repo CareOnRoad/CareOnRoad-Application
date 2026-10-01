@@ -6,6 +6,9 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import { Linking } from 'react-native';
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   clearSession,
@@ -19,6 +22,7 @@ import {
   maybeGetExpoPushToken,
 } from '@/lib/devices-service';
 import {
+  completeGoogleSignIn,
   fetchCurrentActor,
   getCurrentSession,
   onAuthStateChange,
@@ -110,6 +114,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [demoSession, setDemoSession] = useState<StoredAuthSession | null>(null);
 
   const backendReady = useMemo(() => isAuthConfigured() && getSupabase() !== null, []);
+
+  // =========================================================
+  // Subscribe deep-link cho Google OAuth callback
+  //
+  // Khi user hoàn tất Google sign-in trong browser, Supabase redirect về app
+  // qua deep link (vd: `careonroad://auth/callback?code=xxx`).
+  // Phải exchange code → session trước, rồi cập nhật state.
+  // =========================================================
+  useEffect(() => {
+    if (!backendReady) return undefined;
+
+    async function handleDeepLink(url: string | null) {
+      if (!url) return;
+      try {
+        const parsed = new URL(url);
+        // Deep-link format: careonroad://auth/callback?code=xxx
+        // (Supabase OAuth PKCE flow)
+        const isAuthCallback =
+          parsed.pathname.endsWith('/auth/callback') ||
+          (parsed.host === 'auth' && parsed.pathname === '/callback');
+        if (!isAuthCallback) return;
+
+        const code = parsed.searchParams.get('code');
+        if (!code) return;
+
+        // Đọc desiredRole từ AsyncStorage (đã set trước khi gọi OAuth).
+        let desiredRole: AuthRole = 'rider';
+        try {
+          const stored = await AsyncStorage.getItem('careonroad.oauth.desired_role');
+          if (stored === 'mechanic') desiredRole = 'mechanic';
+          // Xoá sau khi đọc để tránh stale state cho lần OAuth sau.
+          await AsyncStorage.removeItem('careonroad.oauth.desired_role');
+        } catch {
+          // ignore storage error → dùng default rider
+        }
+
+        // Exchange code → session + bootstrap profile.
+        const result = await completeGoogleSignIn(url, desiredRole);
+        setUser(result.user);
+        setRole(result.user.role);
+        setStatus('authenticated');
+      } catch (err) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[auth] Deep-link OAuth callback failed:', err);
+        }
+      }
+    }
+
+    // Initial URL (app đã mở qua deep-link)
+    Linking.getInitialURL().then((url) => handleDeepLink(url));
+    // Subscribe URL changes (app đang chạy, user quay lại từ browser)
+    const sub = Linking.addEventListener('url', ({ url }) => handleDeepLink(url));
+    return () => {
+      sub.remove();
+    };
+  }, [backendReady]);
 
   // =========================================================
   // Hydrate session khi app mount

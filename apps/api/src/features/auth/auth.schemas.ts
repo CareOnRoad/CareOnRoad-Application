@@ -15,7 +15,7 @@ export const verifiedIdentitySchema = z.object({
 export const bootstrapProfileSchema = z
   .object({
     display_name: z.string().trim().min(1).max(120).optional(),
-    account_type: z.enum(["rider", "mechanic"]).optional()
+    account_type: z.enum(["rider", "mechanic"]).optional(),
     phone: z
       .string()
       .trim()

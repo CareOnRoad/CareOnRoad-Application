@@ -60,7 +60,6 @@ export class AuthService {
       await users.createProfile({
         id: identity.subject,
         displayName: input.display_name ?? identity.displayName,
-        displayName: input.display_name,
         phone: input.phone,
         phoneMasked: input.phone ? maskPhone(input.phone) : undefined,
         address: input.address,
