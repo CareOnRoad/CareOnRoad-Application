@@ -1,4 +1,5 @@
 import type { AuditActorRole } from "./audit.repository";
+import type { RescuePaymentTiming } from "./quote.repository";
 
 export type AssignmentStatus =
   | "accepted"
@@ -27,6 +28,8 @@ export type Assignment = {
   requestId: string;
   mechanicId: string;
   acceptedCandidateId: string;
+  rescueLaborQuoteId?: string;
+  rescuePaymentTiming?: RescuePaymentTiming;
   status: AssignmentStatus;
   acceptedAt: Date;
   startedAt?: Date;
@@ -68,6 +71,7 @@ export type MechanicActiveWorkload = {
 };
 
 export interface AssignmentRepository {
+  setRescueAgreement(input: { id: string; laborQuoteId: string; paymentTiming: RescuePaymentTiming; updatedAt: Date }): Promise<Assignment | undefined>;
   create(input: CreateAssignment): Promise<Assignment>;
   findById(id: string): Promise<Assignment | undefined>;
   findByIdForUpdate(id: string): Promise<Assignment | undefined>;

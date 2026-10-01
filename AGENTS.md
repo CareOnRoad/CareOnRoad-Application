@@ -84,8 +84,11 @@
    - Riders manage date/time reminder rules.
    - Protected worker routes claim due reminders and outbox events using
      `X-Worker-Secret`.
-   - Payment uses backend-only payOS/VietQR orders. Quote approval stops at
-     `awaiting_payment`; verified payment success is required before work starts.
+   - Payment uses backend-only payOS/VietQR orders. Standard services require
+     verified payment before work starts. Emergency rescue quotes labor before
+     travel, fixes approved labor, and supports `labor_upfront` or `after_repair`;
+     approved parts and full payment are required before closing the rescue job.
+     See `apps/api/RESCUE-WORKFLOW.md` for the API and state workflow.
 
 ## Backend MVP Status
 
@@ -97,6 +100,8 @@
 - Feature 005 payment is implemented as backend-only payOS/VietQR payment orders,
   signed payOS webhooks, and payment reconciliation. Refunds, settlement,
   payout, invoices, card storage, and payment UI remain out of scope.
+  Durable payment creation, provider-verified admin review resolution, and a
+  worker CLI are implemented. Setup steps are in `apps/api/PAYMENT-SETUP.md`.
 - Patch 7A completed through T087: date/time-based reminders, reminder occurrences, protected reminder worker route, and reminder-originated periodic-maintenance service-request integration. No odometer/kilometer reminder logic exists in this scope.
 - Patch 7B notification persistence/outbox delivery is completed through T096.
 - Patch 8 compatible chatbot persistence is completed through T105.
@@ -127,8 +132,11 @@
 - P2 Feature 16 adds opt-in, polling-only latest-location tracking for assignment
   travel states with explicit short retention, replay/rate controls, RLS,
   lifecycle-triggered deletion, and protected bounded cleanup.
+- Emergency rescue quote/payment workflow is implemented through migration 033,
+  including rejected-mechanic recall, remaining-balance collection, and rescue
+  inbox/outbox notifications. Mobile and web clients are unchanged.
 - Migrations `202606250001_enable_extensions.sql` through
-  `202606250032_live_location_tracking.sql` must be applied and verified on
+  `202606250033_rescue_quote_payment_workflow.sql` must be applied and verified on
   hosted/dev before enabling the corresponding APIs or seeding mock data.
 
 ## Hosted Supabase Mock Data
@@ -466,6 +474,7 @@
 - `OPENROUTER_FALLBACK_MODEL`
 - `DATABASE_URL`
 - `TEST_DATABASE_URL`
+- `TEST_DATABASE_CONFIRMED` (only for a separate hosted test project)
 - `CHATBOT_PERSISTENCE_MODE`
 - `HEALTH_READINESS_TIMEOUT_MS`
 - `SUPABASE_URL`
@@ -478,6 +487,7 @@
 - `MEDIA_STORAGE_TIMEOUT_MS`
 - `SEED_USER_PASSWORD` (local mock seeding only)
 - `INTERNAL_WORKER_SECRET`
+- `WORKER_API_BASE_URL` (worker CLI API origin)
 - `PUSH_TOKEN_ENCRYPTION_KEY`
 - `FCM_PROJECT_ID`
 - `FCM_CLIENT_EMAIL`

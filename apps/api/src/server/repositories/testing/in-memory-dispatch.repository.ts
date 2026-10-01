@@ -103,7 +103,7 @@ export class InMemoryDispatchRepository implements DispatchRepository {
       if (
         this.candidates.some(
           (existing) =>
-            existing.requestId === candidate.requestId &&
+            existing.roundId === candidate.roundId &&
             existing.mechanicId === candidate.mechanicId
         )
       ) {

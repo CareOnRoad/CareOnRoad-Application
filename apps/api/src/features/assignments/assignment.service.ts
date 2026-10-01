@@ -3,12 +3,14 @@ import { randomUUID } from "node:crypto";
 import type { ApiErrorCode } from "@/lib/api-error";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { requireActiveActor } from "@/features/auth/authorization";
+import { persistNotification } from "@/features/notifications/notification.service";
 import type { AuditActorRole } from "@/server/repositories/contracts/audit.repository";
 import type {
   Assignment,
   AssignmentStatus
 } from "@/server/repositories/contracts/assignment.repository";
 import type { RequestStatus } from "@/server/repositories/contracts/service-request.repository";
+import type { RescuePaymentTiming } from "@/server/repositories/contracts/quote.repository";
 import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 
 import { assertRequestStatusTransition } from "../service-requests/service-request-state";
@@ -20,6 +22,8 @@ export type AssignmentResponse = {
   request_id: string;
   mechanic_id: string;
   accepted_candidate_id: string;
+  rescue_labor_quote_id?: string;
+  rescue_payment_timing?: RescuePaymentTiming;
   status: AssignmentStatus;
   accepted_at: string;
   started_at?: string;
@@ -66,6 +70,9 @@ export class AssignmentService {
     return this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
       const actorRole = primaryAuditRole(actor.roles);
+      const snapshot = await repositories.assignments.findById(assignmentId);
+      if (!snapshot) throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
+      const request = await repositories.serviceRequests.findByIdForUpdate(snapshot.requestId);
       const assignment = await repositories.assignments.findByIdForUpdate(assignmentId);
       if (!assignment) {
         throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
@@ -78,15 +85,39 @@ export class AssignmentService {
       }
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
+      const rescue = request?.serviceType === "emergency_rescue";
+      if (rescue && parsed.data.status === "en_route") {
+        const labor = assignment.rescueLaborQuoteId ? await repositories.quotes.findById(assignment.rescueLaborQuoteId) : undefined;
+        if (!labor || labor.status !== "approved" || !assignment.rescuePaymentTiming) {
+          throw new AssignmentError("CONFLICT", "Rider must approve rescue labor and choose payment timing before travel.", 409);
+        }
+        if (assignment.rescuePaymentTiming === "labor_upfront" && !await repositories.payments.hasSucceededForAssignment({ assignmentId: assignment.id, requestId: assignment.requestId, quoteId: labor.id })) {
+          throw new AssignmentError("CONFLICT", "The agreed labor must be paid before travel.", 409);
+        }
+      }
+      if (rescue && ["in_progress", "awaiting_payment", "completed"].includes(parsed.data.status)) {
+        const finalQuote = await repositories.quotes.findLatestByRequestForUpdate(assignment.requestId);
+        if (!finalQuote || finalQuote.assignmentId !== assignment.id || finalQuote.purpose !== "rescue_final" || finalQuote.status !== "approved") {
+          throw new AssignmentError("CONFLICT", "An approved final rescue quote is required before repair.", 409);
+        }
+        const expectedSource = parsed.data.status === "in_progress" ? "diagnosis" : parsed.data.status === "awaiting_payment" ? "in_progress" : "awaiting_payment";
+        if (assignment.status !== expectedSource) throw new AssignmentError("CONFLICT", "Rescue repair/payment steps must be completed in order.", 409);
+        if (parsed.data.status === "completed" && await repositories.payments.sumSucceededForAssignment(assignment.id) < finalQuote.totalAmount) {
+          throw new AssignmentError("CONFLICT", "Agreed labor and parts must be fully paid before closing rescue work.", 409);
+        }
+      }
 
-      if (parsed.data.status === "quoted" || parsed.data.status === "awaiting_payment") {
+      if (parsed.data.status === "quoted" || parsed.data.status === "accepted" || (assignment.status === "quoted" && parsed.data.status === "diagnosis") || (parsed.data.status === "awaiting_payment" && !rescue)) {
         throw new AssignmentError(
           "CONFLICT",
           "This assignment transition requires its authorized quote or payment workflow.",
           409
         );
       }
-      if (parsed.data.status === "in_progress") {
+      if (!rescue && parsed.data.status === "completed" && assignment.status !== "in_progress") {
+        throw new AssignmentError("CONFLICT", "Standard work must start before completion.", 409);
+      }
+      if (parsed.data.status === "in_progress" && !rescue) {
         if (assignment.status !== "awaiting_payment") {
           throw new AssignmentError(
             "CONFLICT",
@@ -160,6 +191,12 @@ export class AssignmentService {
           to_status: parsed.data.status
         }
       });
+      if (rescue && request && ["awaiting_payment", "completed"].includes(updated.status)) await persistNotification(repositories, {
+        userId: request.riderId, type: `rescue.${updated.status}`,
+        title: updated.status === "awaiting_payment" ? "Thợ đã sửa xong" : "Yêu cầu cứu hộ đã hoàn tất",
+        body: updated.status === "awaiting_payment" ? "Kiểm tra tổng phí và thanh toán khoản còn lại nếu có." : "Bạn có thể đánh giá thợ cho yêu cầu này.",
+        data: { request_id: request.id, assignment_id: updated.id }, dedupeKey: `rescue.${updated.status}:${updated.id}`, requestId: request.id
+      }, now, createId);
       return toAssignmentResponse(updated);
     });
   }
@@ -293,6 +330,8 @@ export function toAssignmentResponse(assignment: Assignment): AssignmentResponse
     request_id: assignment.requestId,
     mechanic_id: assignment.mechanicId,
     accepted_candidate_id: assignment.acceptedCandidateId,
+    rescue_labor_quote_id: assignment.rescueLaborQuoteId,
+    rescue_payment_timing: assignment.rescuePaymentTiming,
     status: assignment.status,
     accepted_at: assignment.acceptedAt.toISOString(),
     ...(assignment.startedAt ? { started_at: assignment.startedAt.toISOString() } : {}),

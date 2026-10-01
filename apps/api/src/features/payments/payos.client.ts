@@ -57,13 +57,27 @@ export class PayosClient implements PaymentProviderClient {
       returnUrl: input.returnUrl,
       ...(input.expiredAt ? { expiredAt: input.expiredAt } : {})
     };
-    const response = await this.request("/v2/payment-requests", {
-      method: "POST",
-      body: {
-        ...body,
-        signature: createPayosSignature(body, this.checksumKey)
+    let response;
+    try {
+      response = await this.request("/v2/payment-requests", {
+        method: "POST",
+        body: {
+          ...body,
+          signature: createPayosSignature({ amount: input.amount, cancelUrl: input.cancelUrl, description: input.description, orderCode: input.orderCode, returnUrl: input.returnUrl }, this.checksumKey)
+        }
+      });
+    } catch (creationError) {
+      // A timeout or duplicate order code can mean payOS already created the link.
+      let existing: ProviderPaymentStatus;
+      try { existing = await this.getPaymentStatus(input.orderCode); }
+      catch { throw creationError; }
+      if (existing.orderCode !== input.orderCode || existing.amount !== input.amount || !existing.paymentLinkId) {
+        throw new PayosProviderError("Existing payOS order does not match the payment.");
       }
-    });
+      return { paymentLinkId: existing.paymentLinkId,
+        checkoutUrl: `https://pay.payos.vn/web/${encodeURIComponent(existing.paymentLinkId)}`,
+        status: existing.status };
+    }
     const data = asRecord(response.data);
     return {
       paymentLinkId: requireString(data.paymentLinkId, "paymentLinkId"),
@@ -137,7 +151,8 @@ export class PayosClient implements PaymentProviderClient {
         "x-client-id": this.clientId,
         "x-api-key": this.apiKey
       },
-      ...(input.body ? { body: JSON.stringify(input.body) } : {})
+      ...(input.body ? { body: JSON.stringify(input.body) } : {}),
+      signal: AbortSignal.timeout(10_000)
     });
     const body = (await response.json().catch(() => ({}))) as {
       code?: string;

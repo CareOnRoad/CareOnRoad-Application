@@ -68,11 +68,12 @@ export type CreatePaymentOrder = Omit<
 export type CreatePaymentEvent = PaymentEvent;
 
 export interface PaymentRepository {
+  sumSucceededForAssignment(assignmentId: string): Promise<number>;
   allocateProviderOrderCode(): Promise<number>;
   create(input: CreatePaymentOrder): Promise<PaymentOrder>;
   findById(id: string): Promise<PaymentOrder | undefined>;
   findByIdForUpdate(id: string): Promise<PaymentOrder | undefined>;
-  findActiveByQuoteForUpdate(quoteId: string): Promise<PaymentOrder | undefined>;
+  findActiveByQuoteForUpdate(quoteId: string, excludingOrderId?: string): Promise<PaymentOrder | undefined>;
   findByProviderOrderCodeForUpdate(
     provider: PaymentProvider,
     providerOrderCode: number

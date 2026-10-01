@@ -9,6 +9,7 @@ import type {
 } from "../contracts/assignment.repository";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "../contracts/assignment.repository";
 import type { AuditActorRole } from "../contracts/audit.repository";
+import type { RescuePaymentTiming } from "../contracts/quote.repository";
 import type { ServiceRequest } from "../contracts/service-request.repository";
 
 export class InMemoryAssignmentRepository implements AssignmentRepository {
@@ -17,6 +18,15 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
     private readonly history: AssignmentStatusHistory[],
     private readonly serviceRequests: ServiceRequest[]
   ) {}
+
+  async setRescueAgreement(input: { id: string; laborQuoteId: string; paymentTiming: RescuePaymentTiming; updatedAt: Date }): Promise<Assignment | undefined> {
+    const assignment = this.assignments.find((item) => item.id === input.id && !item.rescueLaborQuoteId);
+    if (!assignment) return undefined;
+    assignment.rescueLaborQuoteId = input.laborQuoteId;
+    assignment.rescuePaymentTiming = input.paymentTiming;
+    assignment.updatedAt = input.updatedAt;
+    return cloneAssignment(assignment);
+  }
 
   async create(input: CreateAssignment): Promise<Assignment> {
     if (

@@ -264,6 +264,36 @@ describeDatabase("diagnosis and quote repository integration", () => {
     await expect(counts()).resolves.toEqual(before);
   }, 30_000);
 
+  it("persists approved rescue labor and protects agreement and pricing from mutation", async () => {
+    await sql`update service_requests set service_type = 'emergency_rescue', status = 'assigned' where id = ${requestId}`;
+    await sql`update assignments set status = 'accepted' where id = ${assignmentId}`;
+    const service = new QuoteService(new PostgresUnitOfWork(sql), { now: () => now });
+    const labor = await service.createQuote(identity(mechanicId), requestId, {
+      assignment_id: assignmentId, purpose: "rescue_labor",
+      labor_pricing: { base_amount: 100000, distance_amount: 20000, weather_amount: 10000, time_amount: 30000, weather: "rain" }
+    });
+    await service.approveQuote(identity(riderId), labor.id, { payment_timing: "after_repair" });
+    await expect(sql`select rescue_labor_quote_id, rescue_payment_timing, status from assignments where id = ${assignmentId}`)
+      .resolves.toEqual([{ rescue_labor_quote_id: labor.id, rescue_payment_timing: "after_repair", status: "accepted" }]);
+    await expect(sql`update assignments set rescue_payment_timing = 'labor_upfront' where id = ${assignmentId}`).rejects.toBeDefined();
+    await expect(sql`update quotes set labor_pricing = '{}'::jsonb where id = ${labor.id}`).rejects.toBeDefined();
+  }, 90_000);
+
+  it("releases rejected rescue assignments with a cancellation timestamp and durable redispatch event", async () => {
+    await sql`update service_requests set service_type = 'emergency_rescue', status = 'assigned' where id = ${requestId}`;
+    await sql`update assignments set status = 'accepted' where id = ${assignmentId}`;
+    const service = new QuoteService(new PostgresUnitOfWork(sql), { now: () => now });
+    const labor = await service.createQuote(identity(mechanicId), requestId, {
+      assignment_id: assignmentId, purpose: "rescue_labor",
+      labor_pricing: { base_amount: 100000, distance_amount: 0, weather_amount: 0, time_amount: 0, weather: "sunny" }
+    });
+    await service.rejectQuote(identity(riderId), labor.id);
+    await expect(sql`select status, canceled_at from assignments where id = ${assignmentId}`)
+      .resolves.toEqual([{ status: "recovery_canceled", canceled_at: now }]);
+    await expect(sql`select status from service_requests where id = ${requestId}`).resolves.toEqual([{ status: "submitted" }]);
+    await expect(sql`select count(*)::int as count from outbox_events where topic = 'assignment.recovery.requested'`).resolves.toEqual([{ count: 1 }]);
+  }, 90_000);
+
   async function seedActor(id: string, role: "rider" | "mechanic" | "admin") {
     await sql`insert into auth.users (id, created_at, updated_at) values (${id}, now(), now())`;
     await sql`
@@ -396,7 +426,9 @@ function legacyCompatibleMigrationFiles(): string[] {
   return [
     ...files,
     "202606250014_indexes_constraints_rls.sql",
-    "202606250020_payments.sql"
+    "202606250020_payments.sql",
+    "202606250027_assignment_recovery.sql",
+    "202606250033_rescue_quote_payment_workflow.sql"
   ];
 }
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { ApiErrorCode } from "@/lib/api-error";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
+import { persistNotification } from "@/features/notifications/notification.service";
 import {
   appendAssignmentAuditOutbox,
   loadActiveActor,
@@ -9,7 +10,9 @@ import {
 } from "@/features/assignments/assignment.service";
 import { assertAssignmentStatusTransition } from "@/features/assignments/assignment-state";
 import { assertRequestStatusTransition } from "@/features/service-requests/service-request-state";
-import type { Quote, QuoteStatus } from "@/server/repositories/contracts/quote.repository";
+import type { Quote, QuoteStatus, QuotePurpose, RescueLaborPricing } from "@/server/repositories/contracts/quote.repository";
+import type { AssignmentStatus } from "@/server/repositories/contracts/assignment.repository";
+import type { RequestStatus } from "@/server/repositories/contracts/service-request.repository";
 import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 
 import {
@@ -17,7 +20,7 @@ import {
   MAX_QUOTE_AMOUNT,
   QuoteCalculationError
 } from "./quote-calculator";
-import { quoteInputSchema } from "./quote.schemas";
+import { approveQuoteInputSchema, quoteInputSchema } from "./quote.schemas";
 
 export { MAX_QUOTE_AMOUNT };
 
@@ -35,6 +38,8 @@ export type QuoteResponse = {
   id: string;
   request_id: string;
   assignment_id: string;
+  purpose?: QuotePurpose;
+  labor_pricing?: RescueLaborPricing;
   diagnosis_id?: string;
   version: number;
   status: QuoteStatus;
@@ -73,7 +78,7 @@ export class QuoteService {
       });
     }
 
-    let calculated;
+    let calculated: ReturnType<typeof calculateQuote>;
     try {
       calculated = calculateQuote(parsed.data.lines, parsed.data.discount_amount);
     } catch (error) {
@@ -85,6 +90,8 @@ export class QuoteService {
 
     return this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
+      const request = await repositories.serviceRequests.findByIdForUpdate(requestId);
+      if (!request) throw new QuoteError("NOT_FOUND", "Service request not found.", 404);
       const assignment = await repositories.assignments.findByIdForUpdate(
         parsed.data.assignment_id
       );
@@ -105,15 +112,43 @@ export class QuoteService {
         );
       }
 
-      const request = await repositories.serviceRequests.findByIdForUpdate(requestId);
-      if (!request) {
-        throw new QuoteError("NOT_FOUND", "Service request not found.", 404);
-      }
       const latest = await repositories.quotes.findLatestByRequestForUpdate(requestId);
-      const firstVersion = !latest;
+      const firstVersion = !latest || latest.assignmentId !== assignment.id || (latest.purpose ?? "standard") !== parsed.data.purpose;
+      const rescue = request.serviceType === "emergency_rescue";
+      if (rescue === (parsed.data.purpose === "standard")) {
+        throw new QuoteError("INVALID_INPUT", "Emergency rescue requires a labor or final quote; other services require a standard quote.", 400);
+      }
+      const now = this.options.now?.() ?? new Date();
+      let laborPricing: RescueLaborPricing | undefined;
+      if (parsed.data.purpose === "rescue_labor") {
+        if (assignment.rescueLaborQuoteId) throw new QuoteError("CONFLICT", "Rescue labor is already agreed and cannot change.", 409);
+        const candidate = await repositories.dispatch.findCandidateById(assignment.acceptedCandidateId);
+        if (candidate?.distanceMeters === undefined) throw new QuoteError("CONFLICT", "Verified dispatch distance is required for rescue pricing.", 409);
+        const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", hourCycle: "h23" }).format(now));
+        laborPricing = {
+          ...parsed.data.labor_pricing!, distance_m: candidate.distanceMeters,
+          time_slot: hour >= 5 && hour < 11 ? "morning" : hour >= 11 && hour < 17 ? "midday" : hour >= 17 && hour < 22 ? "evening" : "late_night"
+        };
+        calculated = calculateValidatedQuote([
+          { line_type: "labor", description: "Tiền công cơ bản", quantity: 1, unit_amount: laborPricing.base_amount },
+          { line_type: "labor", description: `Phí khoảng cách ${laborPricing.distance_m} m`, quantity: 1, unit_amount: laborPricing.distance_amount },
+          { line_type: "labor", description: `Phí thời tiết ${laborPricing.weather}`, quantity: 1, unit_amount: laborPricing.weather_amount },
+          { line_type: "labor", description: `Phí thời điểm ${laborPricing.time_slot}`, quantity: 1, unit_amount: laborPricing.time_amount }
+        ], 0);
+      }
+      if (parsed.data.purpose === "rescue_final") {
+        const labor = assignment.rescueLaborQuoteId ? await repositories.quotes.findById(assignment.rescueLaborQuoteId) : undefined;
+        if (!labor || labor.status !== "approved" || labor.assignmentId !== assignment.id || labor.purpose !== "rescue_labor") {
+          throw new QuoteError("CONFLICT", "An approved rescue labor agreement is required.", 409);
+        }
+        calculated = calculateValidatedQuote([
+          ...labor.lines.map((line) => ({ line_type: line.lineType, description: line.description, quantity: line.quantity, unit_amount: line.unitAmount })),
+          ...parsed.data.lines
+        ], 0);
+      }
       if (
         firstVersion
-          ? assignment.status !== "diagnosis" || request.status !== "in_service"
+          ? assignment.status !== (parsed.data.purpose === "rescue_labor" ? "accepted" : "diagnosis") || request.status !== (parsed.data.purpose === "rescue_labor" ? "assigned" : "in_service")
           : assignment.status !== "quoted" ||
             request.status !== "awaiting_quote_approval"
       ) {
@@ -133,7 +168,6 @@ export class QuoteService {
         }
       }
 
-      const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
       if (latest?.status === "pending") {
         await repositories.quotes.updateStatus({
@@ -146,6 +180,8 @@ export class QuoteService {
         id: createId(),
         requestId,
         assignmentId: assignment.id,
+        purpose: parsed.data.purpose,
+        laborPricing,
         diagnosisId: parsed.data.diagnosis_id,
         version: (latest?.version ?? 0) + 1,
         subtotalAmount: calculated.subtotal_amount,
@@ -154,7 +190,7 @@ export class QuoteService {
         notes: parsed.data.notes,
         expiresAt: parsed.data.expires_at
           ? new Date(parsed.data.expires_at)
-          : undefined,
+          : parsed.data.purpose === "rescue_labor" ? new Date(now.getTime() + 10 * 60 * 1000) : undefined,
         createdBy: actor.id,
         createdAt: now,
         lines: calculated.lines.map((line, index) => ({
@@ -225,9 +261,10 @@ export class QuoteService {
 
   approveQuote(
     identity: VerifiedSupabaseIdentity,
-    quoteId: string
+    quoteId: string,
+    input: unknown = {}
   ): Promise<QuoteResponse> {
-    return this.decideQuote(identity, quoteId, "approved");
+    return this.decideQuote(identity, quoteId, "approved", input);
   }
 
   rejectQuote(
@@ -240,20 +277,21 @@ export class QuoteService {
   private decideQuote(
     identity: VerifiedSupabaseIdentity,
     quoteId: string,
-    decision: "approved" | "rejected"
+    decision: "approved" | "rejected",
+    input: unknown = {}
   ): Promise<QuoteResponse> {
+    const parsed = approveQuoteInputSchema.safeParse(input);
+    if (!parsed.success) throw new QuoteError("INVALID_INPUT", "Quote approval input is invalid.", 400);
     return this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
       const initial = await repositories.quotes.findById(quoteId);
       if (!initial) {
         throw new QuoteError("NOT_FOUND", "Quote not found.", 404);
       }
-      const assignment = await repositories.assignments.findByIdForUpdate(
-        initial.assignmentId
-      );
       const request = await repositories.serviceRequests.findByIdForUpdate(
         initial.requestId
       );
+      const assignment = await repositories.assignments.findByIdForUpdate(initial.assignmentId);
       const quote = await repositories.quotes.findByIdForUpdate(quoteId);
       const latest = await repositories.quotes.findLatestByRequestForUpdate(
         initial.requestId
@@ -280,6 +318,12 @@ export class QuoteService {
 
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
+      if (decision === "approved" && quote.expiresAt && quote.expiresAt <= now) throw new QuoteError("CONFLICT", "Quote has expired.", 409);
+      const rescueLabor = quote.purpose === "rescue_labor";
+      if (decision === "approved" && rescueLabor && !parsed.data.payment_timing) {
+        throw new QuoteError("INVALID_INPUT", "Choose labor_upfront or after_repair when approving rescue labor.", 400);
+      }
+      if (!rescueLabor && parsed.data.payment_timing) throw new QuoteError("INVALID_INPUT", "Payment timing applies only to rescue labor.", 400);
       const updated = await repositories.quotes.updateStatus({
         id: quote.id,
         status: decision,
@@ -290,17 +334,27 @@ export class QuoteService {
       }
 
       if (decision === "approved") {
+        if (rescueLabor) {
+          const agreed = await repositories.assignments.setRescueAgreement({ id: assignment.id, laborQuoteId: quote.id, paymentTiming: parsed.data.payment_timing!, updatedAt: now });
+          if (!agreed) throw new QuoteError("CONFLICT", "Rescue labor has already been agreed.", 409);
+        }
         await transitionWorkflow(repositories, {
           assignment,
           request,
-          assignmentStatus: "awaiting_payment",
-          requestStatus: "awaiting_payment",
+          assignmentStatus: rescueLabor ? "accepted" : quote.purpose === "rescue_final" ? "diagnosis" : "awaiting_payment",
+          requestStatus: rescueLabor ? "assigned" : quote.purpose === "rescue_final" ? "in_service" : "awaiting_payment",
           actorId: actor.id,
           actorRole: "rider",
           now,
           createId,
           reason: "quote_approved"
         });
+      }
+      if (decision === "rejected" && rescueLabor) {
+        await transitionWorkflow(repositories, { assignment, request, assignmentStatus: "recovery_canceled", requestStatus: "submitted", actorId: actor.id, actorRole: "rider", now, createId, reason: "rescue_labor_rejected" });
+        await repositories.dispatch.cancelOpenDispatchForRequest({ requestId: request.id, now });
+        const eventId = createId();
+        await repositories.outbox.append({ id: eventId, topic: "assignment.recovery.requested", aggregateType: "assignment", aggregateId: assignment.id, dedupeKey: `rescue.reject:${quote.id}`, payload: { request_id: request.id, assignment_id: assignment.id, reason_code: "rescue_labor_rejected" }, createdAt: now, nextAttemptAt: now });
       }
       await appendQuoteAuditOutbox(repositories, {
         action: `quote.${decision}`,
@@ -330,6 +384,14 @@ export class QuoteError extends Error {
   }
 }
 
+function calculateValidatedQuote(lines: Parameters<typeof calculateQuote>[0], discount: number) {
+  try { return calculateQuote(lines, discount); }
+  catch (error) {
+    if (error instanceof QuoteCalculationError) throw new QuoteError("INVALID_INPUT", error.message, 400);
+    throw error;
+  }
+}
+
 async function transitionWorkflow(
   repositories: FoundationRepositories,
   input: {
@@ -337,8 +399,8 @@ async function transitionWorkflow(
       object;
     request: Awaited<ReturnType<FoundationRepositories["serviceRequests"]["findById"]>> &
       object;
-    assignmentStatus: "quoted" | "awaiting_payment";
-    requestStatus: "awaiting_quote_approval" | "awaiting_payment";
+    assignmentStatus: AssignmentStatus;
+    requestStatus: RequestStatus;
     actorId: string;
     actorRole: "rider" | "mechanic" | "admin";
     now: Date;
@@ -351,7 +413,8 @@ async function transitionWorkflow(
   const assignment = await repositories.assignments.updateStatus({
     id: input.assignment.id,
     status: input.assignmentStatus,
-    updatedAt: input.now
+    updatedAt: input.now,
+    ...(input.assignmentStatus === "recovery_canceled" ? { canceledAt: input.now } : {})
   });
   if (!assignment) {
     throw new QuoteError("NOT_FOUND", "Assignment not found.", 404);
@@ -437,6 +500,17 @@ async function appendQuoteAuditOutbox(
     metadata: payload,
     createdAt: input.now
   });
+  if (input.quote.purpose === "rescue_labor" || input.quote.purpose === "rescue_final") {
+    const request = await repositories.serviceRequests.findById(input.quote.requestId);
+    const assignment = await repositories.assignments.findById(input.quote.assignmentId);
+    const created = input.action === "quote.created";
+    if (request && assignment) await persistNotification(repositories, {
+      userId: created ? request.riderId : assignment.mechanicId, type: input.action,
+      title: created ? "Có báo giá cứu hộ cần duyệt" : input.action === "quote.approved" ? "Khách đã đồng ý báo giá" : "Khách đã từ chối báo giá",
+      body: created ? "Xem các khoản phí và xác nhận trước khi thợ thực hiện bước tiếp theo." : "Mở yêu cầu để xem báo giá và trạng thái thanh toán hiện tại.",
+      data: payload, dedupeKey: `${input.action}:${input.quote.id}`, requestId: request.id
+    }, input.now, input.createId);
+  }
 }
 
 export function toQuoteResponse(quote: Quote): QuoteResponse {
@@ -444,6 +518,8 @@ export function toQuoteResponse(quote: Quote): QuoteResponse {
     id: quote.id,
     request_id: quote.requestId,
     assignment_id: quote.assignmentId,
+    purpose: quote.purpose ?? "standard",
+    labor_pricing: quote.laborPricing,
     diagnosis_id: quote.diagnosisId,
     version: quote.version,
     status: quote.status,

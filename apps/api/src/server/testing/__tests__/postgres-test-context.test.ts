@@ -8,6 +8,22 @@ import {
 } from "../postgres-test-context";
 
 describe("postgres test context", () => {
+  it("blocks a shared app database even with explicit test confirmation", async () => {
+    await expect(createIsolatedPostgresTestContext({ NODE_ENV: "test", RUN_DB_TESTS: "true", TEST_DATABASE_CONFIRMED: "true",
+      DATABASE_URL: "postgres://postgres:app@localhost/careonroad_test",
+      TEST_DATABASE_URL: "postgres://postgres:test@localhost:5432/careonroad_test" })).rejects.toThrow("separate database");
+  });
+  it("allows a separately confirmed hosted test project", () => {
+    const environment = { NODE_ENV: "test", RUN_DB_TESTS: "true", TEST_DATABASE_CONFIRMED: "true",
+      DATABASE_URL: "postgres://postgres.app:app@aws.pooler.supabase.com/postgres",
+      TEST_DATABASE_URL: "postgres://postgres.test:test@aws.pooler.supabase.com/postgres" };
+    expect(requirePostgresTestDatabaseUrl(environment)).toBe(environment.TEST_DATABASE_URL);
+  });
+  it("recognizes direct and pooler URLs for the same Supabase project", () => {
+    expect(() => requirePostgresTestDatabaseUrl({ NODE_ENV: "test", RUN_DB_TESTS: "true", TEST_DATABASE_CONFIRMED: "true",
+      DATABASE_URL: "postgres://postgres:app@db.same-project.supabase.co/postgres",
+      TEST_DATABASE_URL: "postgres://postgres.same-project:test@aws.pooler.supabase.com/postgres" })).toThrow("separate database");
+  });
   it("reports whether the dedicated test database variable is configured", () => {
     expect(hasPostgresTestDatabase({ NODE_ENV: "test", TEST_DATABASE_URL: "" })).toBe(false);
     expect(

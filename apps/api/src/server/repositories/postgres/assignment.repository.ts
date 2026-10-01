@@ -11,12 +11,15 @@ import type {
 } from "../contracts/assignment.repository";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "../contracts/assignment.repository";
 import type { AuditActorRole } from "../contracts/audit.repository";
+import type { RescuePaymentTiming } from "../contracts/quote.repository";
 
 type AssignmentRow = {
   id: string;
   request_id: string;
   mechanic_id: string;
   accepted_candidate_id: string;
+  rescue_labor_quote_id: string | null;
+  rescue_payment_timing: RescuePaymentTiming | null;
   status: AssignmentStatus;
   accepted_at: Date;
   started_at: Date | null;
@@ -44,6 +47,15 @@ type MechanicActiveWorkloadRow = {
 
 export class PostgresAssignmentRepository implements AssignmentRepository {
   constructor(private readonly sql: TransactionSql) {}
+
+  async setRescueAgreement(input: { id: string; laborQuoteId: string; paymentTiming: RescuePaymentTiming; updatedAt: Date }): Promise<Assignment | undefined> {
+    const rows = await this.sql<AssignmentRow[]>`
+      update assignments set rescue_labor_quote_id = ${input.laborQuoteId},
+        rescue_payment_timing = ${input.paymentTiming}, updated_at = ${input.updatedAt}
+      where id = ${input.id} and rescue_labor_quote_id is null returning *
+    `;
+    return rows[0] ? mapAssignment(rows[0]) : undefined;
+  }
 
   async create(input: CreateAssignment): Promise<Assignment> {
     const rows = await this.sql<AssignmentRow[]>`
@@ -213,6 +225,8 @@ function mapAssignment(row: AssignmentRow): Assignment {
     requestId: row.request_id,
     mechanicId: row.mechanic_id,
     acceptedCandidateId: row.accepted_candidate_id,
+    rescueLaborQuoteId: row.rescue_labor_quote_id ?? undefined,
+    rescuePaymentTiming: row.rescue_payment_timing ?? undefined,
     status: row.status,
     acceptedAt: row.accepted_at,
     startedAt: row.started_at ?? undefined,

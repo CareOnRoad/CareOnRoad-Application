@@ -11,6 +11,16 @@ const identity: VerifiedSupabaseIdentity = {
 };
 
 describe("payment route handlers", () => {
+  it("requires an idempotency key before resolving payment review", async () => {
+    let called = false;
+    const handlers = createPaymentRouteHandlers({ authenticate: async () => identity, authenticateWorker: () => ({ workerId: "worker" }),
+      paymentService: { ...paymentService(), async resolvePaymentReview() { called = true; return {}; } } });
+    const response = await handlers.resolvePaymentReview(new Request("http://localhost/api/v1/admin/payments/orders/id/resolve", {
+      method: "POST", body: JSON.stringify({ action: "confirm_received", reason: "Verified provider receipt" })
+    }), "77777777-7777-4777-8777-777777777777");
+    expect(response.status).toBe(400);
+    expect(called).toBe(false);
+  });
   it("requires idempotency for payment order creation", async () => {
     const handlers = createPaymentRouteHandlers({
       authenticate: async () => identity,
