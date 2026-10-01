@@ -45,6 +45,25 @@ describe("SupabaseJwtVerifier", () => {
     });
   });
 
+  it("reads a bounded display name from verified user metadata", async () => {
+    const token = await createToken({
+      payload: { user_metadata: { full_name: "  Nguyễn Văn An  " } }
+    });
+
+    await expect(createVerifier().verify(token)).resolves.toEqual({
+      subject,
+      issuer,
+      audience: [audience],
+      displayName: "Nguyễn Văn An"
+    });
+
+    await expect(
+      createVerifier().verify(
+        await createToken({ payload: { user_metadata: { full_name: "x".repeat(121) } } })
+      )
+    ).resolves.toEqual({ subject, issuer, audience: [audience] });
+  });
+
   it.each([
     ["wrong issuer", { tokenIssuer: "https://wrong.example/auth/v1" }],
     ["wrong audience", { tokenAudience: "other-client" }],
@@ -210,9 +229,10 @@ async function createToken(
     tokenAudience?: string;
     expiresAt?: number;
     notBefore?: number;
+    payload?: Record<string, unknown>;
   } = {}
 ) {
-  let token = new SignJWT({})
+  let token = new SignJWT(options.payload ?? {})
     .setProtectedHeader({ alg: "RS256", kid: "test-key" })
     .setSubject(subject)
     .setIssuer(options.tokenIssuer ?? issuer)

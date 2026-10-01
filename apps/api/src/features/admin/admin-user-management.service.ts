@@ -4,6 +4,7 @@ import type { ApiErrorCode } from "@/lib/api-error";
 import { prepareIdempotency } from "@/lib/idempotency";
 import type { VerifiedSupabaseIdentity, UserRole, UserStatus } from "@/features/auth/auth.types";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import { INITIAL_MECHANIC_SERVICE_RADIUS_KM } from "@/server/repositories/contracts/mechanic.repository";
 import type {
   AdminDeviceSummary,
   AdminUserActivity,
@@ -402,6 +403,22 @@ export class AdminUserManagementService {
         throw conflict(
           mode === "grant" ? "User already has this role." : "User does not have this role."
         );
+      }
+      if (parsed.data.role === "mechanic") {
+        const profile = await repositories.mechanics.findProfileByUserId(id);
+        if (mode === "grant" && !profile) {
+          await repositories.mechanics.createProfile({
+            userId: id,
+            profileStatus: "pending",
+            isAvailable: false,
+            serviceRadiusKm: INITIAL_MECHANIC_SERVICE_RADIUS_KM,
+            availabilityUpdatedAt: now,
+            createdAt: now,
+            updatedAt: now
+          });
+        } else if (mode === "revoke" && profile) {
+          await repositories.mechanics.updateAvailability(id, false, now);
+        }
       }
       const updated = await repositories.users.findActorById(id);
       if (!updated) throw notFound("User not found.");

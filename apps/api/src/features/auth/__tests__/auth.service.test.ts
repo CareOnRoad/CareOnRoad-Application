@@ -18,8 +18,14 @@ describe("AuthService", () => {
     const unitOfWork = new InMemoryUnitOfWork();
     const service = new AuthService(unitOfWork, { now: () => new Date("2026-06-25T00:00:00Z") });
 
-    const first = await service.bootstrapProfile(identity, { display_name: "Rider One" });
-    const second = await service.bootstrapProfile(identity, { display_name: "Ignored update" });
+    const first = await service.bootstrapProfile(
+      { ...identity, displayName: "Google Name" },
+      { display_name: "Rider One" }
+    );
+    const second = await service.bootstrapProfile(identity, {
+      display_name: "Ignored update",
+      account_type: "mechanic"
+    });
 
     expect(first).toEqual(second);
     expect(first).toMatchObject({
@@ -38,11 +44,75 @@ describe("AuthService", () => {
       resource_id: identity.subject,
       status: "active"
     });
+    expect(snapshot.mechanicProfiles).toHaveLength(0);
     expect(JSON.stringify(snapshot.outboxEvents)).not.toContain("Rider One");
     expect(JSON.stringify(snapshot.auditLogs)).not.toContain("Rider One");
   });
 
-  it("rolls profile, role, outbox, and audit state back when bootstrap fails", async () => {
+  it("uses the verified identity display name when the request omits it", async () => {
+    const actor = await new AuthService(new InMemoryUnitOfWork()).bootstrapProfile(
+      { ...identity, displayName: "Google Rider" },
+      {}
+    );
+
+    expect(actor).toMatchObject({
+      display_name: "Google Rider",
+      roles: ["rider"]
+    });
+  });
+
+  it("bootstraps a self-selected mechanic with a pending unavailable profile", async () => {
+    const now = new Date("2026-06-25T00:00:00Z");
+    const unitOfWork = new InMemoryUnitOfWork();
+    const actor = await new AuthService(unitOfWork, { now: () => now }).bootstrapProfile(
+      { ...identity, displayName: "Google Mechanic" },
+      { account_type: "mechanic" }
+    );
+
+    expect(actor).toMatchObject({
+      display_name: "Google Mechanic",
+      roles: ["mechanic"],
+      status: "active"
+    });
+    const snapshot = unitOfWork.snapshot();
+    expect(snapshot.userRoles).toEqual([{ userId: identity.subject, role: "mechanic" }]);
+    expect(snapshot.mechanicProfiles).toEqual([
+      expect.objectContaining({
+        userId: identity.subject,
+        profileStatus: "pending",
+        isAvailable: false,
+        serviceRadiusKm: 10,
+        serviceTypes: []
+      })
+    ]);
+    expect(snapshot.auditLogs[0]?.actorRole).toBe("mechanic");
+  });
+
+  it("keeps a provisioned admin role when the same Google identity bootstraps again", async () => {
+    const adminId = "99999999-9999-4999-8999-999999999999";
+    const unitOfWork = new InMemoryUnitOfWork({
+      users: [
+        {
+          id: adminId,
+          displayName: "Admin",
+          status: "active",
+          createdAt: new Date("2026-06-25T00:00:00Z"),
+          updatedAt: new Date("2026-06-25T00:00:00Z")
+        }
+      ],
+      userRoles: [{ userId: adminId, role: "admin" }]
+    });
+
+    const actor = await new AuthService(unitOfWork).bootstrapProfile(
+      { ...identity, subject: adminId },
+      { account_type: "mechanic" }
+    );
+
+    expect(actor.roles).toEqual(["admin"]);
+    expect(unitOfWork.snapshot().mechanicProfiles).toHaveLength(0);
+  });
+
+  it("rolls profile, role, mechanic profile, outbox, and audit state back when bootstrap fails", async () => {
     const unitOfWork = new InMemoryUnitOfWork({
       outboxEvents: [
         {
@@ -61,12 +131,16 @@ describe("AuthService", () => {
     });
 
     await expect(
-      new AuthService(unitOfWork).bootstrapProfile(identity, { display_name: "Rollback Rider" })
+      new AuthService(unitOfWork).bootstrapProfile(identity, {
+        display_name: "Rollback Mechanic",
+        account_type: "mechanic"
+      })
     ).rejects.toThrow("OUTBOX_DEDUPE_KEY_EXISTS");
 
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.users).toHaveLength(0);
     expect(snapshot.userRoles).toHaveLength(0);
+    expect(snapshot.mechanicProfiles).toHaveLength(0);
     expect(snapshot.auditLogs).toHaveLength(0);
     expect(snapshot.outboxEvents).toHaveLength(1);
   });

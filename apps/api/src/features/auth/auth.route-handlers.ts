@@ -10,6 +10,7 @@ import {
   bootstrapProfileSchema,
   registerDeviceSchema,
   rotatePushTokenSchema,
+  type BootstrapProfileInput
   updateProfileSchema
 } from "./auth.schemas";
 import { AuthService } from "./auth.service";
@@ -25,6 +26,7 @@ export type AuthRouteDependencies = {
     getCurrentActor(identity: VerifiedSupabaseIdentity): Promise<RequestActor>;
     bootstrapProfile(
       identity: VerifiedSupabaseIdentity,
+      input: BootstrapProfileInput
       input: {
         display_name?: string;
         phone?: string;

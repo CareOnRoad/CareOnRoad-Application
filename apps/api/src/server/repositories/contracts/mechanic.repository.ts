@@ -9,6 +9,8 @@ import type {
   AssignmentStatus
 } from "./assignment.repository";
 
+export const INITIAL_MECHANIC_SERVICE_RADIUS_KM = 10;
+
 export type MechanicProfileStatus =
   | "pending"
   | "active"
