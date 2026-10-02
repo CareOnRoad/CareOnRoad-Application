@@ -1,21 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import postgres, { type Sql } from "postgres";
+import {
+  requirePostgresTestDatabaseUrl as requireDedicatedTestDatabase,
+  type PostgresTestEnvironment
+} from "../db/database-environment.mjs";
+export type { PostgresTestEnvironment } from "../db/database-environment.mjs";
 
-const POSTGRES_PROTOCOLS = new Set(["postgres:", "postgresql:"]);
 const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const TEST_DATABASE_NAME = /(^|[_-])(test|testing)([_-]|$)/i;
 
 export const POSTGRES_TEST_DATABASE_ENV = "TEST_DATABASE_URL";
 export const RUN_POSTGRES_TESTS_ENV = "RUN_DB_TESTS";
-
-export type PostgresTestEnvironment = {
-  NODE_ENV?: string;
-  RUN_DB_TESTS?: string;
-  TEST_DATABASE_URL?: string;
-  DATABASE_URL?: string;
-  TEST_DATABASE_CONFIRMED?: string;
-};
 
 export type PostgresCleanupExecutor = {
   unsafe(query: string): Promise<unknown>;
@@ -46,46 +41,7 @@ export function hasPostgresTestDatabase(environment: PostgresTestEnvironment = p
 export function requirePostgresTestDatabaseUrl(
   environment: PostgresTestEnvironment = process.env
 ): string {
-  if (environment.NODE_ENV !== "test") {
-    throw new Error("PostgreSQL integration helpers require NODE_ENV=test.");
-  }
-
-  if (!isEnabled(environment.RUN_DB_TESTS)) {
-    throw new Error(`${RUN_POSTGRES_TESTS_ENV}=true is required for PostgreSQL integration tests.`);
-  }
-
-  const rawUrl = environment.TEST_DATABASE_URL?.trim();
-  if (!rawUrl) {
-    throw new Error(`${POSTGRES_TEST_DATABASE_ENV} is required for PostgreSQL integration tests.`);
-  }
-
-  let parsedUrl: URL;
-
-  try {
-    parsedUrl = new URL(rawUrl);
-  } catch {
-    throw new Error(`${POSTGRES_TEST_DATABASE_ENV} must be a valid PostgreSQL URL.`);
-  }
-
-  if (!POSTGRES_PROTOCOLS.has(parsedUrl.protocol)) {
-    throw new Error(`${POSTGRES_TEST_DATABASE_ENV} must use postgres:// or postgresql://.`);
-  }
-
-  const databaseName = decodeURIComponent(parsedUrl.pathname.replace(/^\/+/, ""));
-  const applicationUrl = environment.DATABASE_URL?.trim();
-  if (applicationUrl) {
-    let app: URL;
-    try { app = new URL(applicationUrl); }
-    catch { throw new Error("DATABASE_URL must be valid to verify test database isolation."); }
-    if (databaseIdentity(app) === databaseIdentity(parsedUrl)) throw new Error("TEST_DATABASE_URL must use a separate database from DATABASE_URL.");
-  }
-  if (!databaseName || (!TEST_DATABASE_NAME.test(databaseName) && !isEnabled(environment.TEST_DATABASE_CONFIRMED))) {
-    throw new Error(
-      `${POSTGRES_TEST_DATABASE_ENV} must target a database whose name contains a test marker, or a separate confirmed test project (TEST_DATABASE_CONFIRMED=true).`
-    );
-  }
-
-  return rawUrl;
+  return requireDedicatedTestDatabase(environment);
 }
 
 export async function createIsolatedPostgresTestContext(
@@ -169,10 +125,4 @@ function quoteQualifiedIdentifier(identifier: string): string {
 
 function isEnabled(value: string | undefined): boolean {
   return /^(1|true|yes)$/i.test(value?.trim() ?? "");
-}
-
-function databaseIdentity(url: URL): string {
-  const directProject = /^db\.([^.]+)\.supabase\.co$/.exec(url.hostname)?.[1];
-  const poolerProject = url.hostname.endsWith(".pooler.supabase.com") ? decodeURIComponent(url.username).split(".").slice(1).join(".") : undefined;
-  return `${directProject || poolerProject ? `supabase:${directProject || poolerProject}` : url.hostname}:${url.pathname}`;
 }
