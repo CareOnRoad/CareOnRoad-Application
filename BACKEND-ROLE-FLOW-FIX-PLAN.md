@@ -1,6 +1,6 @@
 # Kế hoạch sửa và hoàn thiện backend theo batch
 
-Ngày lập: **02/10/2026, giờ Việt Nam**. Phạm vi: backend/API của rider, mechanic và admin. Trạng thái: **Batch 00 đã implement phần local; migration/DB integration còn chờ DB test riêng**. Xem [báo cáo Batch 00](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/BACKEND-BATCH-00-REPORT.md). Các batch 01–15 chưa implement theo plan này.
+Ngày lập: **02/10/2026, giờ Việt Nam**. Phạm vi: backend/API của rider, mechanic và admin. **Đã đối chiếu Batch 00–12 và triển khai tiếp đến Batch 15 theo yêu cầu.** Batch 13 và optional 15 đã implement; Batch 14 có HTTP/JWT/SQL acceptance local, còn provider/device thật và production rollout. DB test dùng Docker riêng; source/local yêu cầu migration **046**. Xem [report hiện tại](BACKEND-FIX-BATCHES-REPORT.md) và [baseline Batch 00](BACKEND-BATCH-00-REPORT.md).
 
 ## 1. Kết luận thiết kế
 
@@ -140,16 +140,16 @@ Tasks:
 
 - [x] Lưu working-tree/commit baseline và danh sách thay đổi đang có; đọc lại findings của workflow để tránh trùng sửa.
 - [x] Kiểm tra test runtime, package manager và lockfile. Khôi phục dependency đã khai báo theo [kế hoạch workspace](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/DEPENDENCY-WORKSPACE-RECOVERY-PLAN.md), không nâng version để chữa việc thiếu binary. Nếu lockfile không khớp, xử lý đúng installation boundary trước.
-- [ ] Thiết lập DB/Supabase Auth test riêng, xác minh khác application DB theo host/project/database identity. Không hạ guard `TEST_DATABASE_CONFIRMED` hoặc chỉ đổi tên schema để coi là project test riêng.
-- [ ] Kiểm tra migration list và dry-run trên đúng development/test; kiểm tra extension `btree_gist`, quyền tạo extension, lịch legacy và constraints mới trước khi apply 035.
-- [ ] Apply 035 trong môi trường test; query cả cột, unique/exclusion index, trigger và notification lease constraints. Chạy smoke accept/reservation và notification claim SQL thật.
+- [x] Thiết lập DB/Supabase Auth test riêng, xác minh khác application DB theo host/project/database identity. Không hạ guard `TEST_DATABASE_CONFIRMED` hoặc chỉ đổi tên schema để coi là project test riêng.
+- [x] Kiểm tra migration history và local dry-run; `btree_gist`, quyền tạo extension và constraints mới hợp lệ. Instance local mới không có lịch legacy; first start tự apply source migrations, dry-run sau đó xác nhận không còn pending. Hosted legacy review còn thuộc rollout riêng.
+- [x] Apply 035 trong môi trường test; query cả cột, unique/exclusion index, trigger và notification lease constraints. Chạy smoke accept/reservation và notification claim SQL thật.
 - [x] Bổ sung schema preflight vào quy trình release và bounded readiness DB probe: thiếu cột bắt buộc phải `not_ready`, chỉ trả trạng thái redacted. `SELECT 1` hiện chưa đủ chứng minh schema tương thích.
 - [x] Chạy lại baseline unit/typecheck/lint/build và audit; lưu kết quả theo run/commit, tách expected red audit khỏi test thường.
 - [x] Lập danh sách data repair dry-run theo mục 4.4, chưa thay đổi dữ liệu khi lập danh sách.
 
-**Cập nhật implementation 02/10/2026:** user xác nhận DB hiện tại là production, chưa có DB test và yêu cầu hoàn thiện local. Unit 578 PASS, typecheck/lint/build API+web PASS; audit 4 PASS/10 FAIL như baseline. Production chỉ đọc, vẫn ở 034; inventory có 4 request thiếu tọa độ. Ba task DB chưa tick ở trên còn BLOCKED theo phạm vi user đã chọn; không áp dụng 035 vào production.
+**Cập nhật implementation 02/10/2026:** đã tạo instance PostgreSQL/Supabase Auth riêng qua Docker, không cần hosted project thứ hai. Test preflight PASS với đủ 35 migrations; DB suite 34 files/85 tests PASS, unit 579 PASS, typecheck/lint/build API+web PASS. Sửa schema/fixture/cleanup drift của integration harness, giữ audit 4 PASS/10 FAIL. Sau suite còn 0 test schema/0 Auth fixture và public append-only guards enabled. Production không bị ghi; evidence read-only trước ghi nhận 034 và 4 request thiếu tọa độ. B01 production rollout vẫn chờ riêng.
 
-Điểm sửa chính: [schema 035](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/supabase/migrations/202606250035_maintenance_reservations_notification_leases.sql), [schema checker](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/audit/check-live-schema.mjs), [readiness adapter](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/health/health.route-handlers.ts), [DB test guard](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/server/testing/postgres-test-context.ts).
+Điểm sửa chính: [schema 035](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/supabase/migrations/202606250035_maintenance_reservations_notification_leases.sql), [schema preflight](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/scripts/check-backend-schema.mjs), [readiness adapter](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/health/health.route-handlers.ts), [DB test context](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/server/testing/postgres-test-context.ts).
 
 **Nghiệm thu:** source/schema khớp trên test; test guard từ chối application DB; readiness đỏ khi thiếu schema; secrets không xuất hiện trong output. Nếu chưa có test DB, vẫn có thể sửa/test local các batch độc lập nhưng chưa đóng B01 hoặc tuyên bố DB/E2E pass.
 
@@ -159,13 +159,13 @@ Tasks:
 
 Tasks:
 
-- [ ] `AssignmentService.updateStatus` yêu cầu admin hoặc **mechanic hiện tại + đúng mechanicId**. Giữ active-user check.
-- [ ] Revoke mechanic khóa profile, kiểm tra mọi assignment chưa terminal gồm future reservations; nếu còn việc trả 409 để admin xử lý việc trước. Không tự orphan/cancel/reassign toàn bộ lịch.
-- [ ] Tắt availability khi role còn tồn tại; profile active có thể chuyển suspended theo policy hiện có trước khi revoke. Giữ pending/rejected/banned và lịch sử phù hợp, không tự re-approve khi re-grant.
-- [ ] Migration mới giới hạn trigger role vào INSERT và UPDATE các cột vận hành/identity. UPDATE chỉ rating/count/updated_at từ review vẫn hợp lệ trên profile lịch sử không còn role. INSERT hoặc bật/sửa vận hành khi không có role vẫn bị chặn.
-- [ ] Kiểm tra dispatch eligibility và admin profile commands không dùng profile cũ không-role như mechanic đang hoạt động. Re-grant giữ unavailable và cần approve/reactivate đúng status.
-- [ ] Guard suspend/ban tương tự phải xét appointment còn nghĩa vụ, không chỉ current slot. Kiểm tra accept/activation cạnh tranh với revoke dưới profile lock; re-read role sau khi chờ lock nếu cần.
-- [ ] PostgreSQL và in-memory `listVisibleToActor` dùng `(mechanic role AND mechanic owner) OR (rider role AND request owner)`; admin dùng policy riêng. Một assignment thỏa cả hai chỉ xuất hiện một lần.
+- [x] `AssignmentService.updateStatus` yêu cầu admin hoặc **mechanic hiện tại + đúng mechanicId**. Giữ active-user check.
+- [x] Revoke mechanic khóa profile, kiểm tra mọi assignment chưa terminal gồm future reservations; nếu còn việc trả 409 để admin xử lý việc trước. Không tự orphan/cancel/reassign toàn bộ lịch.
+- [x] Tắt availability khi role còn tồn tại; profile active có thể chuyển suspended theo policy hiện có trước khi revoke. Giữ pending/rejected/banned và lịch sử phù hợp, không tự re-approve khi re-grant.
+- [x] Migration mới giới hạn trigger role vào INSERT và UPDATE các cột vận hành/identity. UPDATE chỉ rating/count/updated_at từ review vẫn hợp lệ trên profile lịch sử không còn role. INSERT hoặc bật/sửa vận hành khi không có role vẫn bị chặn.
+- [x] Kiểm tra dispatch eligibility và admin profile commands không dùng profile cũ không-role như mechanic đang hoạt động. Re-grant giữ unavailable và cần approve/reactivate đúng status.
+- [x] Guard suspend/ban tương tự phải xét appointment còn nghĩa vụ, không chỉ current slot. Kiểm tra accept/activation cạnh tranh với revoke dưới profile lock; re-read role sau khi chờ lock nếu cần.
+- [x] PostgreSQL và in-memory `listVisibleToActor` dùng `(mechanic role AND mechanic owner) OR (rider role AND request owner)`; admin dùng policy riêng. Một assignment thỏa cả hai chỉ xuất hiện một lần.
 
 Điểm sửa: [assignment service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/assignments/assignment.service.ts), [admin user service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/admin/admin-user-management.service.ts), [admin mechanic service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/admin/admin-mechanic-management.service.ts), [assignment SQL](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/server/repositories/postgres/assignment.repository.ts), [rating SQL](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/server/repositories/postgres/review.repository.ts).
 
@@ -175,10 +175,10 @@ Tasks:
 
 Tasks:
 
-- [ ] Thêm biến thể phổ biến của chết/tắt máy khi đang chạy vào matcher hiện có. Ưu tiên danh sách cụm ngắn; chỉ dùng regex có biên/ngữ cảnh nếu danh sách không đủ cho case đã xác định.
-- [ ] Test có dấu/không dấu, đảo thứ tự, dấu câu và các câu không phải đang chạy: “không chết máy”, “đã tắt máy rồi”, “không đề được khi đỗ”. Không dùng một từ “chết máy” để đánh dấu mọi trường hợp nguy hiểm.
-- [ ] Kiểm tra câu phủ định có kèm triệu chứng khác thật sự nguy hiểm không làm mất override đó. Giới hạn xử lý phủ định vào phạm vi đã kiểm chứng, không viết NLP engine.
-- [ ] Test qua `DiagnosisService` với provider trả câu cho phép tiếp tục và khi provider lỗi: safety vẫn quyết định `can_continue_riding=false`, risk/action đúng.
+- [x] Thêm biến thể phổ biến của chết/tắt máy khi đang chạy vào matcher hiện có. Ưu tiên danh sách cụm ngắn; chỉ dùng regex có biên/ngữ cảnh nếu danh sách không đủ cho case đã xác định.
+- [x] Test có dấu/không dấu, đảo thứ tự, dấu câu và các câu không phải đang chạy: “không chết máy”, “đã tắt máy rồi”, “không đề được khi đỗ”. Không dùng một từ “chết máy” để đánh dấu mọi trường hợp nguy hiểm.
+- [x] Kiểm tra câu phủ định có kèm triệu chứng khác thật sự nguy hiểm không làm mất override đó. Giới hạn xử lý phủ định vào phạm vi đã kiểm chứng, không viết NLP engine.
+- [x] Test qua `DiagnosisService` với provider trả câu cho phép tiếp tục và khi provider lỗi: safety vẫn quyết định `can_continue_riding=false`, risk/action đúng.
 
 Điểm sửa: [safety gate](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/chatbot/safety-gate.ts), normalize/pipeline tests hiện có. Giữ local fallback và ASR nguyên workflow.
 
@@ -188,17 +188,17 @@ Tasks:
 
 Tasks:
 
-- [ ] Áp dụng ma trận ở mục 4.2 cho status canceled, rider cancel, admin cancel và recovery. Nếu hai command cùng cần guard quote/payment, dùng một helper nhỏ dùng repositories hiện có; không tạo policy framework.
-- [ ] Guard theo quote của assignment hiện tại, các agreement IDs và payment orders. Bổ sung query EXISTS nhỏ cho hoạt động payment nếu contract hiện tại chưa đủ; cập nhật cả SQL/in-memory.
-- [ ] Request không còn active assignment nhưng có khoản tiền chưa xử lý từ assignment cũ cũng không được hủy như đơn chưa nhận việc. Đưa case legacy này vào điều tra, không làm mất dấu tiền bằng terminal status.
-- [ ] Bỏ silent catch trong request synchronization. Request thiếu/transition sai trả controlled conflict và rollback assignment, history, audit, outbox.
-- [ ] Chỉ thêm request → canceled transitions cần cho các nhánh được phép. Hủy từ in_service phải chứng minh chưa started/quote/tiền; không suy ra chỉ từ request status thô.
-- [ ] Cho owning rider hủy `accepted` chưa travel, chưa quote/tiền; thêm manual_escalation cancel khi không active assignment. Cancel đã assigned phải cập nhật cả assignment/request, giải phóng reservation và đóng open dispatch trong một transaction.
-- [ ] Chặn recovery rescue/maintenance đã duyệt công kể cả chưa thanh toán hoặc chọn after_repair. Pending/rejected quote trên assignment hiện tại cũng không thuộc pre-quote recovery.
-- [ ] Recovery đủ điều kiện giữ durable outbox re-dispatch, actor/reason restrictions và idempotent replay. Không gọi dispatch/provider ngoài transaction trước khi commit recovery.
-- [ ] Sửa thứ tự lock recovery; thống nhất các đường quote/payment success/status/cancel. Webhook re-check workflow dưới khóa và late payment vẫn vào needs_review, không credit vào job đã hủy.
-- [ ] Khi bị chặn trả `CONFLICT` kèm bounded reason code, ví dụ `quote_already_issued`, `agreement_exists`, `payment_unresolved`, `work_started`. Không tự đánh dấu một case có tiền đã được giải quyết.
-- [ ] Data repair B02 legacy: chỉ case assignment canceled đúng history, không tiền, không replacement active mới thì đồng bộ request bằng command audited; mọi case còn nghi vấn chỉ báo cáo.
+- [x] Áp dụng ma trận ở mục 4.2 cho status canceled, rider cancel, admin cancel và recovery. Nếu hai command cùng cần guard quote/payment, dùng một helper nhỏ dùng repositories hiện có; không tạo policy framework.
+- [x] Guard theo quote của assignment hiện tại, các agreement IDs và payment orders. Bổ sung query EXISTS nhỏ cho hoạt động payment nếu contract hiện tại chưa đủ; cập nhật cả SQL/in-memory.
+- [x] Request không còn active assignment nhưng có khoản tiền chưa xử lý từ assignment cũ cũng không được hủy như đơn chưa nhận việc. Đưa case legacy này vào điều tra, không làm mất dấu tiền bằng terminal status.
+- [x] Bỏ silent catch trong request synchronization. Request thiếu/transition sai trả controlled conflict và rollback assignment, history, audit, outbox.
+- [x] Chỉ thêm request → canceled transitions cần cho các nhánh được phép. Hủy từ in_service phải chứng minh chưa started/quote/tiền; không suy ra chỉ từ request status thô.
+- [x] Cho owning rider hủy `accepted` chưa travel, chưa quote/tiền; thêm manual_escalation cancel khi không active assignment. Cancel đã assigned phải cập nhật cả assignment/request, giải phóng reservation và đóng open dispatch trong một transaction.
+- [x] Chặn recovery rescue/maintenance đã duyệt công kể cả chưa thanh toán hoặc chọn after_repair. Pending/rejected quote trên assignment hiện tại cũng không thuộc pre-quote recovery.
+- [x] Recovery đủ điều kiện giữ durable outbox re-dispatch, actor/reason restrictions và idempotent replay. Không gọi dispatch/provider ngoài transaction trước khi commit recovery.
+- [x] Sửa thứ tự lock recovery; thống nhất các đường quote/payment success/status/cancel. Webhook re-check workflow dưới khóa và late payment vẫn vào needs_review, không credit vào job đã hủy.
+- [x] Khi bị chặn trả `CONFLICT` kèm bounded reason code, ví dụ `quote_already_issued`, `agreement_exists`, `payment_unresolved`, `work_started`. Không tự đánh dấu một case có tiền đã được giải quyết.
+- [x] Data repair B02 legacy: chỉ case assignment canceled đúng history, không tiền, không replacement active mới thì đồng bộ request bằng command audited; mọi case còn nghi vấn chỉ báo cáo.
 
 Điểm sửa: [assignment/recovery](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/assignments/assignment-recovery.service.ts), [rider request service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/service-requests/service-request.service.ts), [admin request policy](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/admin/admin-request-state.ts), [payment service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/payments/payment.service.ts) và hai state maps.
 
@@ -208,10 +208,10 @@ Tasks:
 
 Tasks:
 
-- [ ] `startDispatch` trả một kết quả escalation từ UnitOfWork, rồi throw/map 409 sau commit. Giữ response success của round như hiện tại.
-- [ ] History/audit/outbox escalation ghi một lần; gọi lại đã escalation không nhân sự kiện. Dùng cùng helper với worker thay vì một nhánh riêng thiếu audit.
-- [ ] Rà soát mọi caller của `manualEscalate`, expiry/decline và các nhánh cố ý ghi rồi báo lỗi. Với expired decline cần persist expiry, cũng map conflict sau commit; lỗi validation thuần túy vẫn rollback.
-- [ ] Giữ các bản sửa reservation ranking/idempotency đang có sau khi kiểm tra regression; không refactor ranking không cần thiết.
+- [x] `startDispatch` trả một kết quả escalation từ UnitOfWork, rồi throw/map 409 sau commit. Giữ response success của round như hiện tại.
+- [x] History/audit/outbox escalation ghi một lần; gọi lại đã escalation không nhân sự kiện. Dùng cùng helper với worker thay vì một nhánh riêng thiếu audit.
+- [x] Rà soát mọi caller của `manualEscalate`, expiry/decline và các nhánh cố ý ghi rồi báo lỗi. Với expired decline cần persist expiry, cũng map conflict sau commit; lỗi validation thuần túy vẫn rollback.
+- [x] Giữ các bản sửa reservation ranking/idempotency đang có sau khi kiểm tra regression; không refactor ranking không cần thiết.
 
 Điểm sửa: [dispatch service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/dispatch/dispatch.service.ts), dispatch route/service/worker tests.
 
@@ -221,21 +221,21 @@ Tasks:
 
 **05A: create/PATCH location**
 
-- [ ] Require coordinates cho mobile_repair, at_home và cả hai fulfillment modes của other; at-home/scheduled_visit vẫn yêu cầu address và giờ tương lai. Emergency/maintenance giữ điều kiện đang có.
-- [ ] Mở rộng owner PATCH hiện có để sửa service location/address trước matching, khi chưa có round/assignment/cam kết. Request đã dispatching/offered/assigned trả conflict; giữ phạm vi nhỏ của PATCH thay vì thêm rescheduling sau matching.
-- [ ] PATCH location/schedule tại manual_escalation chỉ hỗ trợ bổ sung input legacy trước matching, không tự bỏ kiểm soát admin; retry ở Batch 09. Request assigned/travel/paid không sửa địa điểm/lịch qua PATCH này.
-- [ ] Emit maintenance matching event chỉ cho maintenance đủ điều kiện submitted; các loại khác giữ entry point dispatch hiện có. Không gửi at-home/other vào consumer maintenance bằng việc mở rộng PATCH.
-- [ ] API errors ghi rõ thiếu `location`; docs/examples đổi contract. Guard DB mới cho insert/thay đổi điểm phục vụ nếu cần, không validate lại legacy row trên update status cancellation.
+- [x] Require coordinates cho mobile_repair, at_home và cả hai fulfillment modes của other; at-home/scheduled_visit vẫn yêu cầu address và giờ tương lai. Emergency/maintenance giữ điều kiện đang có.
+- [x] Mở rộng owner PATCH hiện có để sửa service location/address trước matching, khi chưa có round/assignment/cam kết. Request đã dispatching/offered/assigned trả conflict; giữ phạm vi nhỏ của PATCH thay vì thêm rescheduling sau matching.
+- [x] PATCH location/schedule tại manual_escalation chỉ hỗ trợ bổ sung input legacy trước matching, không tự bỏ kiểm soát admin; retry ở Batch 09. Request assigned/travel/paid không sửa địa điểm/lịch qua PATCH này.
+- [x] Emit maintenance matching event chỉ cho maintenance đủ điều kiện submitted; các loại khác giữ entry point dispatch hiện có. Không gửi at-home/other vào consumer maintenance bằng việc mở rộng PATCH.
+- [x] API errors ghi rõ thiếu `location`; docs/examples đổi contract. Guard DB mới cho insert/thay đổi điểm phục vụ nếu cần, không validate lại legacy row trên update status cancellation.
 
 **05B: scheduled fulfillment**
 
-- [ ] Xác định scheduled bằng request.scheduledStartAt/fulfillment policy, không riêng serviceType maintenance.
-- [ ] Reuse buffer 30 phút và duration 15–480 phút hiện có; mọi scheduled accept cần estimated_duration_minutes. Không bắt immediate clients gửi trường mới.
-- [ ] Dispatch conflict/ranking áp dụng đúng khoảng thời gian cho at-home/other; offer dùng minimum duration để lọc sơ bộ, accept kiểm tra duration thực và DB exclusion.
-- [ ] Future appointment không chiếm current work slot. `en_route` chỉ được activation trong preparation window và khi current slot trống, mechanic vẫn có role/profile hợp lệ.
-- [ ] Worker preparation, accepted/canceled notifications dùng nội dung đúng loại dịch vụ; không gọi lịch at-home là lịch bảo dưỡng. Giữ event cũ của maintenance cho compatibility/dedupe.
-- [ ] Scheduled appointment đã quá giờ/không đến được có conflict và đường admin điều tra/hủy/reassign theo policy; không âm thầm kích hoạt hoặc bỏ reservation.
-- [ ] Dry-run nhận diện at-home/other legacy đã accepted nhưng chưa có scheduled reservation. Chỉ backfill khi chưa travel/quote/tiền và duration được xác nhận; case đã travel hoặc overlap đưa cho admin xử lý, không viết lại history để giả định chưa đi.
+- [x] Xác định scheduled bằng request.scheduledStartAt/fulfillment policy, không riêng serviceType maintenance.
+- [x] Reuse buffer 30 phút và duration 15–480 phút hiện có; mọi scheduled accept cần estimated_duration_minutes. Không bắt immediate clients gửi trường mới.
+- [x] Dispatch conflict/ranking áp dụng đúng khoảng thời gian cho at-home/other; offer dùng minimum duration để lọc sơ bộ, accept kiểm tra duration thực và DB exclusion.
+- [x] Future appointment không chiếm current work slot. `en_route` chỉ được activation trong preparation window và khi current slot trống, mechanic vẫn có role/profile hợp lệ.
+- [x] Worker preparation, accepted/canceled notifications dùng nội dung đúng loại dịch vụ; không gọi lịch at-home là lịch bảo dưỡng. Giữ event cũ của maintenance cho compatibility/dedupe.
+- [x] Scheduled appointment đã quá giờ/không đến được có conflict và đường admin điều tra/hủy/reassign theo policy; không âm thầm kích hoạt hoặc bỏ reservation.
+- [x] Dry-run nhận diện at-home/other legacy đã accepted nhưng chưa có scheduled reservation. Chỉ backfill khi chưa travel/quote/tiền và duration được xác nhận; case đã travel hoặc overlap đưa cho admin xử lý, không viết lại history để giả định chưa đi.
 
 Điểm sửa: [create/PATCH service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/service-requests/service-request.service.ts), [accept](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/assignments/accept-assignment.service.ts), dispatch/status services, [dispatch worker](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/server/workers/dispatch.worker.ts), reservation repositories/tests.
 
@@ -245,11 +245,11 @@ Tasks:
 
 Tasks:
 
-- [ ] Thêm `GET /api/v1/mechanics/me/jobs/{assignmentId}`; actor phải active, có mechanic role và là mechanic được gán. Admin tiếp tục read qua admin API; rider qua owner API.
-- [ ] DTO gồm assignment/status/lịch, request code/type/problem, service coordinates/address, xe cần phục vụ, media references được phép, latest relevant quote/agreement và checklist summary nếu có.
-- [ ] Reuse repository/mappers hiện có; thêm bounded detail query khi composition có N+1. Không đổi jobs summary thành payload lớn.
-- [ ] Không lộ internal admin note, token, payment provider payload, raw storage path/secrets hoặc thông tin liên hệ không cần cho công việc. DTO tài chính chỉ lấy phần quote được phép, không trả ledger/provider response.
-- [ ] History đã terminal vẫn đọc được summary công việc của chính mechanic; giới hạn thông tin vị trí/contact theo privacy policy và retention hiện có.
+- [x] Thêm `GET /api/v1/mechanics/me/jobs/{assignmentId}`; actor phải active, có mechanic role và là mechanic được gán. Admin tiếp tục read qua admin API; rider qua owner API.
+- [x] DTO gồm assignment/status/lịch, request code/type/problem, service coordinates/address, xe cần phục vụ, media references được phép, latest relevant quote/agreement và checklist summary nếu có.
+- [x] Reuse repository/mappers hiện có; thêm bounded detail query khi composition có N+1. Không đổi jobs summary thành payload lớn.
+- [x] Không lộ internal admin note, token, payment provider payload, raw storage path/secrets hoặc thông tin liên hệ không cần cho công việc. DTO tài chính chỉ lấy phần quote được phép, không trả ledger/provider response.
+- [x] History đã terminal vẫn đọc được summary công việc của chính mechanic; giới hạn thông tin vị trí/contact theo privacy policy và retention hiện có.
 
 Điểm sửa: [mechanic job service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/mechanic-operations/mechanic-job-list.service.ts), mapper/types/route handlers và route mới.
 
@@ -259,10 +259,10 @@ Tasks:
 
 Tasks:
 
-- [ ] Sau calculateQuote, `purpose=standard` yêu cầu total > 0 và nằm trong giới hạn amount thật sự payment hỗ trợ. Giữ calculator làm số học tổng quát, không cấm mọi line 0 hoặc cấm rescue parts rỗng.
-- [ ] Validation hoàn thành trước supersede/insert/transition, tránh pending quote cũ bị mất khi quote mới invalid.
-- [ ] Pending legacy standard 0 không được approve để vào awaiting_payment; trả conflict yêu cầu quote thay thế. Approved legacy 0 đưa vào danh sách cần xử lý admin, không sửa approved total hoặc sinh fake payment.
-- [ ] Standard >0 vẫn yêu cầu succeeded trước in_progress. Rescue đã paid đủ total có thể remaining=0 và completed mà không tạo order 0; maintenance additions giữ cách tính cumulative.
+- [x] Sau calculateQuote, `purpose=standard` yêu cầu total > 0 và nằm trong giới hạn amount thật sự payment hỗ trợ. Giữ calculator làm số học tổng quát, không cấm mọi line 0 hoặc cấm rescue parts rỗng.
+- [x] Validation hoàn thành trước supersede/insert/transition, tránh pending quote cũ bị mất khi quote mới invalid.
+- [x] Pending legacy standard 0 không được approve để vào awaiting_payment; trả conflict yêu cầu quote thay thế. Approved legacy 0 đưa vào danh sách cần xử lý admin, không sửa approved total hoặc sinh fake payment.
+- [x] Standard >0 vẫn yêu cầu succeeded trước in_progress. Rescue đã paid đủ total có thể remaining=0 và completed mà không tạo order 0; maintenance additions giữ cách tính cumulative.
 
 Điểm sửa: [quote service](D:/fpt/subject/EXE101/CareOnRoad-mobile-break/apps/api/src/features/quotes/quote.service.ts), quote schema/calculator tests và payment boundary tests.
 
@@ -272,11 +272,11 @@ Tasks:
 
 Tasks:
 
-- [ ] POST /auth/profile vẫn bootstrap. Bổ sung PATCH tự sửa display_name với schema strict, actor row lock và active check; không chấp nhận roles/status/account_type/rating/verified fields.
-- [ ] Reuse user repository; audit ghi loại thao tác/trường thay đổi, không copy tên hoặc PII không cần vào outbox.
-- [ ] Service-request list parse status/date_from/date_to/limit/cursor, reject query không hợp lệ; default limit 20, max 100, sort ổn định `(created_at,id)` và owner predicate trong mọi query.
-- [ ] Giữ `items`, bổ sung `page` có next_cursor/has_more; docs nói rõ giới hạn mới và cách đi trang. Không silently truncate mà không có cursor. Kiểm tra consumer contract trước rollout.
-- [ ] Rà soát assignment list dùng bởi rider/admin có bounded pagination tương ứng, giữ visibility hợp sau Batch 01. Không mở unrestricted query để tiện dashboard.
+- [x] POST /auth/profile vẫn bootstrap. Bổ sung PATCH tự sửa display_name với schema strict, actor row lock và active check; không chấp nhận roles/status/account_type/rating/verified fields.
+- [x] Reuse user repository; audit ghi loại thao tác/trường thay đổi, không copy tên hoặc PII không cần vào outbox.
+- [x] Service-request list parse status/date_from/date_to/limit/cursor, reject query không hợp lệ; default limit 20, max 100, sort ổn định `(created_at,id)` và owner predicate trong mọi query.
+- [x] Giữ `items`, bổ sung `page` có next_cursor/has_more; docs nói rõ giới hạn mới và cách đi trang. Không silently truncate mà không có cursor. Kiểm tra consumer contract trước rollout.
+- [x] Rà soát assignment list dùng bởi rider/admin có bounded pagination tương ứng, giữ visibility hợp sau Batch 01. Không mở unrestricted query để tiện dashboard.
 
 **Done:** PATCH đổi display name, gọi POST lại không giả làm update; roles/status injection bị 400; user khác không sửa được; pagination không trùng/mất item ở timestamp bằng nhau và không lộ đơn khác; filter thật sự tác động SQL.
 
@@ -286,13 +286,15 @@ Phạm vi tương ứng phần cần thiết của Patch E, T065–T083; manual 
 
 Tasks:
 
-- [ ] Read dispatch status/round detail/eligible mechanics/explanation bằng dữ liệu đã lưu và eligibility thật. Trả tất cả lý do loại phù hợp: inactive/role, skill, stale location, radius, current work, reservation và search limits; redacted và bounded.
-- [ ] Command expire overdue round, retry search và cancel dispatch có reason/idempotency. Request manual_escalation không active assignment được admin retry → submitted → matching hoặc cancel request theo Batch 03.
-- [ ] Retry mở search episode mới có provenance/budget rõ, không sửa/xóa round cũ và không mở lại vì đọc cùng request vô hạn. Tận dụng currentSearchRounds/recovery boundary; nếu chưa có marker episode đủ rõ, thêm field tối thiểu.
-- [ ] Phân biệt cancel dispatch với cancel request: dừng matching chuyển manual_escalation, còn hủy nhu cầu chuyển canceled. Không để request offered nhưng tất cả offers đã bị đóng mà không có action tiếp theo.
-- [ ] Reuse dispatch ranking/round creation trong service chung, không copy thuật toán cho admin. Notifications nói đúng kết quả; worker/rider/admin dùng cùng domain rules.
+- [x] Read dispatch status/round detail/eligible mechanics/explanation bằng dữ liệu đã lưu và eligibility thật. Trả tất cả lý do loại phù hợp: inactive/role, skill, stale location, radius, current work, reservation và search limits; redacted và bounded.
+- [x] Command expire overdue round, retry search và cancel dispatch có reason/idempotency. Request manual_escalation không active assignment được admin retry → submitted → matching hoặc cancel request theo Batch 03.
+- [x] Retry mở search episode mới có provenance/budget rõ, không sửa/xóa round cũ và không mở lại vì đọc cùng request vô hạn. Tận dụng currentSearchRounds/recovery boundary; nếu chưa có marker episode đủ rõ, thêm field tối thiểu.
+- [x] Phân biệt cancel dispatch với cancel request: dừng matching chuyển manual_escalation, còn hủy nhu cầu chuyển canceled. Không để request offered nhưng tất cả offers đã bị đóng mà không có action tiếp theo.
+- [x] Reuse dispatch ranking/round creation trong service chung, không copy thuật toán cho admin. Notifications nói đúng kết quả; worker/rider/admin dùng cùng domain rules.
 
 **Done:** manual_escalation có đường retry/cancel thực tế; exhausted retry không quay vòng vô hạn; cạnh tranh retry/worker/accept không tạo hai active rounds hoặc assignment thứ hai; rider/mechanic không gọi được admin mutation.
+
+**Đối chiếu hoàn tất 07–09:** standard total dùng payment cap 999999999999; profile audit reuse field allowlist; list cursor/SQL cùng millisecond precision. Admin retry tối đa 3 lần/request, mỗi episode 4 rounds/360s; migration 038 chỉ apply Docker test. Gate cuối: unit 674, DB 108, audit 14/14, typecheck/lint/build PASS. Chi tiết contract ở apps/api/PROFILE-LISTS-ADMIN-DISPATCH.md. Gate HTTP JWT/provider/worker thật của plan vẫn chờ Batch 14; manual assignment/source/provenance của Patch E giữ ở Batch 10.
 
 ### Batch 10 — Admin assignment operations và manual assignment
 
@@ -300,19 +302,19 @@ Phạm vi Patch F, T084–T097 và manual assign của Patch E.
 
 **10A: read models**
 
-- [ ] Admin assignment detail/timeline/internal note; dùng history/audit/metadata có sẵn. Redaction theo admin contract, pagination có giới hạn.
-- [ ] Hiển thị current vs future appointment, quote/agreement/payment commitment và safe next action codes; không đề xuất reassign/cancel nếu guard sẽ cấm.
+- [x] Admin assignment detail/timeline/internal note; dùng history/audit/metadata có sẵn. Redaction theo admin contract, pagination có giới hạn.
+- [x] Hiển thị current vs future appointment, quote/agreement/payment commitment và safe next action codes; không đề xuất reassign/cancel nếu guard sẽ cấm.
 
 **10B: commands**
 
-- [ ] Migration source/provenance/replacement fields, source-dependent candidate constraint và uniqueness cho replacement. Không dùng migration 017 cũ; không fake offer ID cho manual assignment.
-- [ ] Rà soát mọi caller của acceptedCandidateId khi field trở thành optional theo source: assignment DTO/mappers, quote pricing, admin/mechanic reads và test fixtures. Contract biểu diễn rõ manual source không có offer; không trả UUID giả để giữ type cũ.
-- [ ] Admin manual assign chỉ khi request chưa có active assignment, target có current role/profile/skill/location/radius/availability hợp lệ, không current/reservation conflict và không phát sinh chuyển tiền. Tất cả eligibility được re-check dưới khóa.
-- [ ] Source manual có thể không có accepted candidate. Lưu snapshot khoảng cách được server tính để rescue labor pricing vẫn hoạt động; acceptance thông thường cũng lưu snapshot từ candidate, quote giữ fallback cho legacy candidate. Không tin khoảng cách do admin/client nhập.
-- [ ] Thêm đúng request transitions cần cho canonical admin manual assignment, vẫn khóa command theo quyền/state; không dùng public status API để bypass matching.
-- [ ] Reassign chỉ accepted/en_route thực sự chưa quote/tiền; giữ assignment cũ recovery_canceled, replacement link và hai lịch sử trong cùng transaction. Reuse internal transaction helper, không gọi hai public services với UnitOfWork lồng nhau.
-- [ ] Các API cancel/resolve-stuck chỉ delegate command hợp lệ: cancel-before-commitment, pre-quote recovery/reassign, expire/retry matching, hoặc ghi case đang cần điều tra. Không arbitrary status input/force completed.
-- [ ] Paid/approved commitment trả conflict có reason code và note/history; không cấp quyền chuyển tiền cho admin bằng manual assign.
+- [x] Migration source/provenance/replacement fields, source-dependent candidate constraint và uniqueness cho replacement. Không dùng migration 017 cũ; không fake offer ID cho manual assignment.
+- [x] Rà soát mọi caller của acceptedCandidateId khi field trở thành optional theo source: assignment DTO/mappers, quote pricing, admin/mechanic reads và test fixtures. Contract biểu diễn rõ manual source không có offer; không trả UUID giả để giữ type cũ.
+- [x] Admin manual assign chỉ khi request chưa có active assignment, target có current role/profile/skill/location/radius/availability hợp lệ, không current/reservation conflict và không phát sinh chuyển tiền. Tất cả eligibility được re-check dưới khóa.
+- [x] Source manual có thể không có accepted candidate. Lưu snapshot khoảng cách được server tính để rescue labor pricing vẫn hoạt động; acceptance thông thường cũng lưu snapshot từ candidate, quote giữ fallback cho legacy candidate. Không tin khoảng cách do admin/client nhập.
+- [x] Thêm đúng request transitions cần cho canonical admin manual assignment, vẫn khóa command theo quyền/state; không dùng public status API để bypass matching.
+- [x] Reassign chỉ accepted/en_route thực sự chưa quote/tiền; giữ assignment cũ recovery_canceled, replacement link và hai lịch sử trong cùng transaction. Reuse internal transaction helper, không gọi hai public services với UnitOfWork lồng nhau.
+- [x] Các API cancel/resolve-stuck chỉ delegate command hợp lệ: cancel-before-commitment, pre-quote recovery/reassign, expire/retry matching, hoặc ghi case đang cần điều tra. Không arbitrary status input/force completed.
+- [x] Paid/approved commitment trả conflict có reason code và note/history; không cấp quyền chuyển tiền cho admin bằng manual assign.
 
 **Done:** manual/reassignment có nguồn và history chứng minh; quote rescue trên manual source vẫn tính khoảng cách server đúng; simultaneous manual assignments/reassignments chỉ một thắng; current slot + reservations đúng; profile inactive, location stale, thiếu skill và quote/payment commitment đều bị chặn.
 
@@ -322,14 +324,14 @@ Phạm vi Patch G, T098–T111, reconcile với workflow rescue/maintenance hi�
 
 Tasks:
 
-- [ ] Read diagnosis/quote history và request revision bằng append-only supervision action, notification cho đúng actor. Không sửa diagnosis/quote content đã phát hành.
-- [ ] Thêm `voided` cho pending quote bằng enum migration riêng; commit enum trước migration dùng giá trị mới. Void có reason/idempotency và không áp dụng approved/paid quote.
-- [ ] Expire chỉ quote đủ điều kiện/time policy; void không dùng tên expire để che việc hủy quote chưa hết hạn.
-- [ ] Sau void/expire, reset workflow theo purpose: pre-travel labor → accepted/assigned; standard/final/work chưa bắt đầu → trạng thái cho phép quote mới; pending maintenance addition → giữ approved work hiện tại in_progress. Không đổi agreement/labor cố định đã approved.
-- [ ] Quote dispute chỉ các action trong contract: request_revision, void_pending_quote, uphold_latest_quote, với audit và role checks. Không tự giảm tiền hoặc tạo refund.
-- [ ] Admin void/revision và rider approve cạnh tranh cùng locks; chỉ một kết quả hợp lệ. Cancel pending quote sau Batch 03 dùng canonical void rồi cancel, không bỏ pending quote bằng status endpoint.
-- [ ] Mở nhánh canonical admin cancel cho quote đã void/rejected/expired, chưa agreement approved/tiền và chưa work, sau khi re-check dưới cùng locks. Guard recovery vẫn cấm mọi quote đã phát hành; public mechanic/rider cancel không được dùng quote history đã đóng để nới quyền.
-- [ ] Reconcile spec/static “no payment” cũ với backend đã có payment: admin supervision không mutate ledger/provider nhưng phải đọc commitment để chặn thao tác sai.
+- [x] Read diagnosis/quote history và request revision bằng append-only supervision action, notification cho đúng actor. Không sửa diagnosis/quote content đã phát hành.
+- [x] Thêm `voided` cho pending quote bằng enum migration riêng; commit enum trước migration dùng giá trị mới. Void có reason/idempotency và không áp dụng approved/paid quote.
+- [x] Expire chỉ quote đủ điều kiện/time policy; void không dùng tên expire để che việc hủy quote chưa hết hạn.
+- [x] Sau void/expire, reset workflow theo purpose: pre-travel labor → accepted/assigned; standard/final/work chưa bắt đầu → trạng thái cho phép quote mới; pending maintenance addition → giữ approved work hiện tại in_progress. Không đổi agreement/labor cố định đã approved.
+- [x] Quote dispute chỉ các action trong contract: request_revision, void_pending_quote, uphold_latest_quote, với audit và role checks. Không tự giảm tiền hoặc tạo refund.
+- [x] Admin void/revision và rider approve cạnh tranh cùng locks; chỉ một kết quả hợp lệ. Cancel pending quote sau Batch 03 dùng canonical void rồi cancel, không bỏ pending quote bằng status endpoint.
+- [x] Mở nhánh canonical admin cancel cho quote đã void/rejected/expired, chưa agreement approved/tiền và chưa work, sau khi re-check dưới cùng locks. Guard recovery vẫn cấm mọi quote đã phát hành; public mechanic/rider cancel không được dùng quote history đã đóng để nới quyền.
+- [x] Reconcile spec/static “no payment” cũ với backend đã có payment: admin supervision không mutate ledger/provider nhưng phải đọc commitment để chặn thao tác sai.
 
 **Done:** quote content/version giữ bất biến; void/expire/approve race không commit hai quyết định; rescue labor đã approved không đổi; additions không xóa công việc đã duyệt; approved legacy standard 0 chỉ được báo cáo/điều tra theo policy, không sửa tổng.
 
@@ -337,35 +339,37 @@ Tasks:
 
 **12A: notification/outbox recovery — Patch H1**
 
-- [ ] Admin list/detail/delivery-summary/worker-health reuse bốn operational queues hiện có, không tạo một monitoring stack mới.
-- [ ] Retry notification chỉ receipt thất bại, không sent, còn delivery credential hợp lệ và không active lease. Retry outbox dead-letter reset retry/next-attempt theo policy, giữ payload/domain identity.
-- [ ] Cancel notification là dừng delivery chưa gửi, không thay unread/read state và không xóa inbox lịch sử. Abandon outbox ghi reason/provenance, worker không claim lại.
-- [ ] Phân loại topic được abandon an toàn; không bỏ domain handoff tài chính/nghiệp vụ quan trọng chỉ để xóa cảnh báo. Retry không tái tạo quote/payment/assignment đã tồn tại.
-- [ ] Enum canceled/abandoned nếu cần có migration commit boundary; worker claim/lease queries cập nhật cùng batch. Admin không đặt `sent` thủ công hoặc gọi FCM trực tiếp.
+- [x] Admin list/detail/delivery-summary/worker-health reuse bốn operational queues hiện có, không tạo một monitoring stack mới.
+- [x] Retry notification chỉ receipt thất bại, không sent, còn delivery credential hợp lệ và không active lease. Retry outbox dead-letter reset retry/next-attempt theo policy, giữ payload/domain identity.
+- [x] Cancel notification là dừng delivery chưa gửi, không thay unread/read state và không xóa inbox lịch sử. Abandon outbox ghi reason/provenance, worker không claim lại.
+- [x] Phân loại topic được abandon an toàn; không bỏ domain handoff tài chính/nghiệp vụ quan trọng chỉ để xóa cảnh báo. Retry không tái tạo quote/payment/assignment đã tồn tại.
+- [x] Enum canceled/abandoned nếu cần có migration commit boundary; worker claim/lease queries cập nhật cùng batch. Admin không đặt `sent` thủ công hoặc gọi FCM trực tiếp.
 
 **12B: audit query/export**
 
-- [ ] Cursor queries theo actor/entity/action/date và admin actions; giới hạn ngày/số bản ghi/thời gian.
-- [ ] Export định dạng đơn giản theo contract, bounded; audit source không update/delete/reorder. Một export thành công append đúng một access-audit chứa filter hash/count/actor/time, không copy exported content.
-- [ ] DTO loại secrets, PII/narrative/provider errors thô; test authorization và redaction cho cả read/export.
+- [x] Cursor queries theo actor/entity/action/date và admin actions; giới hạn ngày/số bản ghi/thời gian.
+- [x] Export định dạng đơn giản theo contract, bounded; audit source không update/delete/reorder. Một export thành công append đúng một access-audit chứa filter hash/count/actor/time, không copy exported content.
+- [x] DTO loại secrets, PII/narrative/provider errors thô; test authorization và redaction cho cả read/export.
 
-**Done:** retry/worker race không double deliver; cancel/abandon không làm event đang leased bị commit sai; inbox read-state nguyên ý nghĩa; domain replay không duplicate; export có access evidence và không mutate nguồn.
+**Done:** retry/worker race không tạo receipt/claim trùng hoặc commit stale outcome; delivery exactly-once tại provider sau network timeout vẫn cần acceptance Batch 14; cancel/abandon không làm event đang leased bị commit sai; inbox read-state nguyên ý nghĩa; domain replay không duplicate; export có access evidence và không mutate nguồn.
+
+**Đối chiếu hoàn tất 10–12:** migration 039 source/provenance/distance; 040/041 quote supervision; 042/043 delivery operations. Chỉ Docker test đã apply. Manual/reassign guard current roles sau profile lock; quote revision voids latest pending, phiên bản mới mới được approve; admin cancel closed quote history giữ money/work guards. Notification retry cap 3, command tối đa 100 receipts; audit window 31 ngày, export 10.000, query timeout 5s. Gate cuối 712 unit, 118 SQL, audit 14/14, typecheck/lint/build và preflight 043 PASS. Contract: apps/api/ADMIN-RECOVERY-OPERATIONS.md. Đây là snapshot lịch sử Batch 12; trạng thái mới ở Batches 13–15 bên dưới. Production acceptance vẫn chờ.
 
 ### Batch 13 — Reminder recovery, dashboard và spec reconciliation
 
 **13A: reminders — Patch H2**
 
-- [ ] Admin rule/occurrence list/detail/worker-health, enable/disable và failed-occurrence retry có reason/idempotency.
-- [ ] Không retry sent/dismissed hoặc active lease; giữ occurrence/request dedupe. Archived motorcycle không được re-enable reminder hoặc tạo job mới.
-- [ ] Race disable/archive/retry/worker không sinh duplicate maintenance request/push; chỉ date/time, không thêm kilometer/odometer.
+- [x] Admin rule/occurrence list/detail/worker-health, enable/disable và failed-occurrence retry có reason/idempotency.
+- [x] Không retry sent/dismissed hoặc active lease; giữ occurrence/request dedupe. Archived motorcycle không được re-enable reminder hoặc tạo job mới.
+- [x] Race disable/archive/retry/worker không sinh duplicate occurrence/notification/request nội bộ; chỉ date/time, không kilometer/odometer. Push thật vẫn thuộc provider/device acceptance.
 
 **13B: dashboard — Patch I**
 
-- [ ] Derived SQL summary cho request/dispatch/assignment/mechanic/worker và stuck workflows; reuse operational queries và bounded date filters, không tạo dashboard table/cache nếu chưa có nhu cầu đo được.
-- [ ] Bao gồm state divergence, manual escalation, quá cửa sổ appointment/chưa activated, pending quote/payment quá hạn, outbox dead-letter và worker thiếu tiến độ theo contract đã reconcile.
-- [ ] Safe action codes trỏ tới command Batch 09–12 và phản ánh commitment/lease thực tế. Không hiển thị resolve đã có API khi chỉ hỗ trợ ghi chú điều tra.
-- [ ] Đối chiếu tasks/contracts feature 003: đánh dấu reuse/done/superseded/deferred theo evidence; sửa số migration cũ và các giả định tiền/provider lỗi thời. Không chỉ tick đủ 111 ô.
-- [ ] Cập nhật handbook/AGENTS/workflow setup chỉ cho hành vi đã implement, tách source migration với migration thực sự deployed.
+- [x] Derived SQL summary cho request/dispatch/assignment/mechanic/worker và stuck workflows; reuse operational queries và bounded date filters, không tạo dashboard table/cache nếu chưa có nhu cầu đo được.
+- [x] Bao gồm state divergence, manual escalation, quá cửa sổ appointment/chưa activated, pending quote/payment quá hạn, outbox dead-letter và worker thiếu tiến độ theo contract đã reconcile.
+- [x] Safe action codes trỏ tới command Batch 09–12 và phản ánh commitment/lease thực tế. Không hiển thị resolve đã có API khi chỉ hỗ trợ ghi chú điều tra.
+- [x] Đối chiếu tasks/contracts feature 003: đánh dấu reuse/done/superseded/deferred theo evidence; sửa số migration cũ và các giả định tiền/provider lỗi thời. Không chỉ tick đủ 111 ô.
+- [x] Cập nhật handbook/AGENTS/workflow setup chỉ cho hành vi đã implement, tách source migration với migration thực sự deployed.
 
 **Done:** aggregate đối chiếu đúng fixture SQL; appointment không bị tính sai vào current work; mỗi stuck case không trùng và có action hợp lệ; reminder retry không spam hoặc tạo lại đơn.
 
@@ -373,26 +377,29 @@ Tasks:
 
 Tasks:
 
-- [ ] Cập nhật oracle audit theo các quyết định đã công bố: A05 reject zero, A08 require location, A06 đọc detail riêng, A09 scheduled accept có duration. Giữ báo cáo/log trước sửa để chứng minh vấn đề gốc và lý do đổi oracle.
-- [ ] Đưa regression phù hợp vào test thường; reuse fixtures/harness đang có, không giữ lỗi cốt lõi chỉ ở bộ audit ngoài default test.
-- [ ] Chạy HTTP với Supabase JWT/DB test thật: bootstrap rider/mechanic, admin approve, request/dispatch/accept, diagnosis/quote, ký webhook, progress, checklist, review, inbox. Trạng thái paid/completed không được SQL seed để vượt bước.
-- [ ] Chạy nhánh admin retry/manual assign/reassign/void/delivery retry/reminder retry rồi đọc kết quả lại qua API của rider/mechanic.
-- [ ] Chạy PostgreSQL concurrency theo ma trận ở mục 7; thử restart khi đã accept, khi payment link đang initialize và khi worker đã claim lease.
-- [ ] Chạy worker matching/recovery/dispatch/reminder/outbox/payment reconcile qua protected route/CLI, không gọi service trực tiếp để thay thế bằng chứng handoff HTTP.
-- [ ] Provider mode tách rõ: mock kiểm tra deterministic HTTP/signature/race; payOS configured test kiểm tra contract/network và nếu cần verified payment thật bằng transaction có authorization; FCM cần device observer để chứng minh push đến Android/iOS.
-- [ ] ETA/live tracking chỉ nghiệm thu provider/config thật khi feature enabled hợp lệ; disabled phải trả lỗi/status đúng và không bị đánh dấu implementation fail. Không ép bật Maps/live để làm báo cáo xanh.
-- [ ] `pnpm.cmd test`, typecheck, lint, build toàn workspace; DB integration qua test:db và HTTP suite riêng. Lưu run/commit/config mode/results, tách PASS/FAIL/BLOCKED.
+- [x] Cập nhật oracle audit theo các quyết định đã công bố: A05 reject zero, A08 require location, A06 đọc detail riêng, A09 scheduled accept có duration. Giữ báo cáo/log trước sửa để chứng minh vấn đề gốc và lý do đổi oracle.
+- [x] Đưa 14 audit regressions vào test thường; reuse harness, giữ baseline lịch sử.
+- [x] HTTP với Supabase ES256 JWT/DB Docker test thật và built Next runtime: bootstrap/approve, standard, rescue upfront/after_repair, maintenance, signed payment, checklist, completion/review/inbox. Không seed paid/completed.
+- [x] Nhánh admin retry/manual assign/reassign/void/delivery retry/reminder retry và đọc lại qua rider/mechanic APIs.
+- [x] PostgreSQL concurrency của ma trận và actual process restart sau accept, payment initialization, outbox worker claim.
+- [x] Matching/recovery/dispatch/reminder/outbox/payment reconcile qua protected HTTP workers.
+- [x] Local payOS HTTP/signature mode, delivery failure/retry và worker leases được kiểm tra riêng; report không quy đổi mock thành provider thật.
+- [x] Kiểm tra disabled ETA/live tracking giữ status đúng; existing provider/ingest regressions vẫn nằm trong suite.
+- [ ] payOS configured test/verified transaction thật; FCM device observer Android/iOS; ETA/live tracking enabled với provider/device phù hợp.
+- [x] `pnpm.cmd test`, typecheck, lint, build toàn workspace; DB integration qua test:db và HTTP suite riêng. Lưu run/commit/config mode/results, tách local PASS và external pending.
 - [ ] Apply/verify migration trên development/hosted đã được phép, chạy smoke sau rollout, cập nhật schema evidence và không seed production.
 
 **Done:** không còn B01–B12 chưa xử lý trong scope đã chọn; core và admin E–I có đủ route/service/test/SQL evidence; mọi blocked provider/device/business-policy được nêu cụ thể. Không tuyên bố “toàn bộ E2E” nếu chỉ có mock hoặc thiếu các bước tiền/push quan trọng.
 
+Local release evidence và production release là hai gate riêng. Những ô provider/hosted còn mở cần môi trường hoặc authorization triển khai; không được dùng production làm test DB.
+
 ### Batch 15 — Optional operational configuration
 
-Chỉ thực hiện khi nhóm cần sửa dispatch policy qua admin API; không phải điều kiện sửa 12 lỗi.
+Optional Patch J đã được người dùng cho phép trong yêu cầu implement đến hết Batch 15; không phải điều kiện sửa 12 lỗi.
 
-- [ ] Bốn keys: radius_steps_km, offer_expiry_seconds, max_rounds, total_wait_seconds theo Patch J.
-- [ ] Defaults/bounds/cross-field validation, version history, row locks, reason/idempotency/audit; immutable history.
-- [ ] Provider budget chỉ read-only metadata; không lưu secret, không sửa payment timing/maintenance workflow/feature flags qua API cấu hình chung.
+- [x] Bốn keys: radius_steps_km, offer_expiry_seconds, max_rounds, total_wait_seconds theo Patch J.
+- [x] Defaults/bounds/cross-field validation, version history, row locks, reason/idempotency/audit; immutable history.
+- [x] Provider budget chỉ read-only metadata; không lưu secret, không sửa payment timing/maintenance workflow/feature flags qua API cấu hình chung.
 
 **Done:** keys ngoài allowlist bị từ chối; config invalid rollback; disabling Patch J vẫn chạy defaults. Pricing/cancellation fee engine và refund là backlog riêng, không gộp vào batch này.
 

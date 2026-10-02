@@ -12,6 +12,12 @@ before or with implementation and retains the full regression suite.
 **Organization**: Tasks are grouped by user story. Patch A is shared foundation;
 Patches B-J map to the prioritized user stories below.
 
+Implementation reconciliation (03/10/2026): Patches A–I and explicitly authorized J are
+implemented in role-flow Batches 00–15; local acceptance results and remaining
+provider/device/production gates are recorded in the root batch report. Tests are consolidated rather than copied per planned
+filename. See root BACKEND-FIX-BATCHES-REPORT.md and
+apps/api/ADMIN-RECOVERY-OPERATIONS.md for scope, policies and evidence.
+
 ## Patch-to-Task Index
 
 | Patch | Task IDs | User story |
@@ -164,30 +170,32 @@ assign one eligible mechanic, and reject all stale/conflicting cases atomically.
 
 ### Patch E - Admin Dispatch Operations
 
+Batches 09–11 complete Patch E locally. Dispatch policy/reads/expire/retry/cancel reuse `DispatchService`; manual creation shares `AdminAssignmentService` with Patch F. Tests are `admin-dispatch.test.ts`, `admin-assignment.test.ts`, native `dispatch.repository.integration.test.ts`, and migration `admin-recovery-migrations.test.ts`. Migration 038 stores capped search episodes; 039 stores assignment provenance. No separate service/policy wrapper was added. Batch 14 adds local HTTP/JWT acceptance; real providers and production rollout remain pending.
+
 #### Tests
 
-- [ ] T065 [P] [US3] Write dispatch service tests for status/round/detail/expiry/retry/cancel/eligibility/manual assignment and every seeded failure combination, asserting all applicable failure reason categories, safe counts where meaningful, only next-command categories valid for the request state, and no private location history or secrets in src/features/admin/__tests__/admin-dispatch-operations.service.test.ts
-- [ ] T066 [P] [US3] Write dispatch route tests for authorization, reason, idempotency, pagination, stale-state conflicts, and stable errors in src/features/admin/__tests__/admin-dispatch.route-handlers.test.ts
-- [ ] T067 [P] [US3] Write migration static tests for assignment-source constraints, nullable candidate policy, admin provenance, supersedes uniqueness, and no payment schema in src/server/db/__tests__/admin-dispatch-assignment-migration.test.ts
-- [ ] T068 [US3] Write PostgreSQL concurrency tests for expiry-versus-accept, retry-versus-active-round, two manual assignments, active-job conflict, and rollback in src/server/repositories/postgres/__tests__/admin-dispatch-operations.integration.test.ts
+- [x] T065 [P] [US3] Write dispatch service tests for status/round/detail/expiry/retry/cancel/eligibility/manual assignment and every seeded failure combination, asserting all applicable failure reason categories, safe counts where meaningful, only next-command categories valid for the request state, and no private location history or secrets in src/features/admin/__tests__/admin-dispatch.test.ts and src/features/admin/__tests__/admin-assignment.test.ts
+- [x] T066 [P] [US3] Write dispatch route tests for authorization, reason, idempotency, pagination, stale-state conflicts, and stable errors in src/features/admin/__tests__/admin-dispatch.test.ts
+- [x] T067 [P] [US3] Write migration static tests for assignment-source constraints, nullable candidate policy, admin provenance, supersedes uniqueness, and no payment schema in src/server/db/__tests__/admin-recovery-migrations.test.ts
+- [x] T068 [US3] Write PostgreSQL concurrency tests for expiry-versus-accept, retry-versus-active-round, two manual assignments, active-job conflict, and rollback in src/server/repositories/postgres/__tests__/dispatch.repository.integration.test.ts
 
 #### Implementation
 
-- [ ] T069 [US3] Add assignment source/provenance/supersedes fields and source-dependent constraints in supabase/migrations/202606250017_admin_dispatch_assignment_operations.sql
-- [ ] T070 [US3] Update assignment contracts and candidate identity semantics for offer/manual/reassignment sources in src/server/repositories/contracts/assignment.repository.ts
-- [ ] T071 [P] [US3] Implement PostgreSQL assignment provenance mapping and manual-create locks in src/server/repositories/postgres/assignment.repository.ts
-- [ ] T072 [P] [US3] Implement in-memory assignment provenance and manual-create behavior in src/server/repositories/testing/in-memory-assignment.repository.ts
-- [ ] T073 [US3] Extend dispatch repository contracts with round locks, overdue expiry, categorized eligibility, and valid-offer queries in src/server/repositories/contracts/dispatch.repository.ts
-- [ ] T074 [P] [US3] Implement PostGIS admin eligibility and dispatch-failure reason aggregation in src/server/repositories/postgres/dispatch.repository.ts
-- [ ] T075 [P] [US3] Implement deterministic in-memory eligibility/failure explanations in src/server/repositories/testing/in-memory-dispatch.repository.ts
-- [ ] T076 [US3] Implement admin dispatch state policy for overdue expiry, retry limits, cancellation, and manual-assignable request states in src/features/admin/admin-dispatch-state.ts
-- [ ] T077 [US3] Implement `AdminDispatchOperationsService` read and eligibility methods plus failure explanations containing all applicable categories, safe counts where meaningful, and allowlisted next-command categories derived from the request's current state in src/features/admin/admin-dispatch-operations.service.ts
-- [ ] T078 [US3] Implement expire/retry/cancel commands with round/candidate/request locks, idempotency, history, audit reason, and outbox in src/features/admin/admin-dispatch-operations.service.ts
-- [ ] T079 [US3] Implement manual assignment with request/mechanic/assignment/dispatch locks and all eligibility invariants in src/features/admin/admin-dispatch-operations.service.ts
-- [ ] T080 [US3] Implement dispatch route-handler factory in src/features/admin/admin-dispatch.route-handlers.ts
-- [ ] T081 [P] [US3] Add dispatch status/round/expiry App Router adapters under app/api/v1/admin/dispatch/ and app/api/v1/admin/service-requests/[requestId]/dispatch/
-- [ ] T082 [P] [US3] Add dispatch retry/cancel/manual-assign/eligible/explanation adapters under app/api/v1/admin/service-requests/[requestId]/dispatch/
-- [ ] T083 [US3] Run Patch E focused and concurrency tests and verify normal mechanic offer acceptance remains unchanged in specs/003-careonroad-admin-operations/quickstart.md
+- [x] T069 [US3] Add assignment source/provenance/supersedes fields and source-dependent constraints in supabase/migrations/202606250039_admin_assignment_provenance.sql
+- [x] T070 [US3] Update assignment contracts and candidate identity semantics for offer/manual/reassignment sources in src/server/repositories/contracts/assignment.repository.ts
+- [x] T071 [P] [US3] Implement PostgreSQL assignment provenance mapping and manual-create locks in src/server/repositories/postgres/assignment.repository.ts
+- [x] T072 [P] [US3] Implement in-memory assignment provenance and manual-create behavior in src/server/repositories/testing/in-memory-assignment.repository.ts
+- [x] T073 [US3] Extend dispatch repository contracts with round locks, overdue expiry, categorized eligibility, and valid-offer queries in src/server/repositories/contracts/dispatch.repository.ts
+- [x] T074 [P] [US3] Implement PostGIS admin eligibility and dispatch-failure reason aggregation in src/server/repositories/postgres/dispatch.repository.ts
+- [x] T075 [P] [US3] Implement deterministic in-memory eligibility/failure explanations in src/server/repositories/testing/in-memory-dispatch.repository.ts
+- [x] T076 [US3] Implement admin dispatch state policy for overdue expiry, retry limits, cancellation, and manual-assignable request states in src/features/admin/admin-assignment.service.ts and src/features/dispatch/dispatch.service.ts
+- [x] T077 [US3] Implement `DispatchService` read and eligibility methods plus failure explanations containing all applicable categories, safe counts where meaningful, and allowlisted next-command categories derived from the request's current state in src/features/dispatch/dispatch.service.ts
+- [x] T078 [US3] Implement expire/retry/cancel commands with round/candidate/request locks, idempotency, history, audit reason, and outbox in src/features/dispatch/dispatch.service.ts
+- [x] T079 [US3] Implement manual assignment with request/mechanic/assignment/dispatch locks and all eligibility invariants in src/features/admin/admin-assignment.service.ts and src/features/dispatch/dispatch.service.ts
+- [x] T080 [US3] Implement dispatch route-handler factory in src/features/admin/admin-dispatch.route-handlers.ts
+- [x] T081 [P] [US3] Add dispatch status/round/expiry App Router adapters under app/api/v1/admin/dispatch/ and app/api/v1/admin/service-requests/[requestId]/dispatch/
+- [x] T082 [P] [US3] Add dispatch retry/cancel/manual-assign/eligible/explanation adapters under app/api/v1/admin/service-requests/[requestId]/dispatch/
+- [x] T083 [US3] Run Patch E focused and concurrency tests and verify normal mechanic offer acceptance remains unchanged in specs/003-careonroad-admin-operations/quickstart.md
 
 ---
 
@@ -204,45 +212,45 @@ rider decision without overwriting domain records.
 
 #### Tests
 
-- [ ] T084 [P] [US4] Write assignment operations service tests for detail/timeline/cancel/reassign/stuck actions/notes, state policy, rollback, history, audit/outbox, and no force-status in src/features/admin/__tests__/admin-assignment-operations.service.test.ts
-- [ ] T085 [P] [US4] Write assignment route tests for authorization, reason, idempotency, validation, and stable conflicts in src/features/admin/__tests__/admin-assignment.route-handlers.test.ts
-- [ ] T086 [US4] Write PostgreSQL concurrency tests for simultaneous reassignments, mechanic active-job conflicts, request synchronization, supersedes uniqueness, and rollback in src/server/repositories/postgres/__tests__/admin-assignment-operations.integration.test.ts
+- [x] T084 [P] [US4] Write assignment operations service tests for detail/timeline/cancel/reassign/stuck actions/notes, state policy, rollback, history, audit/outbox, and no force-status in src/features/admin/__tests__/admin-assignment.test.ts
+- [x] T085 [P] [US4] Write assignment route tests for authorization, reason, idempotency, validation, and stable conflicts in src/features/admin/__tests__/admin-assignment.test.ts
+- [x] T086 [US4] Write PostgreSQL concurrency tests for simultaneous reassignments, mechanic active-job conflicts, request synchronization, supersedes uniqueness, and rollback in src/server/repositories/postgres/__tests__/dispatch.repository.integration.test.ts
 
 #### Implementation
 
-- [ ] T087 [US4] Implement explicit admin assignment cancel/reassign/stuck action policy in src/features/admin/admin-assignment-state.ts
-- [ ] T088 [US4] Extend assignment repository history/detail locks and replacement queries in src/server/repositories/contracts/assignment.repository.ts
-- [ ] T089 [P] [US4] Implement PostgreSQL cancel/replacement/history operations in src/server/repositories/postgres/assignment.repository.ts
-- [ ] T090 [P] [US4] Implement in-memory cancel/replacement/history operations in src/server/repositories/testing/in-memory-assignment.repository.ts
-- [ ] T091 [US4] Implement `AdminAssignmentOperationsService` detail/timeline and canonical cancellation in src/features/admin/admin-assignment-operations.service.ts
-- [ ] T092 [US4] Implement canonical reassignment transaction and dispatch-service delegation in src/features/admin/admin-assignment-operations.service.ts
-- [ ] T093 [US4] Implement allowlisted stuck resolution and assignment internal-note commands in src/features/admin/admin-assignment-operations.service.ts
-- [ ] T094 [US4] Implement assignment route-handler factory in src/features/admin/admin-assignment.route-handlers.ts
-- [ ] T095 [P] [US4] Add assignment detail/timeline/cancel/reassign adapters under app/api/v1/admin/assignments/[assignmentId]/
-- [ ] T096 [P] [US4] Add assignment resolve-stuck and internal-note adapters under app/api/v1/admin/assignments/[assignmentId]/
-- [ ] T097 [US4] Run Patch F state-machine/concurrency tests and verify existing mechanic/admin assignment transition routes in specs/003-careonroad-admin-operations/quickstart.md
+- [x] T087 [US4] Implement explicit admin assignment cancel/reassign/stuck action policy in src/features/admin/admin-assignment.service.ts and src/features/assignments/assignment-cancellation.ts
+- [x] T088 [US4] Extend assignment repository history/detail locks and replacement queries in src/server/repositories/contracts/assignment.repository.ts
+- [x] T089 [P] [US4] Implement PostgreSQL cancel/replacement/history operations in src/server/repositories/postgres/assignment.repository.ts
+- [x] T090 [P] [US4] Implement in-memory cancel/replacement/history operations in src/server/repositories/testing/in-memory-assignment.repository.ts
+- [x] T091 [US4] Implement `AdminAssignmentService` detail/timeline and canonical cancellation in src/features/admin/admin-assignment.service.ts
+- [x] T092 [US4] Implement canonical reassignment transaction using shared dispatch eligibility/closure in src/features/admin/admin-assignment.service.ts
+- [x] T093 [US4] Implement allowlisted stuck resolution and assignment internal-note commands in src/features/admin/admin-assignment.service.ts
+- [x] T094 [US4] Implement assignment route-handler factory in src/features/admin/admin-assignment.route-handlers.ts
+- [x] T095 [P] [US4] Add assignment detail/timeline/cancel/reassign adapters under app/api/v1/admin/assignments/[assignmentId]/
+- [x] T096 [P] [US4] Add assignment resolve-stuck and internal-note adapters under app/api/v1/admin/assignments/[assignmentId]/
+- [x] T097 [US4] Run Patch F state-machine/concurrency tests and verify existing mechanic/admin assignment transition routes in specs/003-careonroad-admin-operations/quickstart.md
 
 ### Patch G - Admin Diagnosis and Quote Supervision
 
 #### Tests
 
-- [ ] T098 [P] [US4] Write diagnosis/quote supervision service tests for redacted detail, history, revision, void, expiry, dispute commands, immutability, reason, audit/outbox, and new-version requirements in src/features/admin/__tests__/admin-diagnosis-quote.service.test.ts
-- [ ] T099 [P] [US4] Write diagnosis/quote admin route tests for authorization, idempotency, allowlisted resolutions, stable conflicts, and text redaction in src/features/admin/__tests__/admin-diagnosis-quote.route-handlers.test.ts
-- [ ] T100 [US4] Write ordered-migration and PostgreSQL race tests proving quote enum migration 018 commits before supervision migration 019 uses `voided`, plus rider approval versus void/expiry and unchanged diagnosis/quote content in src/server/repositories/postgres/__tests__/admin-diagnosis-quote.integration.test.ts
+- [x] T098 [P] [US4] Write diagnosis/quote supervision service tests for redacted detail, history, revision, void, expiry, dispute commands, immutability, reason, audit/outbox, and new-version requirements in src/features/admin/__tests__/admin-supervision.test.ts
+- [x] T099 [P] [US4] Write diagnosis/quote admin route tests for authorization, idempotency, allowlisted resolutions, stable conflicts, and text redaction in src/features/admin/__tests__/admin-supervision.test.ts
+- [x] T100 [US4] Write ordered-migration and PostgreSQL race tests proving quote enum migration 040 commits before supervision migration 041 uses `voided`, plus rider approval versus void/expiry and unchanged diagnosis/quote content in src/server/repositories/postgres/__tests__/diagnosis-quote.repositories.integration.test.ts
 
 #### Implementation
 
-- [ ] T101 [US4] Add `voided` enum-only migration followed by append-only supervision actions, transition constraints, indexes, and RLS in supabase/migrations/202606250018_admin_quote_status.sql and supabase/migrations/202606250019_admin_supervision_actions.sql
-- [ ] T102 [P] [US4] Define admin supervision repository contract and action models in src/server/repositories/contracts/admin-supervision.repository.ts
-- [ ] T103 [P] [US4] Implement PostgreSQL supervision action repository and quote row locks in src/server/repositories/postgres/admin-supervision.repository.ts
-- [ ] T104 [P] [US4] Implement in-memory supervision action repository in src/server/repositories/testing/in-memory-admin-supervision.repository.ts
-- [ ] T105 [US4] Extend quote status contracts/repositories for pending-to-voided transition without content mutation in src/server/repositories/contracts/quote.repository.ts and src/server/repositories/postgres/quote.repository.ts
-- [ ] T106 [US4] Register supervision repositories in all UnitOfWork implementations in src/server/repositories/contracts/unit-of-work.ts
-- [ ] T107 [US4] Implement `AdminDiagnosisQuoteService` redacted reads and revision request commands in src/features/admin/admin-diagnosis-quote.service.ts
-- [ ] T108 [US4] Implement quote void/expiry/dispute commands with related-row locks, latest-state checks, audit reason, and outbox in src/features/admin/admin-diagnosis-quote.service.ts
-- [ ] T109 [US4] Implement diagnosis/quote route-handler factory in src/features/admin/admin-diagnosis-quote.route-handlers.ts
-- [ ] T110 [P] [US4] Add diagnosis revision and quote history/revision/void/expire/dispute adapters under app/api/v1/admin/diagnoses/, app/api/v1/admin/quotes/, and app/api/v1/admin/service-requests/
-- [ ] T111 [US4] Run Patch G race/immutability tests and scan audit/outbox fixtures for full diagnosis or quote narrative in specs/003-careonroad-admin-operations/quickstart.md
+- [x] T101 [US4] Add `voided` enum-only migration followed by append-only supervision actions, transition constraints, indexes, and RLS in supabase/migrations/202606250040_admin_quote_status.sql and supabase/migrations/202606250041_admin_supervision_actions.sql
+- [x] T102 [P] [US4] Define admin supervision repository contract and action models in src/server/repositories/contracts/admin-supervision.repository.ts
+- [x] T103 [P] [US4] Implement PostgreSQL supervision action repository and quote row locks in src/server/repositories/postgres/admin-supervision.repository.ts
+- [x] T104 [P] [US4] Implement in-memory supervision action repository in src/server/repositories/testing/in-memory-admin-supervision.repository.ts
+- [x] T105 [US4] Extend quote status contracts/repositories for pending-to-voided transition without content mutation in src/server/repositories/contracts/quote.repository.ts and src/server/repositories/postgres/quote.repository.ts
+- [x] T106 [US4] Register supervision repositories in all UnitOfWork implementations in src/server/repositories/contracts/unit-of-work.ts
+- [x] T107 [US4] Implement `AdminSupervisionService` redacted reads and revision request commands in src/features/admin/admin-supervision.service.ts
+- [x] T108 [US4] Implement quote void/expiry/dispute commands with related-row locks, latest-state checks, audit reason, and outbox in src/features/admin/admin-supervision.service.ts
+- [x] T109 [US4] Implement diagnosis/quote route-handler factory in src/features/admin/admin-supervision.route-handlers.ts
+- [x] T110 [P] [US4] Add diagnosis revision and quote history/revision/void/expire/dispute adapters under app/api/v1/admin/diagnoses/, app/api/v1/admin/quotes/, and app/api/v1/admin/service-requests/
+- [x] T111 [US4] Run Patch G race/immutability tests and scan audit/outbox fixtures for full diagnosis or quote narrative in specs/003-careonroad-admin-operations/quickstart.md
 
 ---
 
@@ -257,30 +265,30 @@ duplicate domain mutation.
 
 ### Tests
 
-- [ ] T112 [P] [US5] Write audit query/export service tests for filters, cursors, entity/actor/admin timelines, export bounds, source audit rows not being modified/deleted/reordered/replaced, each successful export appending exactly one sanitized export-access audit record, and exported content never being copied into that record in src/features/admin/__tests__/admin-audit-query.service.test.ts
-- [ ] T113 [P] [US5] Write notification operations service tests for list/detail/summary/retry/cancel, delivery races, reason, idempotency, audit/outbox, and no manual sent in src/features/admin/__tests__/admin-notification-operations.service.test.ts
-- [ ] T114 [P] [US5] Write outbox operations service tests for list/detail/dead-letter/health/retry/abandon, lease conflicts, redaction, idempotency, and no duplicate domain mutation in src/features/admin/__tests__/admin-outbox-operations.service.test.ts
-- [ ] T115 [P] [US5] Write Patch H1 route tests for the admin authorization matrix, filters, pagination, reason validation, export bounds, and stable errors in src/features/admin/__tests__/admin-operations-h1.route-handlers.test.ts
-- [ ] T116 [US5] Write ordered-migration and PostgreSQL concurrency tests proving enum migration 020 commits before delivery migration 021 uses canceled/abandoned, plus claim exclusions, retry reset, active leases, and append-only audit in src/server/repositories/postgres/__tests__/admin-delivery-operations.integration.test.ts
+- [x] T112 [P] [US5] Write audit query/export service tests for filters, cursors, entity/actor/admin timelines, export bounds, source audit rows not being modified/deleted/reordered/replaced, each successful export appending exactly one sanitized export-access audit record, and exported content never being copied into that record in src/features/admin/__tests__/admin-delivery-audit.test.ts
+- [x] T113 [P] [US5] Write notification operations service tests for list/detail/summary/retry/cancel, delivery races, reason, idempotency, audit/outbox, and no manual sent in src/features/admin/__tests__/admin-delivery-audit.test.ts
+- [x] T114 [P] [US5] Write outbox operations service tests for list/detail/dead-letter/health/retry/abandon, lease conflicts, redaction, idempotency, and no duplicate domain mutation in src/features/admin/__tests__/admin-delivery-audit.test.ts
+- [x] T115 [P] [US5] Write Patch H1 route tests for the admin authorization matrix, filters, pagination, reason validation, export bounds, and stable errors in src/features/admin/__tests__/admin-delivery-audit.test.ts
+- [x] T116 [US5] Write ordered-migration and PostgreSQL concurrency tests proving enum migration 042 commits before delivery migration 043 uses canceled/abandoned, plus claim exclusions, retry reset, active leases, and append-only audit in src/server/repositories/postgres/__tests__/admin-delivery-audit.integration.test.ts and src/server/db/__tests__/migration-lifecycle.integration.test.ts
 
 ### Implementation
 
-- [ ] T117 [US5] Add canceled/abandoned enum-only migration followed by delivery provenance fields, constraints, and claim indexes in supabase/migrations/202606250020_admin_delivery_statuses.sql and supabase/migrations/202606250021_admin_delivery_operations.sql
-- [ ] T118 [US5] Extend audit repository contract with paginated safe queries, admin reason, timelines, and bounded export in src/server/repositories/contracts/audit.repository.ts
-- [ ] T119 [P] [US5] Implement PostgreSQL audit filters/cursors/export and admin action history in src/server/repositories/postgres/audit.repository.ts
-- [ ] T120 [P] [US5] Implement equivalent in-memory audit queries in src/server/repositories/testing/in-memory-audit.repository.ts
-- [ ] T121 [US5] Extend notification repository contracts and adapters for row locks, failed retry, pending cancel, and summaries in src/server/repositories/contracts/notification.repository.ts
-- [ ] T122 [US5] Extend outbox repository contracts and adapters for safe queries, row locks, dead-letter retry, abandon, and health in src/server/repositories/contracts/outbox.repository.ts
-- [ ] T123 [US5] Update outbox worker claim/delivery handling to exclude abandoned/canceled work without changing normal retry behavior in src/server/workers/outbox.worker.ts
-- [ ] T124 [US5] Implement `AdminAuditQueryService` with source-row-preserving queries and a sanitized bounded export command that appends exactly one access-audit event containing only requesting admin, filter hash, exported count, and timestamp without exported content in src/features/admin/admin-audit-query.service.ts
-- [ ] T125 [US5] Implement `AdminNotificationOperationsService` queries and retry/cancel commands in src/features/admin/admin-notification-operations.service.ts
-- [ ] T126 [US5] Implement `AdminOutboxOperationsService` queries and retry/abandon commands in src/features/admin/admin-outbox-operations.service.ts
-- [ ] T127 [P] [US5] Implement audit, notification, and outbox route-handler factories in src/features/admin/admin-audit.route-handlers.ts, src/features/admin/admin-notification.route-handlers.ts, and src/features/admin/admin-outbox.route-handlers.ts
-- [ ] T128 [P] [US5] Add audit query/export/admin-action adapters under app/api/v1/admin/audit/
-- [ ] T129 [P] [US5] Add notification list/detail/retry/cancel/summary adapters under app/api/v1/admin/notifications/
-- [ ] T130 [P] [US5] Add outbox list/detail/dead-letter/retry/abandon/health adapters under app/api/v1/admin/outbox/
-- [ ] T131 [US5] Add static redaction regression tests for all Patch H1 list/detail/export DTOs in src/features/admin/__tests__/admin-operations-h1-redaction.test.ts
-- [ ] T132 [US5] Run Patch H1 focused/worker tests and verify no external delivery provider or direct source-audit mutation route was added in specs/003-careonroad-admin-operations/quickstart.md
+- [x] T117 [US5] Add canceled/abandoned enum-only migration followed by delivery provenance fields, constraints, and claim indexes in supabase/migrations/202606250042_admin_delivery_statuses.sql and supabase/migrations/202606250043_admin_delivery_operations.sql
+- [x] T118 [US5] Extend audit repository contract with paginated safe queries, admin reason, timelines, and bounded export in src/server/repositories/contracts/audit.repository.ts
+- [x] T119 [P] [US5] Implement PostgreSQL audit filters/cursors/export and admin action history in src/server/repositories/postgres/audit.repository.ts
+- [x] T120 [P] [US5] Implement equivalent in-memory audit queries in src/server/repositories/testing/in-memory-audit.repository.ts
+- [x] T121 [US5] Extend notification repository contracts and adapters for row locks, failed retry, pending cancel, and summaries in src/server/repositories/contracts/notification.repository.ts
+- [x] T122 [US5] Extend outbox repository contracts and adapters for safe queries, row locks, dead-letter retry, abandon, and health in src/server/repositories/contracts/outbox.repository.ts
+- [x] T123 [US5] Update outbox worker claim/delivery handling to exclude abandoned/canceled work without changing normal retry behavior in src/features/outbox/outbox-consumers.ts, src/features/notifications/notification-delivery.service.ts, and PostgreSQL receipt/outbox adapters
+- [x] T124 [US5] Implement `AdminAuditService` with source-row-preserving queries and a sanitized bounded export command that appends exactly one access-audit event containing only requesting admin, filter hash, exported count, and timestamp without exported content in src/features/admin/admin-audit.service.ts
+- [x] T125 [US5] Implement `AdminDeliveryService` queries and retry/cancel commands in src/features/admin/admin-delivery.service.ts
+- [x] T126 [US5] Implement `AdminDeliveryService` queries and retry/abandon commands in src/features/admin/admin-delivery.service.ts
+- [x] T127 [P] [US5] Implement audit, notification, and outbox route-handler factories in src/features/admin/admin-audit.route-handlers.ts, src/features/admin/admin-delivery.route-handlers.ts
+- [x] T128 [P] [US5] Add audit query/export/admin-action adapters under app/api/v1/admin/audit/
+- [x] T129 [P] [US5] Add notification list/detail/retry/cancel/summary adapters under app/api/v1/admin/notifications/
+- [x] T130 [P] [US5] Add outbox list/detail/dead-letter/retry/abandon/health adapters under app/api/v1/admin/outbox/
+- [x] T131 [US5] Add static redaction regression tests for all Patch H1 list/detail/export DTOs in src/features/admin/__tests__/admin-delivery-audit.test.ts
+- [x] T132 [US5] Run Patch H1 focused/worker tests and verify no external delivery provider or direct source-audit mutation route was added in specs/003-careonroad-admin-operations/quickstart.md
 
 ---
 
@@ -294,26 +302,26 @@ race worker processing, and reject sent/dismissed retries.
 
 ### Tests
 
-- [ ] T133 [P] [US6] Write reminder admin service tests for list/detail/occurrences/health/enable/disable/retry, state rules, idempotency, audit/outbox, and no duplicate spam in src/features/admin/__tests__/admin-reminder-management.service.test.ts
-- [ ] T134 [P] [US6] Write reminder admin route tests for authorization, filters, pagination, reason, next-due validation, and stable errors in src/features/admin/__tests__/admin-reminder.route-handlers.test.ts
-- [ ] T135 [US6] Write PostgreSQL concurrency tests for admin retry versus worker claim, sent/dismissed rejection, failure-count handling, and rollback in src/server/repositories/postgres/__tests__/admin-reminder-management.integration.test.ts
+- [x] T133 [P] [US6] Write reminder admin service tests for list/detail/occurrences/health/enable/disable/retry, state rules, idempotency, audit/outbox, and no duplicate spam in src/features/admin/__tests__/admin-reminder-dashboard.test.ts
+- [x] T134 [P] [US6] Write reminder admin route tests for authorization, filters, pagination, reason, next-due validation, and stable errors in src/features/admin/__tests__/admin-reminder-dashboard.test.ts
+- [x] T135 [US6] Write PostgreSQL concurrency tests for admin retry versus worker claim, sent/dismissed rejection, failure-count handling, and rollback in src/server/repositories/postgres/__tests__/admin-reminder-dashboard.integration.test.ts
 
 ### Implementation
 
-- [ ] T136 [US6] Extend reminder repository contracts with admin pagination, rule/occurrence locks, enable/disable, failed retry, and health queries in src/server/repositories/contracts/reminder.repository.ts
-- [ ] T137 [P] [US6] Implement PostgreSQL admin reminder queries and contested retry behavior in src/server/repositories/postgres/reminder.repository.ts
-- [ ] T138 [P] [US6] Implement in-memory admin reminder queries and retry behavior in src/server/repositories/testing/in-memory-reminder.repository.ts
-- [ ] T139 [US6] Implement `AdminReminderManagementService` read methods and enable/disable/retry commands in src/features/admin/admin-reminder-management.service.ts
-- [ ] T140 [US6] Implement reminder route-handler factory in src/features/admin/admin-reminder.route-handlers.ts
-- [ ] T141 [P] [US6] Add reminder list/detail/enable/disable/occurrence adapters under app/api/v1/admin/reminders/
-- [ ] T142 [P] [US6] Add failed-occurrence retry and reminder worker-health adapters under app/api/v1/admin/reminder-occurrences/ and app/api/v1/admin/reminders/worker-health/
-- [ ] T143 [US6] Run Patch H2 focused/worker tests and static-check that no kilometer/odometer fields exist in src/features/admin/__tests__/admin-reminder-scope.static.test.ts
+- [x] T136 [US6] Extend reminder repository contracts with admin pagination, rule/occurrence locks, enable/disable, failed retry, and health queries in src/server/repositories/contracts/reminder.repository.ts
+- [x] T137 [P] [US6] Implement PostgreSQL admin reminder queries and contested retry behavior in src/server/repositories/postgres/reminder.repository.ts
+- [x] T138 [P] [US6] Implement in-memory admin reminder queries and retry behavior in src/server/repositories/testing/in-memory-reminder.repository.ts
+- [x] T139 [US6] Implement `AdminReminderService` read methods and enable/disable/retry commands in src/features/admin/admin-reminder.service.ts
+- [x] T140 [US6] Implement reminder route-handler factory in src/features/admin/admin-reminder.route-handlers.ts
+- [x] T141 [P] [US6] Add reminder list/detail/enable/disable/occurrence adapters under app/api/v1/admin/reminders/
+- [x] T142 [P] [US6] Add failed-occurrence retry and reminder worker-health adapters under app/api/v1/admin/reminder-occurrences/ and app/api/v1/admin/reminders/worker-health/
+- [x] T143 [US6] Run Patch H2 focused/worker tests and static-check that no kilometer/odometer fields exist in src/features/admin/__tests__/admin-api-routes.static.test.ts
 
 ---
 
 ## Phase 9: User Story 7 - Monitor Operational Health (Priority: P3) - Patch I
 
-**Goal**: Admin can read reconciled operational metrics and all six required
+**Goal**: Admin can read reconciled operational metrics and all nine implemented
 stuck-workflow categories without mutating state.
 
 **Independent Test**: Seed known aggregates and one fixture per stuck category;
@@ -322,20 +330,20 @@ behavior, and bounded runtime.
 
 ### Tests
 
-- [ ] T144 [P] [US7] Write dashboard service tests for all metric groups, date bounds, reconciliation, and read-only behavior in src/features/admin/__tests__/admin-dashboard.service.test.ts
-- [ ] T145 [P] [US7] Write stuck-workflow tests for six categories, threshold boundaries, no duplicates, reason codes, and safe next actions in src/features/admin/__tests__/admin-stuck-workflows.test.ts
-- [ ] T146 [P] [US7] Write dashboard route tests for authorization, filters, pagination, response bounds, and stable errors in src/features/admin/__tests__/admin-dashboard.route-handlers.test.ts
-- [ ] T147 [US7] Write PostgreSQL aggregate reconciliation, threshold-boundary, duplicate-finding, and response-bound tests in src/server/repositories/postgres/__tests__/admin-dashboard.integration.test.ts
+- [x] T144 [P] [US7] Write dashboard service tests for all metric groups, date bounds, reconciliation, and read-only behavior in src/features/admin/__tests__/admin-reminder-dashboard.test.ts
+- [x] T145 [P] [US7] Write stuck-workflow tests for nine categories, threshold boundaries, no duplicates, reason codes, and safe next actions in src/features/admin/__tests__/admin-reminder-dashboard.test.ts and src/server/repositories/postgres/__tests__/admin-reminder-dashboard.integration.test.ts
+- [x] T146 [P] [US7] Write dashboard route tests for authorization, filters, pagination, response bounds, and stable errors in src/features/admin/__tests__/admin-reminder-dashboard.test.ts
+- [x] T147 [US7] Write PostgreSQL aggregate reconciliation, threshold-boundary, duplicate-finding, and response-bound tests in src/server/repositories/postgres/__tests__/admin-reminder-dashboard.integration.test.ts
 
 ### Implementation
 
-- [ ] T148 [US7] Extend `AdminQueryRepository` with bounded operational summary, dispatch, assignment, mechanic, request, worker, and stuck-workflow queries in src/server/repositories/contracts/admin-query.repository.ts
-- [ ] T149 [P] [US7] Implement PostgreSQL aggregate and six-category stuck-workflow queries without dashboard persistence in src/server/repositories/postgres/admin-query.repository.ts
-- [ ] T150 [P] [US7] Implement deterministic in-memory dashboard aggregates and findings in src/server/repositories/testing/in-memory-admin-query.repository.ts
-- [ ] T151 [US7] Define documented default assignment/reminder stuck thresholds and safe action mappings in src/features/admin/admin-operational-policy.ts
-- [ ] T152 [US7] Implement `AdminDashboardService` read-only DTO composition in src/features/admin/admin-dashboard.service.ts
-- [ ] T153 [US7] Implement dashboard route-handler factory in src/features/admin/admin-dashboard.route-handlers.ts
-- [ ] T154 [P] [US7] Add summary/metrics/workers/stuck-workflows adapters under app/api/v1/admin/dashboard/
+- [x] T148 [US7] Extend `AdminQueryRepository` with bounded operational summary, dispatch, assignment, mechanic, request, worker, and stuck-workflow queries in src/server/repositories/contracts/admin-query.repository.ts
+- [x] T149 [P] [US7] Implement PostgreSQL aggregate and nine-category stuck-workflow queries without dashboard persistence in src/server/repositories/postgres/admin-query.repository.ts
+- [x] T150 [P] [US7] Implement deterministic in-memory dashboard aggregates and findings in src/server/repositories/testing/in-memory-admin-query.repository.ts
+- [x] T151 [US7] Define documented default assignment/reminder stuck thresholds and safe action mappings in src/features/admin/admin-operational-policy.ts
+- [x] T152 [US7] Implement `AdminDashboardService` read-only DTO composition in src/features/admin/admin-dashboard.service.ts
+- [x] T153 [US7] Implement dashboard route-handler factory in src/features/admin/admin-dashboard.route-handlers.ts
+- [x] T154 [P] [US7] Add summary/metrics/workers/stuck-workflows adapters under app/api/v1/admin/dashboard/
 
 ---
 
@@ -352,21 +360,22 @@ provider-budget, maintenance-mode, secret-like, and out-of-range mutations.
 
 ### Tests
 
-- [ ] T155 [P] [US8] Write configuration service tests for the exact four-key dispatch allowlist, defaults, types, numeric bounds, ascending 1-to-8 radius steps, total-wait-versus-offer-expiry validation, versions, Patch-J-disabled behavior, read-only provider budget metadata, rejected feature-flag/provider-budget/maintenance mutations, reason, idempotency, audit/outbox, rollback, and secret rejection in src/features/admin/__tests__/admin-configuration.service.test.ts
-- [ ] T156 [P] [US8] Write configuration route tests for authorization, reason, exact dispatch keys, boundary values, provider-budget read-only access, unknown/feature-flag/provider-budget/maintenance/secret-like mutation rejection, and stable errors in src/features/admin/__tests__/admin-configuration.route-handlers.test.ts
-- [ ] T157 [US8] Write migration and PostgreSQL integration tests for current/version rows restricted to the four dispatch keys, atomic increments, append-only history, RLS, and no credential, feature-flag, provider-budget, or maintenance-mode storage in src/server/repositories/postgres/__tests__/admin-configuration.integration.test.ts
+- [x] T155 [P] [US8] Write configuration service tests for the exact four-key dispatch allowlist, defaults, types, numeric bounds, ascending 1-to-8 radius steps, total-wait-versus-offer-expiry validation, versions, Patch-J-disabled behavior, read-only provider budget metadata, rejected feature-flag/provider-budget/maintenance mutations, reason, idempotency, audit/outbox, rollback, and secret rejection in src/features/admin/__tests__/admin-configuration.test.ts
+- [x] T156 [P] [US8] Write configuration route tests for authorization, reason, exact dispatch keys, boundary values, provider-budget read-only access, unknown/feature-flag/provider-budget/maintenance/secret-like mutation rejection, and stable errors in src/features/admin/__tests__/admin-configuration.test.ts
+- [x] T157 [US8] Write migration and PostgreSQL integration tests for current/version rows restricted to the four dispatch keys, atomic increments, append-only history, RLS, and no credential, feature-flag, provider-budget, or maintenance-mode storage in src/server/repositories/postgres/__tests__/admin-configuration.integration.test.ts
 
 ### Implementation
 
-- [ ] T158 [US8] Add optional configuration current/version tables restricted to `dispatch.radius_steps_km`, `dispatch.offer_expiry_seconds`, `dispatch.max_rounds`, and `dispatch.total_wait_seconds`, with constraints, indexes, append-only history, and RLS in supabase/migrations/202606250022_admin_operation_configs.sql
-- [ ] T159 [P] [US8] Define the four typed mutable dispatch values and read-only provider budget metadata in the admin configuration repository contract in src/server/repositories/contracts/admin-configuration.repository.ts
-- [ ] T160 [P] [US8] Implement PostgreSQL locking, exact-key validation, versioning, and reads for the four dispatch configuration keys in src/server/repositories/postgres/admin-configuration.repository.ts
-- [ ] T161 [P] [US8] Implement equivalent in-memory four-key dispatch configuration behavior in src/server/repositories/testing/in-memory-admin-configuration.repository.ts
-- [ ] T162 [US8] Register optional configuration repositories in all UnitOfWork implementations in src/server/repositories/contracts/unit-of-work.ts
-- [ ] T163 [US8] Implement exact four-key dispatch schemas with documented defaults, types, bounds, ascending radius steps, cross-field total-wait validation, and unknown/secret/feature-flag/provider-budget/maintenance mutation rejection in src/features/admin/admin-configuration.schemas.ts
-- [ ] T164 [US8] Implement `AdminConfigurationService` dispatch reads/updates and read-only provider budget metadata without feature-flag, provider-budget, maintenance-mode, or chatbot/provider behavior mutations in src/features/admin/admin-configuration.service.ts
-- [ ] T165 [US8] Implement configuration route-handler factory in src/features/admin/admin-configuration.route-handlers.ts
-- [ ] T166 [P] [US8] Add configuration read, dispatch update, and read-only provider-budget metadata adapters under app/api/v1/admin/configuration/
+- [x] T158 [US8] Add optional configuration current/version tables restricted to `dispatch.radius_steps_km`, `dispatch.offer_expiry_seconds`, `dispatch.max_rounds`, and `dispatch.total_wait_seconds`, with constraints, indexes, append-only history, and RLS in supabase/migrations/202606250045_admin_dispatch_configuration.sql (explicitly authorized Batch 15)
+- Batch 15 follow-up: migration `202606250046_dispatch_radius_policy_bounds.sql` accepts configured radii within 1–100 km. Native dispatch/worker tests exercise non-default fractional steps and snapshot preservation across configuration updates.
+- [x] T159 [P] [US8] Define the four typed mutable dispatch values and read-only provider budget metadata in the admin configuration repository contract in src/server/repositories/contracts/admin-configuration.repository.ts
+- [x] T160 [P] [US8] Implement PostgreSQL locking, exact-key validation, versioning, and reads for the four dispatch configuration keys in src/server/repositories/postgres/admin-configuration.repository.ts
+- [x] T161 [P] [US8] Implement equivalent in-memory four-key dispatch configuration behavior in src/server/repositories/testing/in-memory-admin-configuration.repository.ts
+- [x] T162 [US8] Register optional configuration repositories in all UnitOfWork implementations in src/server/repositories/contracts/unit-of-work.ts
+- [x] T163 [US8] Implement exact four-key dispatch schemas with documented defaults, types, bounds, ascending radius steps, cross-field total-wait validation, and unknown/secret/feature-flag/provider-budget/maintenance mutation rejection in src/features/admin/admin-configuration.schemas.ts
+- [x] T164 [US8] Implement `AdminConfigurationService` dispatch reads/updates and read-only provider budget metadata without feature-flag, provider-budget, maintenance-mode, or chatbot/provider behavior mutations in src/features/admin/admin-configuration.service.ts
+- [x] T165 [US8] Implement configuration route-handler factory in src/features/admin/admin-configuration.route-handlers.ts
+- [x] T166 [P] [US8] Add configuration read, dispatch update, and read-only provider-budget metadata adapters under app/api/v1/admin/configuration/
 
 ---
 
@@ -374,15 +383,15 @@ provider-budget, maintenance-mode, secret-like, and out-of-range mutations.
 
 **Purpose**: Verify all selected patches as one backend feature.
 
-- [ ] T167 [P] Add full admin API operation-to-route contract coverage in src/features/admin/__tests__/admin-api-routes.static.test.ts
-- [ ] T168 [P] Add cross-module mutation audit/outbox/idempotency matrix tests in src/features/admin/__tests__/admin-mutation-invariants.test.ts
-- [ ] T169 [P] Add sensitive-field scans for admin responses, logs, audit, outbox, fixtures, and exports in src/features/admin/__tests__/admin-privacy-regression.test.ts
-- [ ] T170 Add mandatory migration 015-021 ordering, enum-commit boundaries, constraints, RLS, retention-index, no-payment assertions, and conditional migration 022 assertions restricting storage to the four dispatch keys when Patch J is included in src/server/db/__tests__/all-migrations.static.test.ts
-- [ ] T171 Run every scenario and scope guard in specs/003-careonroad-admin-operations/quickstart.md
-- [ ] T172 Run `npm.cmd test`, `npm.cmd run typecheck`, and `npm.cmd run lint` from package.json
-- [ ] T173 Run `npm.cmd run build` and verify no admin frontend bundle or route was created outside app/api/v1/admin/
-- [ ] T174 Update CAREONROAD_CODEBASE_HANDBOOK.md and AGENTS.md only for implemented feature behavior and final migration status
-- [ ] T175 Add PostgreSQL-backed performance acceptance tests for every bounded admin list/detail operation, including five warm-up requests, 20 measured requests per operation, 19-of-20 <= 2 seconds, and response-bound assertions in src/server/repositories/postgres/__tests__/admin-performance.integration.test.ts
+- [x] T167 [P] Add full admin API operation-to-route contract coverage in src/features/admin/__tests__/admin-api-routes.static.test.ts
+- [x] T168 [P] Add cross-module mutation audit/outbox/idempotency matrix tests in the existing admin-assignment, admin-supervision, admin-delivery-audit, admin-reminder-dashboard and admin-configuration tests plus their native SQL suites
+- [x] T169 [P] Add sensitive-field scans for admin responses, logs, audit, outbox, fixtures, and exports in admin redaction/delivery/reminder/configuration regressions, server-logger tests and HTTP response/server-log secret scans
+- [x] T170 Add mandatory migrations 015–046 ordering, enum-commit boundaries, constraints, RLS, retention-index, no-payment assertions, and conditional optional Patch J migration assertions restricting storage to the four dispatch keys when Patch J is included in src/server/db/__tests__/all-migrations.static.test.ts
+- [x] T171 Run local scenarios and scope guards in specs/003-careonroad-admin-operations/quickstart.md; real provider/device/production acceptance remains a separate release gate
+- [x] T172 Run `pnpm.cmd test`, `pnpm.cmd run test:db`, `pnpm.cmd run test:http`, `pnpm.cmd run typecheck`, and `pnpm.cmd run lint` from package.json
+- [x] T173 Run `pnpm.cmd run build` and verify no admin frontend bundle or route was created outside app/api/v1/admin/
+- [x] T174 Update CAREONROAD_CODEBASE_HANDBOOK.md and AGENTS.md only for implemented feature behavior and final migration status
+- [x] T175 Add PostgreSQL-backed performance acceptance tests for every bounded admin list/detail operation, including five warm-up requests, 20 measured requests per operation, 19-of-20 <= 2 seconds, and response-bound assertions in src/server/testing/__tests__/http-acceptance.integration.test.ts
 
 ---
 
@@ -410,9 +419,9 @@ Patch J is optional and depends on Patch A; it should follow Patch I.
 - **US1** depends only on Patch A.
 - **US2** depends only on Patch A, but its active-assignment conflict uses
   existing assignment data.
-- **US3** depends on Patch A; Patch E depends on Patch D and migration 017.
+- **US3** depends on Patch A; Patch E depends on Patch D and migration 039.
 - **US4** depends on Patch E provenance; Patch G depends on Patch F behavior.
-- **US5** depends on Patch A and ordered migrations 020-021; it can begin after Patch A if
+- **US5** depends on Patch A and ordered migrations 042-043; it can begin after Patch A if
   domain patches do not concurrently edit the same repository contracts.
 - **US6** depends on Patch A; it can proceed independently of US5 after shared
   Patch H migration coordination.
@@ -506,6 +515,6 @@ recovery without waiting for dashboard or optional configuration.
 - `[P]` means different files and no dependency on another incomplete task in
   the same phase.
 - Every task names its target file or directory.
-- Patch J and migration 022 are skipped unless explicitly authorized.
+- Patch J and its new migration are skipped unless explicitly authorized.
 - No task authorizes payment, frontend, inventory, odometer, tracking, Maps, or
   chatbot/ASR implementation.

@@ -220,6 +220,13 @@ feature needs operational facts, not credential or raw-content access.
 **Decision**: Patch J stores only allowlisted typed operational values, is off by
 default, and may be deferred without blocking Patches A-I.
 
+Implementation reconciliation: explicitly authorized Batch 15 uses migration 045
+and exactly four dispatch keys. Dashboard thresholds remain constants; provider
+quota metadata is read-only and unavailable values are null. Policy snapshots
+keep active dispatch episodes consistent across worker/API restarts.
+Migration 046 replaces the original fixed-radius database constraint with
+1,000–100,000 meter bounds; all dispatch callers share nearest-meter conversion.
+
 **Rationale**: Fixed deployed constants are sufficient for the initial admin
 layer. Runtime configuration expands operational risk and needs version history.
 
