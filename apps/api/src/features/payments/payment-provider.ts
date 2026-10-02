@@ -34,7 +34,7 @@ export type VerifiedPaymentEvent =
       success: boolean;
       orderCode: number;
       amount: number;
-      currency: "VND";
+      currency: string;
       paymentLinkId?: string;
       providerReference?: string;
       status: string;

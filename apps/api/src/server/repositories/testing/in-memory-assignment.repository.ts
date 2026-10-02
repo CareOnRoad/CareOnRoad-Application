@@ -46,6 +46,13 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
       .slice(0, input.limit).map(cloneAssignment);
   }
 
+  async listReservationConflictMechanicIds(input: Parameters<AssignmentRepository["listReservationConflictMechanicIds"]>[0]) {
+    const mechanicIds = new Set(input.mechanicIds);
+    return [...new Set(this.assignments.filter((item) => mechanicIds.has(item.mechanicId) &&
+      isActiveStatus(item.status) && (item.reservationStartAt ?? item.acceptedAt) < input.end &&
+      (!item.reservationEndAt || item.reservationEndAt > input.start)).map((item) => item.mechanicId))];
+  }
+
   async setMaintenanceAgreement(input: { id: string; laborQuoteId: string; updatedAt: Date }): Promise<Assignment | undefined> {
     const assignment = this.assignments.find((item) => item.id === input.id && !item.maintenanceLaborQuoteId);
     if (!assignment) return undefined;

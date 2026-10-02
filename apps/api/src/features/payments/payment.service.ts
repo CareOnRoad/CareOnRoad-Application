@@ -750,9 +750,11 @@ function toPaymentEvent(input: {
     providerOrderCode: input.event.orderCode,
     providerPaymentLinkId: input.event.paymentLinkId,
     providerReference: input.event.providerReference,
-    eventType: input.event.success ? "payment_success" : "payment_failed",
+    eventType: input.event.currency !== "VND" ? "payment_currency_mismatch" : input.event.success ? "payment_success" : "payment_failed",
     amount: input.event.amount,
-    currency: input.event.currency,
+    // The ledger supports VND only; retain a mismatched signed receipt as an
+    // explicit mismatch event without falsely denominating its amount in VND.
+    currency: input.event.currency === "VND" ? "VND" : undefined,
     status: input.event.status,
     signatureValid: true,
     receivedAt: input.now

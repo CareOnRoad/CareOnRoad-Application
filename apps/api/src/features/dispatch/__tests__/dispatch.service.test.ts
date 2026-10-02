@@ -156,6 +156,24 @@ describe("dispatch service", () => {
     expect(round.candidates).toEqual([]);
     expect(unitOfWork.snapshot().serviceRequests[0]?.status).toBe("dispatching");
   });
+
+  it("excludes future calendar conflicts while allowing exactly adjacent and terminal reservations", async () => {
+    const mechanics = [
+      mechanic("00000000-0000-4000-8000-000000000001", 10.762622, 106.660172),
+      mechanic("00000000-0000-4000-8000-000000000002", 10.7627, 106.660172),
+      mechanic("00000000-0000-4000-8000-000000000003", 10.7628, 106.660172)
+    ];
+    const unitOfWork = createUnitOfWork({ mechanics, assignments: mechanics.map((item, index) => ({
+      ...assignment(`calendar-${index}`, item.userId, index === 2 ? "completed" : "accepted"),
+      scheduledStartAt: new Date(now.getTime() + 180 * 60_000),
+      reservationStartAt: new Date(now.getTime() + (index === 1 ? 150 : 149) * 60_000),
+      reservationEndAt: new Date(now.getTime() + 210 * 60_000)
+    })) });
+
+    const round = await new DispatchService(unitOfWork, { now: () => now }).startDispatch(identity(riderId), requestId);
+
+    expect(round.candidates.map((candidate) => candidate.mechanic_id)).toEqual([mechanics[1]!.userId, mechanics[2]!.userId]);
+  });
 });
 
 function createUnitOfWork(

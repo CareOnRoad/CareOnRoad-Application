@@ -31,6 +31,9 @@ export class PostgresIdempotencyRepository implements IdempotencyRepository {
     scope: string,
     idempotencyKey: string
   ): Promise<IdempotencyRecord | undefined> {
+    // A missing row cannot be locked. Serialize this actor/scope/key before
+    // reading it in a fresh statement snapshot, including the first creation.
+    await this.sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([actorId, scope, idempotencyKey])}, 0))`;
     const rows = await this.sql<IdempotencyRow[]>`
       select *
       from idempotency_records
