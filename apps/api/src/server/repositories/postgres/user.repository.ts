@@ -205,6 +205,13 @@ export class PostgresUserRepository implements UserRepository {
     return { ...mapUser(rows[0]), roles: roleRows.map((row) => row.role) };
   }
 
+  async updateDisplayName(id: string, displayName: string, updatedAt: Date): Promise<ApplicationActor> {
+    await this.sql`update app_users set display_name = ${displayName}, updated_at = ${updatedAt} where id = ${id}`;
+    const actor = await this.findActorById(id);
+    if (!actor) throw new Error("USER_NOT_FOUND");
+    return actor;
+  }
+
   async listDevicesForAdmin(input: {
     userId: string;
     limit: number;

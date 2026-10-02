@@ -1,4 +1,10 @@
 import { z } from "zod";
+import { listQuerySchema, validDateRange } from "@/lib/list-pagination";
+
+export const assignmentListSchema = listQuerySchema.extend({ status: z.enum([
+  "accepted", "en_route", "on_site", "diagnosis", "quoted", "awaiting_payment",
+  "in_progress", "completed", "canceled", "recovery_canceled"
+]).optional() }).refine(validDateRange, "Invalid date range.");
 
 export const assignmentStatusSchema = z.enum([
   "accepted",

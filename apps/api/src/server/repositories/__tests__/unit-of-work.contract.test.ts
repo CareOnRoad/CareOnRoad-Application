@@ -44,9 +44,18 @@ describe("unit of work contract", () => {
 
   it("rolls back every repository when work fails", async () => {
     const unitOfWork = new InMemoryUnitOfWork();
+    const before = unitOfWork.snapshot();
 
     await expect(
-      unitOfWork.execute(async ({ adminInternalNotes, audit, idempotency, outbox }) => {
+      unitOfWork.execute(async ({ adminConfiguration, adminInternalNotes, audit, idempotency, outbox }) => {
+        await adminConfiguration.update({
+          id: "configuration-rollback",
+          key: "dispatch.max_rounds",
+          value: 8,
+          actorId: "actor-1",
+          reason: "Verify transactional configuration rollback",
+          now: new Date("2026-10-02T00:00:00Z")
+        });
         await adminInternalNotes.create({
           id: "note-rollback",
           adminId: "actor-1",
@@ -83,42 +92,6 @@ describe("unit of work contract", () => {
       })
     ).rejects.toThrow("rollback");
 
-    expect(unitOfWork.snapshot()).toEqual({
-      adminInternalNotes: [],
-      users: [],
-      userRoles: [],
-      userDevices: [],
-      deviceDeliveryCredentials: [],
-      idempotencyRecords: [],
-      outboxEvents: [],
-      workerRuns: [],
-      auditLogs: [],
-      motorcycles: [],
-      mechanicProfiles: [],
-      mediaUploadIntents: [],
-      assignmentLiveLocations: [],
-      serviceRequests: [],
-      requestMediaMetadata: [],
-      requestStatusHistory: [],
-      dailyRequestSequences: [],
-      dispatchRounds: [],
-      dispatchCandidates: [],
-      assignments: [],
-      assignmentStatusHistory: [],
-      assignmentEtaMetadata: [],
-      assignmentMediaMetadata: [],
-      assignmentCompletionChecklists: [],
-      mechanicDiagnoses: [],
-      quotes: [],
-      quoteLines: [],
-      reminderRules: [],
-      reminderOccurrences: [],
-      serviceReviews: [],
-      notifications: [],
-      notificationDeliveryReceipts: [],
-      paymentOrders: [],
-      paymentEvents: [],
-      chatbotSessions: []
-    });
+    expect(unitOfWork.snapshot()).toEqual(before);
   });
 });

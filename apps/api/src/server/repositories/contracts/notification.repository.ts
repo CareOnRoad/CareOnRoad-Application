@@ -1,6 +1,6 @@
 import type { JsonObject } from "./idempotency.repository";
 
-export type NotificationStatus = "pending" | "sent" | "failed";
+export type NotificationStatus = "pending" | "sent" | "failed" | "canceled";
 
 export type Notification = {
   id: string;
@@ -15,6 +15,8 @@ export type Notification = {
   createdAt: Date;
   sentAt?: Date;
   lastErrorCode?: string;
+  adminRetryCount?: number;
+  canceledAt?: Date;
 };
 
 export type CreateNotification = Pick<
@@ -41,6 +43,10 @@ export type MarkNotificationReadResult = {
 };
 
 export interface NotificationRepository {
+  findByIdForUpdate(id: string): Promise<Notification | undefined>;
+  listAdmin(input: import("@/lib/list-pagination").ListFilter & { userId?: string }): Promise<Notification[]>;
+  summary(input: { from: Date; to: Date }): Promise<Array<{ status: NotificationStatus; count: number }>>;
+  recoverDelivery(input: { id: string; status: "pending" | "canceled"; actorId: string; reason: string; now: Date }): Promise<Notification | undefined>;
   createIfAbsent(input: CreateNotification): Promise<CreateNotificationResult>;
   findById(id: string): Promise<Notification | undefined>;
   findByDedupeKey(dedupeKey: string): Promise<Notification | undefined>;

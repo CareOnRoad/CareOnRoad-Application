@@ -63,7 +63,10 @@ type AssignmentRow = {
   id: string;
   request_id: string;
   mechanic_id: string;
-  accepted_candidate_id: string;
+  accepted_candidate_id: string | null;
+  source: Assignment["source"];
+  supersedes_assignment_id: string | null;
+  dispatch_distance_m: number | null;
   maintenance_labor_quote_id: string | null;
   status: AssignmentStatus;
   accepted_at: Date;
@@ -591,7 +594,10 @@ function mapAssignment(row: AssignmentRow): Assignment {
     id: row.id,
     requestId: row.request_id,
     mechanicId: row.mechanic_id,
-    acceptedCandidateId: row.accepted_candidate_id,
+    acceptedCandidateId: row.accepted_candidate_id ?? undefined,
+    source: row.source,
+    supersedesAssignmentId: row.supersedes_assignment_id ?? undefined,
+    dispatchDistanceMeters: row.dispatch_distance_m ?? undefined,
     maintenanceLaborQuoteId: row.maintenance_labor_quote_id ?? undefined,
     status: row.status,
     acceptedAt: row.accepted_at,

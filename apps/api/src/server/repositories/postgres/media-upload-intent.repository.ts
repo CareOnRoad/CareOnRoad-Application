@@ -33,6 +33,14 @@ type IntentRow = {
 export class PostgresMediaUploadIntentRepository implements MediaUploadIntentRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async listFinalizedForJob(input: Parameters<MediaUploadIntentRepository["listFinalizedForJob"]>[0]) {
+    const rows = await this.sql<IntentRow[]>`select * from media_upload_intents where request_id = ${input.requestId}
+      and status = 'finalized' and media_metadata_id is not null
+      and (resource_type = 'service_request' or (resource_type = 'assignment' and assignment_id = ${input.assignmentId}))
+      order by created_at desc, id desc limit ${input.limit}`;
+    return rows.map(mapIntent);
+  }
+
   async create(input: CreateMediaUploadIntent): Promise<MediaUploadIntent> {
     const rows = await this.sql<IntentRow[]>`
       insert into media_upload_intents (

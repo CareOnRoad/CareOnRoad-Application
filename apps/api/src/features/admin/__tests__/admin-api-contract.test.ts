@@ -20,8 +20,8 @@ describe("admin API contract", () => {
       (match) => match[1]
     );
 
-    expect(operationIds).toHaveLength(85);
-    expect(new Set(operationIds)).toHaveLength(85);
+    expect(operationIds).toHaveLength(88);
+    expect(new Set(operationIds)).toHaveLength(88);
     expect(operationIds[0]).toBe("adminListUsers");
     expect(operationIds.at(-1)).toBe("adminGetProviderBudgetMetadata");
     expect(operationIds).not.toContain("adminUpdateFeatureFlags");

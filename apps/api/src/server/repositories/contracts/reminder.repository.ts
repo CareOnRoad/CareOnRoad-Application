@@ -1,3 +1,5 @@
+import type { ListFilter } from "@/lib/list-pagination";
+export type ReminderAdminFilter = ListFilter & { riderId?: string; enabled?: boolean; ruleId?: string; status?: ReminderOccurrenceStatus };
 export type ReminderOccurrenceStatus = "due" | "queued" | "sent" | "dismissed" | "failed";
 
 export type ReminderRule = {
@@ -59,6 +61,8 @@ export type ClaimDueReminderRulesInput = {
 };
 
 export interface ReminderRepository {
+  listRulesAdmin(input: ReminderAdminFilter): Promise<ReminderRule[]>;
+  listOccurrencesAdmin(input: ReminderAdminFilter): Promise<ReminderOccurrence[]>;
   createRule(input: CreateReminderRule): Promise<ReminderRule>;
   listRulesByRider(riderId: string): Promise<ReminderRule[]>;
   findRuleById(id: string): Promise<ReminderRule | undefined>;

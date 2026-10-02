@@ -5,12 +5,20 @@ import type {
   ServiceRequest,
   ServiceRequestRepository
 } from "../contracts/service-request.repository";
+import { filterPage, type ListFilter } from "@/lib/list-pagination";
 
 export class InMemoryServiceRequestRepository implements ServiceRequestRepository {
   constructor(
     private readonly requests: ServiceRequest[],
     private readonly history: RequestStatusHistory[]
   ) {}
+
+  async startDispatchEpisode(input: { id: string; startRound: number; updatedAt: Date }): Promise<ServiceRequest> {
+    const request = this.requests.find((row) => row.id === input.id);
+    if (!request || (request.dispatchRetryCount ?? 0) >= 3) throw new Error("DISPATCH_RETRY_LIMIT_REACHED");
+    Object.assign(request, { dispatchEpisodeStartRound: input.startRound, dispatchRetryCount: (request.dispatchRetryCount ?? 0) + 1, updatedAt: input.updatedAt });
+    return cloneRequest(request);
+  }
 
   async updateAppointment(input: Parameters<ServiceRequestRepository["updateAppointment"]>[0]) {
     const request = this.requests.find((item) => item.id === input.id);
@@ -33,11 +41,8 @@ export class InMemoryServiceRequestRepository implements ServiceRequestRepositor
     return cloneRequest(request);
   }
 
-  async listByRider(riderId: string): Promise<ServiceRequest[]> {
-    return this.requests
-      .filter((request) => request.riderId === riderId)
-      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
-      .map(cloneRequest);
+  async listByRider(riderId: string, input: ListFilter = { limit: 20 }): Promise<ServiceRequest[]> {
+    return filterPage(this.requests.filter((request) => request.riderId === riderId), input).map(cloneRequest);
   }
 
   async findById(id: string): Promise<ServiceRequest | undefined> {

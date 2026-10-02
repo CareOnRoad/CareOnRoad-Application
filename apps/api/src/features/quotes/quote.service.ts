@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { MAX_PAYMENT_AMOUNT } from "@/features/payments/payment-amount";
 
 import type { ApiErrorCode } from "@/lib/api-error";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
@@ -88,6 +89,10 @@ export class QuoteService {
       throw error;
     }
 
+    if (parsed.data.purpose === "standard" && (calculated.total_amount <= 0 || calculated.total_amount > MAX_PAYMENT_AMOUNT)) {
+      throw new QuoteError("INVALID_INPUT", "Standard quote total must be positive and within the supported payment amount.", 400);
+    }
+
     return this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
       const request = await repositories.serviceRequests.findByIdForUpdate(requestId);
@@ -113,7 +118,8 @@ export class QuoteService {
       }
 
       const latest = await repositories.quotes.findLatestByRequestForUpdate(requestId);
-      const firstVersion = !latest || latest.assignmentId !== assignment.id || (latest.purpose ?? "standard") !== parsed.data.purpose;
+      const firstVersion = !latest || latest.assignmentId !== assignment.id || (latest.purpose ?? "standard") !== parsed.data.purpose ||
+        (["voided", "expired"].includes(latest.status) && assignment.status !== "quoted");
       const rescue = request.serviceType === "emergency_rescue";
       const maintenance = request.serviceType === "periodic_maintenance";
       const maintenanceQuote = parsed.data.purpose === "maintenance_labor" || parsed.data.purpose === "maintenance_work";
@@ -128,11 +134,12 @@ export class QuoteService {
       let laborPricing: RescueLaborPricing | undefined;
       if (parsed.data.purpose === "rescue_labor") {
         if (assignment.rescueLaborQuoteId) throw new QuoteError("CONFLICT", "Rescue labor is already agreed and cannot change.", 409);
-        const candidate = await repositories.dispatch.findCandidateById(assignment.acceptedCandidateId);
-        if (candidate?.distanceMeters === undefined) throw new QuoteError("CONFLICT", "Verified dispatch distance is required for rescue pricing.", 409);
+        const candidate = assignment.acceptedCandidateId ? await repositories.dispatch.findCandidateById(assignment.acceptedCandidateId) : undefined;
+        const distance = assignment.dispatchDistanceMeters ?? candidate?.distanceMeters;
+        if (distance === undefined) throw new QuoteError("CONFLICT", "Verified dispatch distance is required for rescue pricing.", 409);
         const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", hourCycle: "h23" }).format(now));
         laborPricing = {
-          ...parsed.data.labor_pricing!, distance_m: candidate.distanceMeters,
+          ...parsed.data.labor_pricing!, distance_m: distance,
           time_slot: hour >= 5 && hour < 11 ? "morning" : hour >= 11 && hour < 17 ? "midday" : hour >= 17 && hour < 22 ? "evening" : "late_night"
         };
         calculated = calculateValidatedQuote([
@@ -268,17 +275,17 @@ export class QuoteService {
       if (!request) {
         throw new QuoteError("NOT_FOUND", "Service request not found.", 404);
       }
-      const assignments = await repositories.assignments.listVisibleToActor({
+      const hasAssignment = await repositories.assignments.hasVisibleByRequest({
         id: actor.id,
         roles: actor.roles.filter(
           (role): role is "rider" | "mechanic" | "admin" =>
             role === "rider" || role === "mechanic" || role === "admin"
         )
-      });
+      }, requestId);
       if (
         !actor.roles.includes("admin") &&
         request.riderId !== actor.id &&
-        !assignments.some((assignment) => assignment.requestId === requestId)
+        !hasAssignment
       ) {
         throw new QuoteError("FORBIDDEN", "Quote access is not allowed.", 403);
       }
@@ -337,6 +344,10 @@ export class QuoteService {
           "Only the latest pending quote may be approved or rejected.",
           409
         );
+      }
+      if (decision === "approved" && (quote.purpose ?? "standard") === "standard" &&
+        (quote.totalAmount <= 0 || quote.totalAmount > MAX_PAYMENT_AMOUNT)) {
+        throw new QuoteError("CONFLICT", "Replace this legacy standard quote with a supported positive total before approval.", 409);
       }
       const maintenanceAddition = quote.purpose === "maintenance_work" && assignment.status === "in_progress" && request.status === "in_service";
       if (!maintenanceAddition && (assignment.status !== "quoted" || request.status !== "awaiting_quote_approval")) {
@@ -423,7 +434,7 @@ function calculateValidatedQuote(lines: Parameters<typeof calculateQuote>[0], di
   }
 }
 
-async function transitionWorkflow(
+export async function transitionWorkflow(
   repositories: FoundationRepositories,
   input: {
     assignment: Awaited<ReturnType<FoundationRepositories["assignments"]["findById"]>> &

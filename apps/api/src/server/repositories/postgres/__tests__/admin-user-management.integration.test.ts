@@ -15,6 +15,7 @@ import {
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { AdminUserManagementService } from "@/features/admin/admin-user-management.service";
+import { AdminMechanicManagementService } from "@/features/admin/admin-mechanic-management.service";
 import {
   createIsolatedPostgresTestContext,
   hasPostgresTestDatabase,
@@ -147,6 +148,25 @@ describeDatabase("admin user management PostgreSQL integration", () => {
     },
     INTEGRATION_TIMEOUT_MS
   );
+
+  it("revokes an approved idle mechanic without losing history and re-grants unavailable", async () => {
+    const service = createService();
+    const mechanics = new AdminMechanicManagementService(new PostgresUnitOfWork(sql));
+    const actor = identity(adminOneId);
+    const input = { ...mutationReason, role: "mechanic" };
+    await service.grantRole(actor, riderId, input, "grant-mechanic");
+    await mechanics.approve(actor, riderId, mutationReason, "approve-mechanic");
+    await service.revokeRole(actor, riderId, input, "revoke-mechanic");
+    await sql`update mechanic_profiles set rating_avg = 4.50, rating_count = 2, updated_at = now() where user_id = ${riderId}`;
+    await expect(sql`update mechanic_profiles set is_available = true where user_id = ${riderId}`)
+      .rejects.toMatchObject({ code: "23514" });
+    await expect(mechanics.reactivate(actor, riderId, mutationReason, "reactivate-without-role"))
+      .rejects.toMatchObject({ status: 409 });
+    await service.grantRole(actor, riderId, input, "regrant-mechanic");
+    expect(await sql`select profile_status, is_available, rating_count from mechanic_profiles where user_id = ${riderId}`)
+      .toEqual([{ profile_status: "suspended", is_available: false, rating_count: 2 }]);
+    await mechanics.reactivate(actor, riderId, mutationReason, "reactivate-regranted");
+  });
 
   it.each(["suspend", "archive", "revoke-role"] as const)(
     "serializes simultaneous %s commands and preserves one active admin",

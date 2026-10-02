@@ -3,11 +3,19 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import type { Sql } from "postgres";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AssignmentRecoveryService } from "@/features/assignments/assignment-recovery.service";
+import { AssignmentService } from "@/features/assignments/assignment.service";
+import { AdminServiceRequestService } from "@/features/admin/admin-service-request.service";
+import { QuoteService } from "@/features/quotes/quote.service";
+import { PaymentService } from "@/features/payments/payment.service";
+import { ServiceRequestService } from "@/features/service-requests/service-request.service";
+import type { PaymentProviderClient } from "@/features/payments/payment-provider";
+import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 import {
   createIsolatedPostgresTestContext,
+  cleanupPostgresTables,
   hasPostgresTestDatabase,
   type IsolatedPostgresTestContext
 } from "@/server/testing/postgres-test-context";
@@ -27,6 +35,7 @@ describeDatabase("assignment recovery repository integration", () => {
   let adminId: string;
   let assignmentId: string;
   let requestId: string;
+  const authIds = new Set<string>();
   const now = new Date("2026-08-23T04:00:00.000Z");
 
   beforeAll(async () => {
@@ -35,10 +44,15 @@ describeDatabase("assignment recovery repository integration", () => {
     for (const migrationFile of migrationFiles) {
       await sql.unsafe(readFileSync(resolve(process.cwd(), "..", "..", "supabase", "migrations", migrationFile), "utf8"));
     }
+  }, 120_000);
+
+  beforeEach(async () => {
+    await cleanupPostgresTables(sql, ["app_users", "audit_logs", "outbox_events", "idempotency_records", "payment_events"], { resetAppendOnlyTables: true });
     riderId = randomUUID();
     mechanicId = randomUUID();
     adminId = randomUUID();
     for (const [id, role] of [[riderId, "rider"], [mechanicId, "mechanic"], [adminId, "admin"]] as const) {
+      authIds.add(id);
       await sql`insert into auth.users (id, created_at, updated_at) values (${id}, now(), now())`;
       await sql`insert into app_users (id, status) values (${id}, 'active')`;
       await sql`insert into user_roles (user_id, role) values (${id}, ${role})`;
@@ -58,10 +72,10 @@ describeDatabase("assignment recovery repository integration", () => {
     await sql`
       insert into service_requests (
         id, request_code, rider_id, motorcycle_id, service_type,
-        problem_description, address_text, status, priority, created_at, updated_at
+        problem_description, address_text, service_location, status, priority, created_at, updated_at
       ) values (
         ${requestId}, 'COR-MOB-20260823-901', ${riderId}, ${motorcycleId},
-        'mobile_repair', 'private', '1 Nguyen Trai', 'assigned', 'normal', ${now}, ${now}
+        'mobile_repair', 'private', '1 Nguyen Trai', st_setsrid(st_makepoint(106.66, 10.76), 4326)::geography, 'assigned', 'normal', ${now}, ${now}
       )
     `;
     await sql`
@@ -84,7 +98,7 @@ describeDatabase("assignment recovery repository integration", () => {
   }, 120_000);
 
   afterAll(async () => {
-    await context?.dispose({ authUserIds: [riderId, mechanicId, adminId].filter(Boolean) });
+    await context?.dispose({ authUserIds: [...authIds] });
   }, 30_000);
 
   it("serializes competing recovery commands and releases active uniqueness", async () => {
@@ -103,4 +117,112 @@ describeDatabase("assignment recovery repository integration", () => {
     expect(requests).toMatchObject([{ status: "submitted" }]);
     expect(events).toHaveLength(1);
   }, 90_000);
+
+  it("serializes quote approval against cancel and recover without discarding issued work", async () => {
+    const quoteId = await seedQuote("pending");
+    await sql`update assignments set status = 'quoted' where id = ${assignmentId}`;
+    await sql`update service_requests set status = 'awaiting_quote_approval' where id = ${requestId}`;
+    const unit = new PostgresUnitOfWork(sql);
+    const outcomes = await Promise.allSettled([
+      new QuoteService(unit, { now: () => now }).approveQuote(identity(riderId), quoteId),
+      new AssignmentService(unit, { now: () => now }).transitionAssignment(identity(mechanicId), assignmentId, { status: "canceled" }),
+      new AssignmentRecoveryService(unit, { now: () => now }).recover(identity(mechanicId), assignmentId, { reason_code: "cannot_continue" }, "approve-recover-sql")
+    ]);
+    expect(outcomes[0].status).toBe("fulfilled");
+    for (const outcome of outcomes.slice(1)) expect(outcome).toMatchObject({ status: "rejected", reason: { status: 409 } });
+    expect(await sql`select status from assignments where id = ${assignmentId}`).toEqual([{ status: "awaiting_payment" }]);
+    expect(await sql`select status from service_requests where id = ${requestId}`).toEqual([{ status: "awaiting_payment" }]);
+    expect(await sql`select * from outbox_events where topic = 'assignment.recovery.requested'`).toHaveLength(0);
+  });
+
+  it("serializes payment success with cancel/recover, deduplicates delivery, and keeps the payment on its assignment", async () => {
+    const quoteId = await seedQuote("approved");
+    await sql`update assignments set status = 'awaiting_payment' where id = ${assignmentId}`;
+    await sql`update service_requests set status = 'awaiting_payment' where id = ${requestId}`;
+    const unit = new PostgresUnitOfWork(sql);
+    const order = await unit.execute(({ payments }) => payments.create({ id: randomUUID(), quoteId, requestId, assignmentId, riderId,
+      providerOrderCode: 991, status: "pending", amount: 100000, description: "COR991", createdAt: now, updatedAt: now }));
+    const provider: PaymentProviderClient = {
+      createPaymentLink: vi.fn(), cancelPaymentLink: vi.fn(), getPaymentStatus: vi.fn(),
+      verifyWebhookPayload: () => ({ kind: "valid", eventDedupeKey: "payment-concurrent-sql", success: true,
+        orderCode: 991, amount: 100000, currency: "VND", status: "00" })
+    };
+    const payment = new PaymentService(unit, { now: () => now, providerFactory: () => provider,
+      returnUrl: () => "https://example.test/return", cancelUrl: () => "https://example.test/cancel" });
+    const outcomes = await Promise.allSettled([
+      payment.handlePayosWebhook({}), payment.handlePayosWebhook({}),
+      new AssignmentService(unit).transitionAssignment(identity(mechanicId), assignmentId, { status: "canceled" }),
+      new AssignmentRecoveryService(unit).recover(identity(mechanicId), assignmentId, { reason_code: "cannot_continue" }, "paid-recover-sql")
+    ]);
+    expect(outcomes.slice(0, 2).map((item) => item.status)).toEqual(["fulfilled", "fulfilled"]);
+    for (const outcome of outcomes.slice(2)) expect(outcome).toMatchObject({ status: "rejected", reason: { status: 409 } });
+    expect(await sql`select status, assignment_id from payment_orders where id = ${order.id}`).toEqual([{ status: "succeeded", assignment_id: assignmentId }]);
+    expect(await sql`select * from payment_events`).toHaveLength(1);
+    expect(await sql`select * from outbox_events where topic = 'payment.succeeded'`).toHaveLength(1);
+    expect(await sql`select * from outbox_events where topic = 'assignment.recovery.requested'`).toHaveLength(0);
+    expect(provider.getPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  it("rolls SQL history and dispatch back when request synchronization fails", async () => {
+    const unit = new PostgresUnitOfWork(sql);
+    const wrapper: UnitOfWork = { execute: (work) => unit.execute((repos) => {
+      vi.spyOn(repos.serviceRequests, "updateStatus").mockResolvedValue(undefined);
+      return work(repos);
+    }) };
+    await expect(new AssignmentService(wrapper).transitionAssignment(identity(mechanicId), assignmentId, { status: "canceled" }))
+      .rejects.toMatchObject({ status: 409, details: { reason_code: "request_missing" } });
+    expect(await sql`select status from assignments where id = ${assignmentId}`).toEqual([{ status: "accepted" }]);
+    for (const table of ["assignment_status_history", "request_status_history", "audit_logs", "outbox_events"]) {
+      expect(await sql.unsafe(`select count(*)::int as count from ${table}`)).toEqual([{ count: 0 }]);
+    }
+  });
+
+  it("holds a late receipt on old canceled work for review while cancellation competes under the request lock", async () => {
+    const quoteId = await seedQuote("approved");
+    await sql`update assignments set status = 'canceled', canceled_at = ${now} where id = ${assignmentId}`;
+    await sql`update service_requests set status = 'submitted' where id = ${requestId}`;
+    const unit = new PostgresUnitOfWork(sql);
+    const order = await unit.execute(({ payments }) => payments.create({ id: randomUUID(), quoteId, requestId, assignmentId, riderId,
+      providerOrderCode: 992, status: "failed", amount: 100000, description: "COR992", createdAt: now, updatedAt: now }));
+    const provider: PaymentProviderClient = { createPaymentLink: vi.fn(), cancelPaymentLink: vi.fn(), getPaymentStatus: vi.fn(),
+      verifyWebhookPayload: () => ({ kind: "valid", eventDedupeKey: "late-payment-sql", success: true, orderCode: 992, amount: 100000, currency: "VND", status: "00" }) };
+    const payment = new PaymentService(unit, { now: () => now, providerFactory: () => provider,
+      returnUrl: () => "https://example.test/return", cancelUrl: () => "https://example.test/cancel" });
+    const outcomes = await Promise.allSettled([
+      new ServiceRequestService(unit).cancelServiceRequest(identity(riderId), requestId, { reason: "Cancel old failed job" }),
+      payment.handlePayosWebhook({})
+    ]);
+    expect(outcomes[1]).toMatchObject({ status: "fulfilled", value: { status: "needs_review" } });
+    expect(await sql`select status, review_reason from payment_orders where id = ${order.id}`)
+      .toEqual([{ status: "needs_review", review_reason: "paid_for_inactive_workflow" }]);
+    expect(await sql`select status from assignments where id = ${assignmentId}`).toEqual([{ status: "canceled" }]);
+    expect(await sql`select * from outbox_events where topic = 'assignment.recovery.requested'`).toHaveLength(0);
+  });
+
+  it("previews and executes a proved SQL legacy cancellation with one audited replay", async () => {
+    const unit = new PostgresUnitOfWork(sql);
+    await unit.execute(async ({ assignments }) => {
+      await assignments.updateStatus({ id: assignmentId, status: "canceled", canceledAt: now, updatedAt: now });
+      await assignments.appendStatusHistory({ id: randomUUID(), assignmentId, fromStatus: "accepted", toStatus: "canceled", actorId: mechanicId, actorRole: "mechanic", createdAt: now });
+    });
+    const service = new AdminServiceRequestService(unit, { now: () => now });
+    const input = { assignment_id: assignmentId, reason: "Verified legacy history repair" };
+    expect(await service.repairCancellation(identity(adminId), requestId, input, "sql-repair-preview"))
+      .toMatchObject({ dry_run: true, repairable: true, status: "assigned" });
+    expect(await sql`select * from audit_logs`).toHaveLength(0);
+    const args = [identity(adminId), requestId, { ...input, dry_run: false }, "sql-repair-commit"] as const;
+    expect(await service.repairCancellation(...args)).toEqual(await service.repairCancellation(...args));
+    expect(await sql`select status from service_requests where id = ${requestId}`).toEqual([{ status: "canceled" }]);
+    expect(await sql`select * from audit_logs`).toHaveLength(1);
+    expect(await sql`select * from request_status_history`).toHaveLength(1);
+  });
+
+  function identity(subject: string) { return { subject, issuer: "test", audience: ["authenticated"] }; }
+  async function seedQuote(status: "pending" | "approved") {
+    const quoteId = randomUUID();
+    await new PostgresUnitOfWork(sql).execute(({ quotes }) => quotes.create({ id: quoteId, requestId, assignmentId, status, version: 1,
+      subtotalAmount: 100000, discountAmount: 0, totalAmount: 100000, createdBy: mechanicId, createdAt: now,
+      lines: [{ id: randomUUID(), lineType: "labor", description: "Verified labor", quantity: 1, unitAmount: 100000, lineTotalAmount: 100000, sortOrder: 0 }] }));
+    return quoteId;
+  }
 });

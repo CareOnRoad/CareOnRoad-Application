@@ -3,6 +3,8 @@ import type { Sql } from "postgres";
 import { runInTransaction, type TransactionOptions } from "@/server/db/transaction";
 
 import type { FoundationRepositories, UnitOfWork } from "../contracts/unit-of-work";
+import { PostgresAdminSupervisionRepository } from "./admin-supervision.repository";
+import { PostgresAdminConfigurationRepository } from "./admin-configuration.repository";
 import { PostgresAdminInternalNoteRepository } from "./admin-internal-note.repository";
 import { PostgresAdminQueryRepository } from "./admin-query.repository";
 import { PostgresAssignmentRepository } from "./assignment.repository";
@@ -41,6 +43,8 @@ export class PostgresUnitOfWork implements UnitOfWork {
       this.sql,
       async (transaction) =>
         work({
+          adminConfiguration: new PostgresAdminConfigurationRepository(transaction),
+          adminSupervision: new PostgresAdminSupervisionRepository(transaction),
           adminQueries: new PostgresAdminQueryRepository(transaction),
           adminInternalNotes: new PostgresAdminInternalNoteRepository(transaction),
           users: new PostgresUserRepository(transaction),

@@ -35,6 +35,7 @@ export interface MotorcycleRepository {
   create(input: CreateMotorcycle): Promise<Motorcycle>;
   listActiveByRider(riderId: string): Promise<Motorcycle[]>;
   findById(id: string): Promise<Motorcycle | undefined>;
+  findByIdForUpdate(id: string): Promise<Motorcycle | undefined>;
   update(input: UpdateMotorcycle): Promise<Motorcycle | undefined>;
   archive(id: string, archivedAt: Date): Promise<Motorcycle | undefined>;
 }

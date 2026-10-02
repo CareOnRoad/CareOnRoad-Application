@@ -87,6 +87,8 @@ describeDatabase("review repository integration", () => {
       )
     );
     expect(new Set(concurrent.map((result) => result.id)).size).toBe(1);
+    await sql`update mechanic_profiles set is_available = false, profile_status = 'suspended' where user_id = ${mechanicId}`;
+    await sql`delete from user_roles where user_id = ${mechanicId} and role = 'mechanic'`;
     await service.createReview(identity, assignmentIds[1]!, { rating: 4 }, "postgres-review-9");
     const final = await service.createReview(identity, assignmentIds[2]!, { rating: 4 }, "postgres-review-10");
     expect(final.mechanic_rating).toEqual({ average: 4.33, count: 3 });
@@ -131,10 +133,10 @@ async function seedCompletedJob(
   await sql`
     insert into service_requests (
       id, request_code, rider_id, motorcycle_id, service_type,
-      problem_description, address_text, status, priority, created_at, updated_at
+      service_location, problem_description, address_text, status, priority, created_at, updated_at
     ) values (
       ${requestId}, ${`COR-MOB-20260823-${input.index}`}, ${input.riderId},
-      ${input.motorcycleId}, 'mobile_repair', 'Xe can sua', '1 Nguyen Trai',
+      ${input.motorcycleId}, 'mobile_repair', ST_SetSRID(ST_MakePoint(106.69, 10.77), 4326)::geography, 'Xe can sua', '1 Nguyen Trai',
       'completed', 'normal', ${input.now}, ${input.now}
     )
   `;

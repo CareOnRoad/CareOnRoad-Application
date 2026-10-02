@@ -2,6 +2,15 @@ import type { ServiceType } from "@/features/motorcycles/motorcycle.schemas";
 import type { MechanicProfileStatus } from "./mechanic.repository";
 
 import type { GeoPoint } from "./mechanic.repository";
+import type { PageCursor } from "@/lib/list-pagination";
+import type { DispatchPolicy } from "@/features/admin/admin-configuration.schemas";
+
+export type DispatchEligibilityInput = {
+  serviceType: ServiceType; origin?: GeoPoint; radiusMeters: number; now: Date; maxLocationAgeSeconds: number;
+  requestId?: string; episodeStartRound?: number; scheduledStartAt?: Date; targetMechanicId?: string;
+  limit: number; cursor?: PageCursor; eligibleOnly?: boolean; ranked?: boolean;
+};
+export type DispatchEligibility = DispatchCandidateMechanic & { createdAt: Date; reasonCodes: string[] };
 
 export type DispatchRoundStatus = "active" | "accepted" | "expired" | "canceled";
 export type DispatchCandidateStatus =
@@ -13,6 +22,7 @@ export type DispatchCandidateStatus =
   | "cancelled";
 
 export type DispatchRound = {
+  policySnapshot?: DispatchPolicy;
   id: string;
   requestId: string;
   roundNumber: number;
@@ -55,6 +65,7 @@ export type DispatchCandidateMechanic = {
 };
 
 export type CreateDispatchRound = {
+  policySnapshot?: DispatchPolicy;
   id: string;
   requestId: string;
   roundNumber: number;
@@ -78,6 +89,9 @@ export type CreateDispatchCandidate = {
 };
 
 export interface DispatchRepository {
+  listEligibility(input: DispatchEligibilityInput): Promise<DispatchEligibility[]>;
+  listRoundPage(requestId: string, limit: number, cursor?: PageCursor): Promise<DispatchRound[]>;
+  listCandidatesByRound(roundId: string, limit: number): Promise<DispatchCandidate[]>;
   listRoundsByRequest(requestId: string): Promise<DispatchRound[]>;
   listRoundsByRequestForUpdate(requestId: string): Promise<DispatchRound[]>;
   findRoundById(roundId: string): Promise<DispatchRound | undefined>;

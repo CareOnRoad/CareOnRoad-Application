@@ -84,6 +84,11 @@ export class PostgresMotorcycleRepository implements MotorcycleRepository {
     `;
     return rows[0] ? mapMotorcycle(rows[0]) : undefined;
   }
+
+  async findByIdForUpdate(id: string): Promise<Motorcycle | undefined> {
+    const [row] = await this.sql<MotorcycleRow[]>`select * from motorcycles where id = ${id} for update`;
+    return row ? mapMotorcycle(row) : undefined;
+  }
 }
 
 function mapMotorcycle(row: MotorcycleRow): Motorcycle {

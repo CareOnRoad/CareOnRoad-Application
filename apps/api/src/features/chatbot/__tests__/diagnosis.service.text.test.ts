@@ -8,6 +8,19 @@ import type { OpenRouterResult } from "../openrouter.client";
 import { InMemorySessionStore } from "../session.store";
 
 describe("DiagnosisService text orchestration", () => {
+  it.each([false, true])("keeps shutdown safety override when provider fallback is %s", async (fallback) => {
+    const { service, store } = setup({ openRouterResult: fallback
+      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+      : { success: true, json: { ...modelDiagnosis(), risk_level: "low", can_continue_riding: true }, apiHttpStatus: "200" } });
+    const session = store.createSession();
+    const result = await service.diagnose({ sessionId: session.session_id,
+      input: { input_mode: "text", content_text: "Xe đang chạy thì chết máy" } });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diagnosis).toMatchObject({ can_continue_riding: false, fallback_used: fallback });
+    expect(["high", "critical"]).toContain(result.diagnosis.risk_level);
+    expect(result.diagnosis.recommended_next_actions[0]?.type).toBe("emergency_rescue");
+  });
   it("returns valid compact diagnosis for normal text input and stores latest diagnosis", async () => {
     const { service, store } = setup({
       openRouterResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }

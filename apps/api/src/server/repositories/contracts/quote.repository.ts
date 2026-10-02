@@ -1,4 +1,4 @@
-export type QuoteStatus = "pending" | "approved" | "rejected" | "superseded" | "expired";
+export type QuoteStatus = "pending" | "approved" | "rejected" | "superseded" | "expired" | "voided";
 export type QuoteLineType = "labor" | "part" | "other";
 export type QuotePurpose = "standard" | "rescue_labor" | "rescue_final" | "maintenance_labor" | "maintenance_work";
 export type RescuePaymentTiming = "labor_upfront" | "after_repair";
@@ -51,10 +51,15 @@ export type CreateQuote = Omit<Quote, "lines" | "status" | "currency"> & {
 };
 
 export interface QuoteRepository {
+  hasOpenByAssignment(assignmentId: string): Promise<boolean>;
+  listPageByRequest(requestId: string, limit: number, cursor?: import("@/lib/list-pagination").PageCursor): Promise<Quote[]>;
+  hasOpenByRequest(requestId: string): Promise<boolean>;
+  hasAnyByAssignment(assignmentId: string): Promise<boolean>;
   create(input: CreateQuote): Promise<Quote>;
   findById(id: string): Promise<Quote | undefined>;
   findByIdForUpdate(id: string): Promise<Quote | undefined>;
   findLatestByRequest(requestId: string): Promise<Quote | undefined>;
+  findLatestByAssignment(assignmentId: string): Promise<Quote | undefined>;
   findLatestByRequestForUpdate(requestId: string): Promise<Quote | undefined>;
   findLatestApprovedByAssignment(assignmentId: string, purpose: QuotePurpose): Promise<Quote | undefined>;
   listByRequest(requestId: string): Promise<Quote[]>;

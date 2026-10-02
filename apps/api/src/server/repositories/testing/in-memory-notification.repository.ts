@@ -1,3 +1,4 @@
+import { filterPage } from "@/lib/list-pagination";
 import type {
   CreateNotification,
   CreateNotificationResult,
@@ -7,6 +8,20 @@ import type {
 
 export class InMemoryNotificationRepository implements NotificationRepository {
   constructor(private readonly notifications: Notification[]) {}
+
+  async findByIdForUpdate(id: string) { return this.findById(id); }
+  async listAdmin(input: Parameters<NotificationRepository["listAdmin"]>[0]) { return filterPage(this.notifications.filter((row) => !input.userId || row.userId === input.userId), input); }
+  async summary(input: { from: Date; to: Date }) {
+    const counts = new Map<Notification["status"], number>();
+    for (const row of this.notifications.filter((row) => row.createdAt >= input.from && row.createdAt <= input.to)) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
+    return [...counts].map(([status, count]) => ({ status, count }));
+  }
+  async recoverDelivery(input: Parameters<NotificationRepository["recoverDelivery"]>[0]) {
+    const row = await this.findById(input.id);
+    if (!row || !["pending", "failed"].includes(row.status) || (input.status === "pending" && (row.adminRetryCount ?? 0) >= 3)) return undefined;
+    Object.assign(row, { status: input.status, sentAt: undefined, lastErrorCode: undefined, adminRetryCount: (row.adminRetryCount ?? 0) + (input.status === "pending" ? 1 : 0), canceledAt: input.status === "canceled" ? input.now : undefined });
+    return row;
+  }
 
   async createIfAbsent(input: CreateNotification): Promise<CreateNotificationResult> {
     const existing = await this.findByDedupeKey(input.dedupeKey);
@@ -32,6 +47,7 @@ export class InMemoryNotificationRepository implements NotificationRepository {
 
   async markSent(id: string, sentAt: Date): Promise<Notification> {
     const notification = this.requireNotification(id);
+    if (notification.status === "canceled") return notification;
     notification.status = "sent";
     notification.sentAt = sentAt;
     notification.lastErrorCode = undefined;
@@ -40,6 +56,7 @@ export class InMemoryNotificationRepository implements NotificationRepository {
 
   async markFailed(id: string, errorCode: string): Promise<Notification> {
     const notification = this.requireNotification(id);
+    if (notification.status === "canceled") return notification;
     notification.status = "failed";
     notification.sentAt = undefined;
     notification.lastErrorCode = errorCode;

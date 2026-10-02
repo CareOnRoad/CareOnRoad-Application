@@ -16,7 +16,7 @@ import { OutboxWorker } from "@/server/workers/outbox.worker";
 import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
-const migrationFiles = legacyCompatibleMigrationFiles();
+const migrationFiles = sourceMigrationFiles();
 
 describeDatabase("outbox and audit integration", () => {
   let context: IsolatedPostgresTestContext;
@@ -168,7 +168,8 @@ describeDatabase("outbox and audit integration", () => {
     await expect(
       new OutboxWorker(new PostgresUnitOfWork(sql), {
         now: () => now,
-        workerId: "recovery-worker"
+        workerId: "recovery-worker",
+        consumers: { handlers: { "test.event": async () => undefined } }
       }).processBatch()
     ).resolves.toMatchObject({ claimed: 1, processed: 1 });
     await expect(
@@ -215,10 +216,8 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
   }
 }
 
-function legacyCompatibleMigrationFiles(): string[] {
+function sourceMigrationFiles(): string[] {
   return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
+    .filter((name) => name.endsWith(".sql"))
     .sort();
 }

@@ -14,7 +14,7 @@ import {
   type AssignmentMediaMetadataResponse
 } from "./mechanic-assignment-metadata.service";
 import { MechanicDashboardService } from "./mechanic-dashboard.service";
-import { MechanicJobListService } from "./mechanic-job-list.service";
+import { MechanicJobListService, type MechanicJobDetailResponse } from "./mechanic-job-list.service";
 import { MechanicPerformanceService } from "./mechanic-performance.service";
 import type {
   MechanicDashboardResponse,
@@ -28,6 +28,7 @@ export type MechanicOperationsRouteDependencies = {
     getDashboard(identity: VerifiedSupabaseIdentity): Promise<MechanicDashboardResponse>;
   };
   jobListService: {
+    getJob?(identity: VerifiedSupabaseIdentity, assignmentId: string): Promise<MechanicJobDetailResponse>;
     listJobs(identity: VerifiedSupabaseIdentity, query: unknown): Promise<MechanicJobPageResponse>;
   };
   performanceService: {
@@ -67,6 +68,13 @@ export function createMechanicOperationsRouteHandlers(
   dependencies: MechanicOperationsRouteDependencies
 ) {
   return {
+    async getJob(request: Request, assignmentId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        if (!dependencies.jobListService.getJob) throw new Error("Job detail service is not configured.");
+        return NextResponse.json(await dependencies.jobListService.getJob(identity, assignmentId), { headers: { "Cache-Control": "private, no-store" } });
+      } catch (error) { return routeError(error); }
+    },
     async getCompletionChecklist(request: Request, assignmentId: string) {
       try {
         const identity = await dependencies.authenticate(request);

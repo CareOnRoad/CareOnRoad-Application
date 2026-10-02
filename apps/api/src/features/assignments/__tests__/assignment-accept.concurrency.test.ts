@@ -113,36 +113,28 @@ describe("assignment accept conflict behavior", () => {
     expect(afterAcceptLoss.dispatchCandidates[0]?.status).toBe("cancelled");
   });
 
-  it("handles accept before rider cancel without a canceled active assignment", async () => {
+  it("allows rider cancel after acceptance before travel and closes both entities", async () => {
     const unitOfWork = createUnitOfWork();
     const cancelService = new ServiceRequestService(unitOfWork, {
-        now: () => now,
-        createId: sequentialIds([
-          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-          "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-        ])
-      });
+      now: () => now
+    });
     const outcomes = await Promise.allSettled([
       acceptService(unitOfWork).acceptOffer(identity(mechanicA), offerA1),
       cancelService.cancelServiceRequest(identity(riderId), requestA, { reason: "late_cancel" })
     ]);
     expect(outcomes[0].status).toBe("fulfilled");
-    expect(outcomes[1]).toMatchObject({
-      status: "rejected",
-      reason: { status: 409, errorCode: "CONFLICT" }
-    });
+    expect(outcomes[1].status).toBe("fulfilled");
 
     const afterCancelLoss = unitOfWork.snapshot();
     expect(afterCancelLoss.assignments).toHaveLength(1);
-    expect(afterCancelLoss.assignments[0]?.status).toBe("accepted");
+    expect(afterCancelLoss.assignments[0]?.status).toBe("canceled");
     expect(afterCancelLoss.serviceRequests.find((request) => request.id === requestA)?.status).toBe(
-      "assigned"
+      "canceled"
     );
-    expect(afterCancelLoss.assignmentStatusHistory).toHaveLength(1);
-    expect(afterCancelLoss.requestStatusHistory).toHaveLength(1);
-    expect(afterCancelLoss.auditLogs).toHaveLength(2);
-    expect(afterCancelLoss.outboxEvents).toHaveLength(2);
+    expect(afterCancelLoss.assignmentStatusHistory).toHaveLength(2);
+    expect(afterCancelLoss.requestStatusHistory).toHaveLength(2);
+    expect(afterCancelLoss.auditLogs).toHaveLength(5);
+    expect(afterCancelLoss.outboxEvents).toHaveLength(5);
     expect(
       afterCancelLoss.serviceRequests.some(
         (request) =>

@@ -1,4 +1,6 @@
 import { LOCATION_MAX_AGE_SECONDS } from "@/features/motorcycles/mechanic-profile.service";
+import { encodeCursor } from "@/lib/list-pagination";
+export { encodeCursor, decodeCursor } from "@/lib/list-pagination";
 import type {
   MechanicDashboardReadModel,
   MechanicJobSummary,
@@ -202,30 +204,6 @@ export function toPerformanceResponse(
   };
 }
 
-export function encodeCursor(cursor: MechanicOperationCursor): string {
-  return Buffer.from(
-    JSON.stringify({ timestamp: cursor.timestamp.toISOString(), id: cursor.id })
-  ).toString("base64url");
-}
-
-export function decodeCursor(value: string): MechanicOperationCursor {
-  try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as {
-      timestamp?: unknown;
-      id?: unknown;
-    };
-    if (
-      typeof parsed.timestamp !== "string" ||
-      Number.isNaN(new Date(parsed.timestamp).getTime()) ||
-      typeof parsed.id !== "string"
-    ) {
-      throw new Error("INVALID_CURSOR");
-    }
-    return { timestamp: new Date(parsed.timestamp), id: parsed.id };
-  } catch {
-    throw new Error("INVALID_CURSOR");
-  }
-}
 
 function locationFreshness(
   locationUpdatedAt: Date | undefined,

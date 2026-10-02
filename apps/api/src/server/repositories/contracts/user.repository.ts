@@ -100,6 +100,7 @@ export interface UserRepository {
   registerDevice(input: RegisterUserDevice): Promise<UserDevice>;
   listAdminUsers(input: AdminUserListInput): Promise<AdminUserPage>;
   findActorForUpdate(id: string): Promise<ApplicationActor | undefined>;
+  updateDisplayName(id: string, displayName: string, updatedAt: Date): Promise<ApplicationActor>;
   updateStatus(id: string, status: UserStatus, updatedAt: Date): Promise<ApplicationActor>;
   listDevicesForAdmin(input: {
     userId: string;

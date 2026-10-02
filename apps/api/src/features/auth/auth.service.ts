@@ -5,6 +5,7 @@ import { INITIAL_MECHANIC_SERVICE_RADIUS_KM } from "@/server/repositories/contra
 import type { UserDevice } from "@/server/repositories/contracts/user.repository";
 
 import { requireActiveActor } from "./authorization";
+import { updateProfileSchema } from "./auth.schemas";
 import type {
   BootstrapProfileInput,
   RegisterDeviceInput,
@@ -195,6 +196,26 @@ export class AuthService {
             }
           : {})
       };
+    });
+  }
+
+  updateProfile(identity: VerifiedSupabaseIdentity, input: unknown): Promise<RequestActor> {
+    const parsed = updateProfileSchema.safeParse(input);
+    if (!parsed.success) throw new AuthError("INVALID_INPUT", "Profile input is invalid.", 400);
+    return this.unitOfWork.execute(async ({ users, audit }) => {
+      const actor = await users.findActorForUpdate(identity.subject);
+      if (!actor) throw new AuthError("NOT_FOUND", "Application profile not found.", 404);
+      requireActiveActor(toRequestActor(actor));
+      if (actor.displayName === parsed.data.display_name) return toRequestActor(actor);
+      const now = this.options.now?.() ?? new Date();
+      const updated = await users.updateDisplayName(actor.id, parsed.data.display_name, now);
+      await audit.append({
+        id: this.options.createId?.() ?? randomUUID(), actorId: actor.id,
+        actorRole: preferredAuditRole(actor.roles), action: "user.profile.updated",
+        entityType: "app_user", entityId: actor.id,
+        metadata: { field: "display_name" }, createdAt: now
+      });
+      return toRequestActor(updated);
     });
   }
 

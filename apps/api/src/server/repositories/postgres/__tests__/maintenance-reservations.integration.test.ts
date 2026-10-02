@@ -3,8 +3,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AcceptAssignmentService } from "@/features/assignments/accept-assignment.service";
+import { AssignmentService } from "@/features/assignments/assignment.service";
 import { DispatchService } from "@/features/dispatch/dispatch.service";
 import { ServiceRequestService } from "@/features/service-requests/service-request.service";
+import { AdminUserManagementService } from "@/features/admin/admin-user-management.service";
+import { AdminMechanicManagementService } from "@/features/admin/admin-mechanic-management.service";
 import { createIsolatedPostgresTestContext, hasPostgresTestDatabase, type IsolatedPostgresTestContext } from "@/server/testing/postgres-test-context";
 import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 
@@ -52,5 +55,21 @@ describeDatabase("maintenance reservation constraints", () => {
     const adjacent = await accept.acceptOffer(identity(mechanic), await offer("2026-10-03T15:00:00Z"), { estimated_duration_minutes: 60 });
     await expect(context.sql`update assignments set reservation_start_at = '2026-10-03T09:30:00Z',
       reservation_end_at = '2026-10-03T17:00:00Z' where id = ${adjacent.id}`).rejects.toMatchObject({ code: "23P01" });
+    expect((await uow.execute(({ assignments }) => assignments.listVisibleToActor({ id: rider, roles: ["rider", "mechanic"] }))))
+      .toHaveLength(2);
+    await context.sql`update assignments set created_at = '2026-10-01T08:59:59.000123Z'`;
+    const listing = new AssignmentService(uow);
+    const page = await listing.listAssignments(identity(rider), { limit: 1, status: "accepted", date_from: "2026-10-01T00:00:00Z" });
+    const next = await listing.listAssignments(identity(rider), { limit: 1, cursor: page.page.next_cursor });
+    expect(new Set([...page.items, ...next.items].map((item) => item.id)).size).toBe(2);
+    expect(next.page.has_more).toBe(false);
+    expect((await listing.listAssignments(identity(rider), { status: "completed" })).items).toHaveLength(0);
+    expect((await listing.listAssignments(identity(rider), { date_to: "2026-10-01T00:00:00Z" })).items).toHaveLength(0);
+    await context.sql`insert into user_roles (user_id, role) values (${rider}, 'admin')`;
+    const reason = { reason: "Do not orphan confirmed future appointments" };
+    await expect(new AdminUserManagementService(uow).revokeRole(identity(rider), mechanic,
+      { ...reason, role: "mechanic" }, "revoke-future-mechanic")).rejects.toMatchObject({ status: 409 });
+    await expect(new AdminMechanicManagementService(uow).suspend(identity(rider), mechanic,
+      reason, "suspend-future-mechanic")).rejects.toMatchObject({ status: 409 });
   }, 120_000);
 });

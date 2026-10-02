@@ -50,11 +50,11 @@ describeDatabase("admin foundation repositories integration", () => {
     await sql`
       insert into service_requests (
         id, request_code, rider_id, motorcycle_id, service_type,
-        problem_description, address_text
+        service_location, problem_description, address_text
       )
       values (
         ${requestId}, 'COR-MOB-20260705-1', ${riderId}, ${motorcycleId},
-        'mobile_repair', 'Engine does not start', 'District 7'
+        'mobile_repair', ST_SetSRID(ST_MakePoint(106.69, 10.77), 4326)::geography, 'Engine does not start', 'District 7'
       )
     `;
   }, 30_000);

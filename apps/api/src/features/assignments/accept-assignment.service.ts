@@ -72,10 +72,12 @@ export class AcceptAssignmentService {
         return toAssignmentResponse(existingForCandidate);
       }
 
+      if (!request.serviceLocation) throw new AssignmentError("CONFLICT", "location is missing; repair the request before matching.", 409);
+
       const now = this.options.now?.() ?? new Date();
-      const scheduled = request.serviceType === "periodic_maintenance" ? request.scheduledStartAt : undefined;
+      const scheduled = request.scheduledStartAt;
       if (scheduled && parsed.data.estimated_duration_minutes === undefined) {
-        throw new AssignmentError("INVALID_INPUT", "Scheduled maintenance requires estimated_duration_minutes.", 400);
+        throw new AssignmentError("INVALID_INPUT", "Scheduled visits require estimated_duration_minutes.", 400);
       }
       if (scheduled && scheduled <= now) throw new AssignmentError("CONFLICT", "The appointment time has passed; reschedule the request.", 409);
       const visitStart = scheduled ?? now;
@@ -95,6 +97,7 @@ export class AcceptAssignmentService {
       }
 
       const mechanic = await repositories.mechanics.findProfileByUserIdForUpdate(actor.id);
+      requireActorRole(await loadActiveActor(repositories, identity.subject), "mechanic");
       if (!mechanic || mechanic.profileStatus !== "active") {
         throw new AssignmentError("CONFLICT", "Mechanic profile is not active.", 409);
       }
@@ -130,6 +133,7 @@ export class AcceptAssignmentService {
         requestId: request.id,
         mechanicId: actor.id,
         acceptedCandidateId: acceptedCandidate.id,
+        dispatchDistanceMeters: acceptedCandidate.distanceMeters,
         status: "accepted",
         scheduledStartAt: scheduled,
         reservationStartAt: reservationStart,
@@ -193,9 +197,9 @@ export class AcceptAssignmentService {
       });
 
       await persistNotification(repositories, {
-        userId: request.riderId, type: scheduled ? "maintenance.booking.confirmed" : "assignment.accepted",
-        title: scheduled ? "Lịch bảo dưỡng đã được xác nhận" : "Thợ đã nhận yêu cầu",
-        body: scheduled ? "Thợ đã nhận lịch đến bảo dưỡng tại vị trí của bạn." : "Bạn có thể theo dõi tiến trình phục vụ.",
+        userId: request.riderId, type: scheduled ? (request.serviceType === "periodic_maintenance" ? "maintenance.booking.confirmed" : "appointment.booking.confirmed") : "assignment.accepted",
+        title: scheduled ? (request.serviceType === "periodic_maintenance" ? "Lịch bảo dưỡng đã được xác nhận" : "Lịch phục vụ đã được xác nhận") : "Thợ đã nhận yêu cầu",
+        body: scheduled ? "Thợ đã nhận lịch đến phục vụ tại vị trí của bạn." : "Bạn có thể theo dõi tiến trình phục vụ.",
         data: { request_id: request.id, assignment_id: assignment.id,
           ...(scheduled ? { scheduled_start_at: scheduled.toISOString() } : {}) },
         dedupeKey: `assignment.accepted:${assignment.id}`, requestId: request.id

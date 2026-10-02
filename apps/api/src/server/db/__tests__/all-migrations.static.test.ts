@@ -39,7 +39,18 @@ const expectedMigrations = [
   "202606250032_live_location_tracking.sql",
   "202606250033_rescue_quote_payment_workflow.sql",
   "202606250034_maintenance_quote_payment_workflow.sql",
-  "202606250035_maintenance_reservations_notification_leases.sql"
+  "202606250035_maintenance_reservations_notification_leases.sql",
+  "202606250036_historical_mechanic_ratings.sql",
+  "202606250037_service_request_coordinates.sql",
+  "202606250038_dispatch_search_episodes.sql",
+  "202606250039_admin_assignment_provenance.sql",
+  "202606250040_admin_quote_status.sql",
+  "202606250041_admin_supervision_actions.sql",
+  "202606250042_admin_delivery_statuses.sql",
+  "202606250043_admin_delivery_operations.sql",
+  "202606250044_admin_reminder_dashboard.sql",
+  "202606250045_admin_dispatch_configuration.sql",
+  "202606250046_dispatch_radius_policy_bounds.sql"
 ] as const;
 
 const migrationSql = expectedMigrations
@@ -153,6 +164,12 @@ describe("complete migration set", () => {
       "dispatch_rounds_due_claim_idx",
       "device_delivery_credentials_one_active_fingerprint_idx",
       "device_delivery_credentials_one_active_device_idx"
+      ,"admin_operation_configs_value_check",
+      "admin_operation_configs_budget_guard",
+      "admin_operation_config_versions_append_only",
+      "admin_operation_config_versions_reject_truncate",
+      "dispatch_rounds_policy_guard",
+      "reminder_rules_owner_guard"
       ,"notification_delivery_receipts_notification_status_idx",
       "notifications_user_unread_created_idx"
       ,"assignment_live_locations_expiry_idx"
@@ -198,6 +215,7 @@ describe("complete migration set", () => {
       "payment_orders",
       "payment_events"
       ,"assignment_live_locations"
+      ,"admin_operation_configs", "admin_operation_config_versions"
     ]) {
       expect(migrationSql).toContain(`alter table ${table} enable row level security`);
     }

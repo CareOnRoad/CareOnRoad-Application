@@ -41,6 +41,10 @@ export const registerDeviceSchema = z
     }
   });
 
+export const updateProfileSchema = z.object({
+  display_name: z.string().trim().min(1).max(120)
+}).strict();
+
 export const rotatePushTokenSchema = z
   .object({
     push_provider: z.enum(pushProviders),

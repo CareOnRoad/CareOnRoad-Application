@@ -53,6 +53,8 @@ export class InMemoryMotorcycleRepository implements MotorcycleRepository {
     motorcycle.updatedAt = archivedAt;
     return cloneMotorcycle(motorcycle);
   }
+
+  findByIdForUpdate(id: string): Promise<Motorcycle | undefined> { return this.findById(id); }
 }
 
 function cloneMotorcycle(motorcycle: Motorcycle): Motorcycle {

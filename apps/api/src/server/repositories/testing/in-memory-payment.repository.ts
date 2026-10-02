@@ -11,6 +11,16 @@ import type {
 const ACTIVE_PAYMENT_STATUSES = new Set<PaymentOrderStatus>(["created", "pending", "failed"]);
 
 export class InMemoryPaymentRepository implements PaymentRepository {
+  async hasUnresolvedForRequest(input: { requestId: string; assignmentId?: string; quoteId?: string }): Promise<boolean> {
+    return this.orders.some((order) => order.requestId === input.requestId &&
+      (!input.assignmentId || order.assignmentId === input.assignmentId) && (!input.quoteId || order.quoteId === input.quoteId) &&
+      ["created", "pending", "succeeded", "needs_review"].includes(order.status));
+  }
+
+  async findByProviderOrderCode(provider: PaymentProvider, providerOrderCode: number): Promise<PaymentOrder | undefined> {
+    const order = this.orders.find((item) => item.provider === provider && item.providerOrderCode === providerOrderCode);
+    return order ? cloneOrder(order) : undefined;
+  }
   constructor(
     private readonly orders: PaymentOrder[],
     private readonly events: PaymentEvent[],

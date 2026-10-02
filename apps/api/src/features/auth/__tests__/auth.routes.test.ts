@@ -27,6 +27,28 @@ const device = {
 };
 
 describe("auth routes", () => {
+  it("PATCH changes only the authenticated profile, rejects injection, and leaves POST bootstrap unchanged", async () => {
+    const uow = new InMemoryUnitOfWork(); const service = new AuthService(uow);
+    await service.bootstrapProfile(identity, { display_name: "Original" });
+    const handlers = createAuthRouteHandlers({ authenticate: async () => identity, authService: service });
+    const patch = (body: unknown) => handlers.updateProfile(new Request("http://localhost/api/v1/auth/profile", {
+      method: "PATCH", body: JSON.stringify(body)
+    }));
+    expect((await patch({ display_name: " Updated " })).status).toBe(200);
+    expect(await service.bootstrapProfile(identity, { display_name: "Ignored" })).toMatchObject({ display_name: "Updated" });
+    for (const field of ["id", "user_id", "roles", "status", "account_type", "rating", "verified"]) {
+      expect((await patch({ display_name: "Injected", [field]: field === "roles" ? ["admin"] : "anything" })).status).toBe(400);
+    }
+    const state = uow.snapshot();
+    expect(state.auditLogs.at(-1)?.metadata).toEqual({ field: "display_name" });
+    expect(JSON.stringify(state.auditLogs)).not.toContain("Updated");
+    expect(state.outboxEvents).toHaveLength(1);
+    await expect(service.updateProfile({ ...identity, subject: "22222222-2222-4222-8222-222222222222" }, { display_name: "Other" }))
+      .rejects.toMatchObject({ status: 404 });
+    state.users[0]!.status = "suspended";
+    await expect(new AuthService(new InMemoryUnitOfWork(state)).updateProfile(identity, { display_name: "Blocked" }))
+      .rejects.toMatchObject({ status: 403 });
+  });
   it("returns the current actor for GET /api/v1/auth/me", async () => {
     const handlers = createHandlers();
     const response = await handlers.getMe(

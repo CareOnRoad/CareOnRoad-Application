@@ -4,7 +4,7 @@ import type { RequestStatus } from "@/server/repositories/contracts/service-requ
 const ADMIN_CANCELABLE_STATUSES = new Set<RequestStatus>([
   "submitted",
   "dispatching",
-  "offered"
+  "offered", "manual_escalation", "assigned", "mechanic_en_route", "in_service", "awaiting_quote_approval"
 ]);
 
 const ADMIN_ESCALATABLE_STATUSES = new Set<RequestStatus>([

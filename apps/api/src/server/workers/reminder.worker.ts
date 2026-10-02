@@ -43,11 +43,12 @@ export class ReminderWorker {
       try {
         const outcome = await this.unitOfWork.execute(async (repositories) => {
           const { reminders } = repositories;
+          // Match archive's motorcycle -> rule lock order before rechecking eligibility.
+          const motorcycle = await repositories.motorcycles.findByIdForUpdate(claimed.motorcycleId);
           const rule = await reminders.findRuleByIdForUpdate(claimed.id);
           if (!rule || rule.leaseOwner !== workerId || !rule.enabled) return undefined;
-          const motorcycle = await repositories.motorcycles.findById(rule.motorcycleId);
           const actor = await repositories.users.findActorById(rule.riderId);
-          if (!motorcycle || motorcycle.archivedAt || !actor || actor.status !== "active") {
+          if (!motorcycle || motorcycle.archivedAt || motorcycle.riderId !== rule.riderId || !actor || actor.status !== "active" || !actor.roles.includes("rider")) {
             await reminders.completeRuleClaim({ id: rule.id, enabled: false, lastCompletedAt: now, updatedAt: now });
             return undefined;
           }
@@ -61,8 +62,9 @@ export class ReminderWorker {
             id: createId(), ruleId: rule.id, riderId: rule.riderId,
             motorcycleId: rule.motorcycleId, dueAt, status: "due", createdAt: now
           });
-          const notification = created.occurrence.status === "dismissed" ? undefined :
+          const notification = ["dismissed", "sent", "queued"].includes(created.occurrence.status) ? undefined :
             await queueReminderNotification(repositories, rule, created.occurrence.id, dueAt, now, createId);
+          if (notification && !["pending", "sent"].includes(notification.notification.status)) throw new Error("Reminder delivery requires admin recovery.");
           if (notification) await reminders.updateOccurrenceStatus({
             id: created.occurrence.id, status: "queued", notificationId: notification.notification.id,
             processedAt: now,

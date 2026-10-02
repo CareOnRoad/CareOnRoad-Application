@@ -20,7 +20,7 @@ import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 import { PostgresMechanicRepository } from "../mechanic.repository";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
-const migrationFiles = legacyCompatibleMigrationFiles();
+const migrationFiles = sourceMigrationFiles();
 
 describeDatabase("motorcycle and mechanic repositories integration", () => {
   let context: IsolatedPostgresTestContext;
@@ -65,7 +65,7 @@ describeDatabase("motorcycle and mechanic repositories integration", () => {
         "outbox_events",
         "idempotency_records"
       ],
-      { resetAppendOnlyAuditLogs: true }
+      { resetAppendOnlyTables: true }
     );
   }, 30_000);
 
@@ -79,7 +79,7 @@ describeDatabase("motorcycle and mechanic repositories integration", () => {
     await bootstrapProfile(riderIdentity, "rider");
     await bootstrapProfile(otherRiderIdentity, "rider");
     await cleanupPostgresTables(sql, ["audit_logs", "outbox_events"], {
-      resetAppendOnlyAuditLogs: true
+      resetAppendOnlyTables: true
     });
 
     const service = new MotorcycleService(new PostgresUnitOfWork(sql), {
@@ -121,7 +121,7 @@ describeDatabase("motorcycle and mechanic repositories integration", () => {
     await bootstrapProfile(mechanicIdentity, "mechanic");
     await createMechanicProfile();
     await cleanupPostgresTables(sql, ["audit_logs", "outbox_events"], {
-      resetAppendOnlyAuditLogs: true
+      resetAppendOnlyTables: true
     });
 
     const service = new MechanicProfileService(new PostgresUnitOfWork(sql), {
@@ -171,7 +171,7 @@ describeDatabase("motorcycle and mechanic repositories integration", () => {
       select table_name
       from information_schema.tables
       where table_schema = ${context.schema}
-        and table_name in ('mechanic_locations', 'service_reviews')
+        and table_name = 'mechanic_locations'
     `;
     expect(tableRows).toHaveLength(0);
 
@@ -323,11 +323,9 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
   }
 }
 
-function legacyCompatibleMigrationFiles(): string[] {
+function sourceMigrationFiles(): string[] {
   return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
+    .filter((name) => name.endsWith(".sql"))
     .sort();
 }
 

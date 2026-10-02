@@ -41,7 +41,7 @@ describe("service request routes", () => {
           motorcycle_id: motorcycleId,
           service_type: "mobile_repair",
           problem_description: "Xe tat may",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "rider"
       )
@@ -75,7 +75,7 @@ describe("service request routes", () => {
           motorcycle_id: motorcycleId,
           service_type: "mobile_repair",
           problem_description: "Xe tat may",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "rider",
         "create-key"
@@ -92,7 +92,7 @@ describe("service request routes", () => {
           motorcycle_id: motorcycleId,
           service_type: "mobile_repair",
           problem_description: "Noi dung khac",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "rider",
         "create-key"

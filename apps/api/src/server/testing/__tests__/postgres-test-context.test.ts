@@ -108,16 +108,28 @@ describe("postgres test context", () => {
   });
 
   it("truncates only validated, unique table identifiers", async () => {
-    const unsafe = vi.fn(async () => undefined);
+    const schema = `careonroad_test_${"a".repeat(32)}`;
+    const unsafe = vi.fn(async () => [{ schema }]);
 
     await cleanupPostgresTables(
       { unsafe },
-      ["public.audit_logs", "public.outbox_events", "public.audit_logs"]
+      ["audit_logs", `${schema}.outbox_events`, "audit_logs"]
     );
 
     expect(unsafe).toHaveBeenCalledWith(
-      'TRUNCATE TABLE "public"."audit_logs", "public"."outbox_events" RESTART IDENTITY CASCADE'
+      `TRUNCATE TABLE "${schema}"."audit_logs", "${schema}"."outbox_events" RESTART IDENTITY CASCADE;`
     );
+  });
+
+  it("rejects cleanup of public or another schema before truncation", async () => {
+    const unsafe = vi.fn(async () => [{ schema: "public" }]);
+    await expect(cleanupPostgresTables({ unsafe }, ["audit_logs"], { resetAppendOnlyTables: true }))
+      .rejects.toThrow("isolated test schema");
+    expect(unsafe).toHaveBeenCalledTimes(1);
+    unsafe.mockResolvedValue([{ schema: `careonroad_test_${"a".repeat(32)}` }]);
+    await expect(cleanupPostgresTables({ unsafe }, ["public.audit_logs"], { resetAppendOnlyTables: true }))
+      .rejects.toThrow("another schema");
+    expect(unsafe).toHaveBeenCalledTimes(2);
   });
 
   it("rejects unsafe table identifiers before executing cleanup SQL", async () => {

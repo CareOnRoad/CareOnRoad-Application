@@ -27,6 +27,21 @@ type AuditRow = {
 export class PostgresAuditRepository implements AuditRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async query(input: import("../contracts/audit.repository").AuditFilter): Promise<AuditLog[]> {
+    await this.sql`select set_config('statement_timeout', '5000', true)`;
+    const rows = await this.sql<AuditRow[]>`select * from audit_logs
+      where (${input.actorId ?? null}::uuid is null or actor_id = ${input.actorId ?? null}::uuid)
+        and (${input.entityType ?? null}::text is null or entity_type = ${input.entityType ?? null})
+        and (${input.entityId ?? null}::uuid is null or entity_id = ${input.entityId ?? null}::uuid)
+        and (${input.action ?? null}::text is null or action = ${input.action ?? null})
+        and (${!input.adminOnly} or actor_role = 'admin')
+        and (${input.date_from ?? null}::timestamptz is null or created_at >= ${input.date_from ?? null}::timestamptz)
+        and (${input.date_to ?? null}::timestamptz is null or created_at <= ${input.date_to ?? null}::timestamptz)
+        and (${input.cursor?.timestamp ?? null}::timestamptz is null or (date_trunc('milliseconds', created_at), id) < (${input.cursor?.timestamp ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc limit ${input.limit + 1}`;
+    return rows.map(mapAuditRow);
+  }
+
   async append(input: AppendAuditLog): Promise<AuditLog> {
     const metadata = sanitizeAuditMetadata(input.metadata);
     const rows =

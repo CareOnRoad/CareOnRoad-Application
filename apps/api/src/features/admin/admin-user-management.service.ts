@@ -395,6 +395,18 @@ export class AdminUserManagementService {
         throw conflict("The last active administrator role cannot be revoked.");
       }
 
+      if (parsed.data.role === "mechanic") {
+        const profile = await repositories.mechanics.findProfileByUserIdForUpdate(id);
+        if (mode === "revoke" && await repositories.assignments.findUnfinishedByMechanicForUpdate(id)) {
+          throw conflict("Mechanic role cannot be revoked while unfinished work or appointments exist.");
+        }
+        if (mode === "revoke" && profile && target.roles.includes("mechanic")) {
+          await repositories.mechanics.updateAvailability(id, false, now);
+          if (profile.profileStatus === "active") {
+            await repositories.mechanics.updateProfileStatus(id, "suspended", now);
+          }
+        }
+      }
       const changed =
         mode === "grant"
           ? await repositories.users.grantRole(id, parsed.data.role)
@@ -416,8 +428,9 @@ export class AdminUserManagementService {
             createdAt: now,
             updatedAt: now
           });
-        } else if (mode === "revoke" && profile) {
+        } else if (mode === "grant" && profile) {
           await repositories.mechanics.updateAvailability(id, false, now);
+          if (profile.profileStatus === "active") await repositories.mechanics.updateProfileStatus(id, "suspended", now);
         }
       }
       const updated = await repositories.users.findActorById(id);

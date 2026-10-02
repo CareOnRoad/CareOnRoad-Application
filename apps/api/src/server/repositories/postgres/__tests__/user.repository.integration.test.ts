@@ -19,7 +19,7 @@ import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 import { PostgresUserRepository } from "../user.repository";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
-const migrationFiles = legacyCompatibleMigrationFiles();
+const migrationFiles = sourceMigrationFiles();
 
 describeDatabase("PostgresUserRepository integration", () => {
   let context: IsolatedPostgresTestContext;
@@ -47,7 +47,7 @@ describeDatabase("PostgresUserRepository integration", () => {
     await cleanupPostgresTables(
       sql,
       ["device_delivery_credentials", "user_devices", "user_roles", "app_users", "audit_logs", "outbox_events", "idempotency_records"],
-      { resetAppendOnlyAuditLogs: true }
+      { resetAppendOnlyTables: true }
     );
   });
 
@@ -292,13 +292,10 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
   }
 }
 
-function legacyCompatibleMigrationFiles(): string[] {
-  const files = readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
+function sourceMigrationFiles(): string[] {
+  return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
+    .filter((name) => name.endsWith(".sql"))
     .sort();
-  return [...files, "202606250022_push_device_tokens.sql"];
 }
 
 function sequentialIds(ids: string[]): () => string {

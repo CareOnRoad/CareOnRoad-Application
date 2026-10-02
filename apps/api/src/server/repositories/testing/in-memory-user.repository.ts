@@ -92,6 +92,13 @@ export class InMemoryUserRepository implements UserRepository {
     return device;
   }
 
+  async updateDisplayName(id: string, displayName: string, updatedAt: Date): Promise<ApplicationActor> {
+    const user = this.users.find((item) => item.id === id);
+    if (!user) throw new Error("USER_NOT_FOUND");
+    Object.assign(user, { displayName, updatedAt });
+    return (await this.findActorById(id))!;
+  }
+
   async listAdminUsers(input: AdminUserListInput): Promise<AdminUserPage> {
     const filtered = this.users
       .filter((user) => !input.status || user.status === input.status)

@@ -1,3 +1,4 @@
+import { filterPage } from "@/lib/list-pagination";
 import type {
   ClaimDueReminderRulesInput,
   CreateReminderOccurrence,
@@ -14,6 +15,13 @@ export class InMemoryReminderRepository implements ReminderRepository {
     private readonly rules: ReminderRule[],
     private readonly occurrences: ReminderOccurrence[]
   ) {}
+
+  async listRulesAdmin(input: Parameters<ReminderRepository["listRulesAdmin"]>[0]) {
+    return filterPage(this.rules.filter(row => (!input.riderId || row.riderId === input.riderId) && (input.enabled === undefined || row.enabled === input.enabled)), input).map(cloneRule);
+  }
+  async listOccurrencesAdmin(input: Parameters<ReminderRepository["listOccurrencesAdmin"]>[0]) {
+    return filterPage(this.occurrences.filter(row => (!input.riderId || row.riderId === input.riderId) && (!input.ruleId || row.ruleId === input.ruleId)), input).map(cloneOccurrence);
+  }
 
   async createRule(input: CreateReminderRule): Promise<ReminderRule> {
     const rule: ReminderRule = {

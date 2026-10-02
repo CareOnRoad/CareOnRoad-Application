@@ -44,6 +44,28 @@ type QuoteLineRow = {
 export class PostgresQuoteRepository implements QuoteRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async hasOpenByAssignment(assignmentId: string): Promise<boolean> {
+    const [row] = await this.sql<{ exists: boolean }[]>`select exists(select 1 from quotes where assignment_id = ${assignmentId} and status in ('pending', 'approved'))`;
+    return Boolean(row?.exists);
+  }
+
+  async listPageByRequest(requestId: string, limit: number, cursor?: import("@/lib/list-pagination").PageCursor): Promise<Quote[]> {
+    const rows = await this.sql<QuoteRow[]>`select * from quotes where request_id = ${requestId}
+      and (${cursor?.timestamp ?? null}::timestamptz is null or (date_trunc('milliseconds', created_at), id) < (${cursor?.timestamp ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc limit ${limit + 1}`;
+    return Promise.all(rows.map((row) => this.withLines(mapQuote(row))));
+  }
+
+  async hasOpenByRequest(requestId: string): Promise<boolean> {
+    const rows = await this.sql<{ found: boolean }[]>`select exists(select 1 from quotes where request_id = ${requestId} and status in ('pending','approved')) as found`;
+    return rows[0]!.found;
+  }
+
+  async findLatestByAssignment(assignmentId: string): Promise<Quote | undefined> {
+    const rows = await this.sql<QuoteRow[]>`select * from quotes where assignment_id = ${assignmentId} order by version desc limit 1`;
+    return rows[0] ? this.withLines(mapQuote(rows[0])) : undefined;
+  }
+
   async create(input: CreateQuote): Promise<Quote> {
     const rows = await this.sql<QuoteRow[]>`
       insert into quotes (
@@ -133,6 +155,13 @@ export class PostgresQuoteRepository implements QuoteRepository {
       select exists(select 1 from quotes where diagnosis_id = ${diagnosisId}) as exists
     `;
     return rows[0]?.exists ?? false;
+  }
+
+  async hasAnyByAssignment(assignmentId: string): Promise<boolean> {
+    const [row] = await this.sql<{ exists: boolean }[]>`
+      select exists(select 1 from quotes where assignment_id = ${assignmentId}) as exists
+    `;
+    return Boolean(row?.exists);
   }
 
   async updateStatus(input: {

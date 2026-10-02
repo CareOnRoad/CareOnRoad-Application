@@ -1,6 +1,7 @@
 import type { ServiceType } from "@/features/motorcycles/motorcycle.schemas";
 import type { GeoPoint } from "./mechanic.repository";
 import type { JsonObject } from "./idempotency.repository";
+import type { ListFilter } from "@/lib/list-pagination";
 
 export type FulfillmentMode = "immediate_location" | "scheduled_visit";
 export type RequestStatus =
@@ -33,6 +34,8 @@ export type ServiceRequest = {
   safetyAnswers?: JsonObject;
   maintenanceNotes?: string;
   manualEscalationReason?: string;
+  dispatchEpisodeStartRound?: number;
+  dispatchRetryCount?: number;
   canceledReason?: string;
   reminderId?: string;
   reminderContextId?: string;
@@ -60,9 +63,10 @@ export type CreateRequestStatusHistory = Omit<RequestStatusHistory, "createdAt">
 };
 
 export interface ServiceRequestRepository {
+  startDispatchEpisode(input: { id: string; startRound: number; updatedAt: Date }): Promise<ServiceRequest>;
   updateAppointment(input: { id: string; location: GeoPoint; addressText?: string; scheduledStartAt?: Date; updatedAt: Date }): Promise<ServiceRequest>;
   create(input: CreateServiceRequest): Promise<ServiceRequest>;
-  listByRider(riderId: string): Promise<ServiceRequest[]>;
+  listByRider(riderId: string, input?: ListFilter): Promise<ServiceRequest[]>;
   findById(id: string): Promise<ServiceRequest | undefined>;
   findByIdForUpdate(id: string): Promise<ServiceRequest | undefined>;
   updateStatus(input: {

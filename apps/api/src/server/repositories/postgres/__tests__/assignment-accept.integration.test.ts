@@ -9,6 +9,7 @@ import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { AcceptAssignmentService } from "@/features/assignments/accept-assignment.service";
 import { AssignmentService } from "@/features/assignments/assignment.service";
 import { ServiceRequestService } from "@/features/service-requests/service-request.service";
+import { AdminUserManagementService } from "@/features/admin/admin-user-management.service";
 import {
   cleanupPostgresTables,
   createIsolatedPostgresTestContext,
@@ -19,7 +20,7 @@ import {
 import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
-const migrationFiles = legacyCompatibleMigrationFiles();
+const migrationFiles = sourceMigrationFiles();
 
 describeDatabase("assignment acceptance integration", () => {
   let context: IsolatedPostgresTestContext;
@@ -69,7 +70,7 @@ describeDatabase("assignment acceptance integration", () => {
         "outbox_events",
         "idempotency_records"
       ],
-      { resetAppendOnlyAuditLogs: true }
+      { resetAppendOnlyTables: true }
     );
     await seedRider(riderId);
     await seedMotorcycle(motorcycleId, riderId);
@@ -82,6 +83,35 @@ describeDatabase("assignment acceptance integration", () => {
   afterAll(async () => {
     await context?.dispose({ authUserIds: [...authUserIds] });
   }, 30_000);
+
+  it("serializes acceptance with mechanic role revoke under the profile lock", async () => {
+    await sql`insert into user_roles (user_id, role) values (${riderId}, 'admin')`;
+    const offer = await seedOffer(requestA, mechanicA);
+    const unit = new PostgresUnitOfWork(sql);
+    const outcomes = await Promise.allSettled([
+      new AcceptAssignmentService(unit, { now: () => now }).acceptOffer(identity(mechanicA), offer),
+      new AdminUserManagementService(unit, { now: () => now }).revokeRole(identity(riderId), mechanicA,
+        { role: "mechanic", reason: "Concurrent revoke integration verification" }, "concurrent-revoke")
+    ]);
+    expect(outcomes.filter((item) => item.status === "fulfilled")).toHaveLength(1);
+    const [row] = await sql`select
+      exists(select 1 from assignments where mechanic_id = ${mechanicA}) as accepted,
+      exists(select 1 from user_roles where user_id = ${mechanicA} and role = 'mechanic') as has_role`;
+    expect(row!.accepted).toBe(row!.has_role);
+  });
+
+  it("serializes concurrent rider cancel and accept into a terminal request with no active assignment", async () => {
+    const offer = await seedOffer(requestA, mechanicA);
+    const unit = new PostgresUnitOfWork(sql);
+    const outcomes = await Promise.allSettled([
+      new AcceptAssignmentService(unit, { now: () => now }).acceptOffer(identity(mechanicA), offer),
+      new ServiceRequestService(unit, { now: () => now }).cancelServiceRequest(identity(riderId), requestA, { reason: "Concurrent rider cancellation" })
+    ]);
+    expect(outcomes[1].status).toBe("fulfilled");
+    expect(await sql`select status from service_requests where id = ${requestA}`).toEqual([{ status: "canceled" }]);
+    const rows = await sql`select status from assignments where request_id = ${requestA}`;
+    expect(rows).toEqual(outcomes[0].status === "fulfilled" ? [{ status: "canceled" }] : []);
+  });
 
   it("creates one first-valid assignment, cancels competitors, and writes sanitized audit/outbox", async () => {
     const offerA = await seedOffer(requestA, mechanicA);
@@ -248,13 +278,12 @@ describeDatabase("assignment acceptance integration", () => {
     await resetDomainRows();
     const acceptFirstOffer = await seedOffer(requestA, mechanicA);
     await service.acceptOffer(identity(mechanicA), acceptFirstOffer);
-    const afterAccept = await counts();
     await expect(
       new ServiceRequestService(new PostgresUnitOfWork(sql), {
         now: () => now
       }).cancelServiceRequest(identity(riderId), requestA, { reason: "late_cancel" })
-    ).rejects.toMatchObject({ status: 409, errorCode: "CONFLICT" });
-    await expect(counts()).resolves.toEqual(afterAccept);
+    ).resolves.toMatchObject({ status: "canceled" });
+    expect(await sql`select status from assignments where request_id = ${requestA}`).toEqual([{ status: "canceled" }]);
     await expect(
       sql`
         select count(*)::int as count
@@ -279,7 +308,7 @@ describeDatabase("assignment acceptance integration", () => {
         "audit_logs",
         "outbox_events"
       ],
-      { resetAppendOnlyAuditLogs: true }
+      { resetAppendOnlyTables: true }
     );
     requestSequence = 1;
     await seedRequest(requestA, "offered");
@@ -411,9 +440,10 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
   }
 }
 
-function legacyCompatibleMigrationFiles(): string[] {
+function sourceMigrationFiles(): string[] {
   return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter((name) => name.endsWith(".sql")).sort();
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
 }
 
 function identity(subject: string): VerifiedSupabaseIdentity {

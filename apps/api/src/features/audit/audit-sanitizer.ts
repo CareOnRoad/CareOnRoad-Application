@@ -17,6 +17,8 @@ const ALLOWED_LEAF_KEYS = new Set([
   "eta_metadata_id",
   "event_type",
   "field",
+  "filter_hash",
+  "exported_count",
   "idempotency_key_hash",
   "media_metadata_id",
   "media_purpose",

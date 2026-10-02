@@ -12,6 +12,8 @@ import {
 } from "./admin-route-helpers";
 import {
   AdminServiceRequestService,
+  type CancellationRepairResponse,
+  type ReservationRepairResponse,
   type AdminPageResponse,
   type AdminRequestAssignmentResponse,
   type AdminRequestMediaResponse,
@@ -25,6 +27,8 @@ import {
 export type AdminServiceRequestRouteDependencies = {
   authenticate(request: Request): Promise<VerifiedSupabaseIdentity>;
   service: {
+    repairReservation(identity: VerifiedSupabaseIdentity, requestId: string, input: unknown, idempotencyKey: string): Promise<ReservationRepairResponse>;
+    repairCancellation(identity: VerifiedSupabaseIdentity, requestId: string, input: unknown, idempotencyKey: string): Promise<CancellationRepairResponse>;
     listRequests(
       identity: VerifiedSupabaseIdentity,
       input: unknown
@@ -77,6 +81,10 @@ export function createAdminServiceRequestRouteHandlers(
   dependencies: AdminServiceRequestRouteDependencies
 ) {
   return {
+    repairReservation: (request: Request, requestId: string) => command(request, (identity, body, key) =>
+      dependencies.service.repairReservation(identity, requestId, body, key)),
+    repairCancellation: (request: Request, requestId: string) => command(request, (identity, body, key) =>
+      dependencies.service.repairCancellation(identity, requestId, body, key)),
     listRequests: (request: Request) =>
       read(request, (identity) =>
         dependencies.service.listRequests(identity, searchParams(request))

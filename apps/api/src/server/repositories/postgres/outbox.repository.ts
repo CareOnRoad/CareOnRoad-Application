@@ -1,3 +1,4 @@
+import { sanitizeAdminReason } from "@/features/admin/admin-redaction";
 import type { TransactionSql } from "postgres";
 
 import type { JsonObject } from "../contracts/idempotency.repository";
@@ -18,10 +19,41 @@ type OutboxRow = {
   last_error_code: string | null;
   created_at: Date;
   processed_at: Date | null;
+  admin_retry_count: number;
+  abandoned_at: Date | null;
 };
 
 export class PostgresOutboxRepository implements OutboxRepository {
   constructor(private readonly sql: TransactionSql) {}
+
+  async findById(id: string): Promise<OutboxEvent | undefined> {
+    const [row] = await this.sql<OutboxRow[]>`select * from outbox_events where id = ${id}`; return row ? mapOutboxRow(row) : undefined;
+  }
+  async findByIdForUpdate(id: string): Promise<OutboxEvent | undefined> {
+    const [row] = await this.sql<OutboxRow[]>`select * from outbox_events where id = ${id} for update`; return row ? mapOutboxRow(row) : undefined;
+  }
+  async listAdmin(input: Parameters<OutboxRepository["listAdmin"]>[0]) {
+    const rows = await this.sql<OutboxRow[]>`select * from outbox_events where
+      (${input.status ?? null}::text is null or status::text = ${input.status ?? null})
+      and (${input.topic ?? null}::text is null or topic = ${input.topic ?? null})
+      and (${input.date_from ?? null}::timestamptz is null or created_at >= ${input.date_from ?? null}::timestamptz)
+      and (${input.date_to ?? null}::timestamptz is null or created_at <= ${input.date_to ?? null}::timestamptz)
+      and (${input.cursor?.timestamp ?? null}::timestamptz is null or (date_trunc('milliseconds', created_at), id) < (${input.cursor?.timestamp ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc limit ${input.limit + 1}`;
+    return rows.map(mapOutboxRow);
+  }
+  async recover(input: Parameters<OutboxRepository["recover"]>[0]) {
+    const retry = input.action === "retry";
+    const [row] = await this.sql<OutboxRow[]>`update outbox_events set status = ${retry ? "pending" : "abandoned"}::outbox_status,
+      attempt_count = ${retry ? this.sql`0` : this.sql`attempt_count`}, next_attempt_at = ${input.now},
+      lease_owner = null, lease_expires_at = null, processed_at = null, last_error_code = null,
+      admin_retry_count = admin_retry_count + ${retry ? 1 : 0}, recovery_admin_id = ${input.actorId}, recovery_reason = ${sanitizeAdminReason(input.reason)}, recovery_at = ${input.now},
+      abandoned_at = ${retry ? null : input.now}
+      where id = ${input.id} and (lease_expires_at is null or lease_expires_at <= ${input.now})
+      and ((${retry} and status in ('dead_letter', 'processed') and admin_retry_count < 3)
+        or (${!retry} and status in ('pending', 'dead_letter', 'processing'))) returning *`;
+    return row ? mapOutboxRow(row) : undefined;
+  }
 
   async renewLease(input: Parameters<OutboxRepository["renewLease"]>[0]) {
     const rows = await this.sql`update outbox_events set lease_expires_at = ${input.leaseUntil}
@@ -153,6 +185,8 @@ function mapOutboxRow(row: OutboxRow): OutboxEvent {
     leaseExpiresAt: row.lease_expires_at ?? undefined,
     lastErrorCode: row.last_error_code ?? undefined,
     createdAt: row.created_at,
+    adminRetryCount: row.admin_retry_count,
+    abandonedAt: row.abandoned_at ?? undefined,
     processedAt: row.processed_at ?? undefined
   };
 }

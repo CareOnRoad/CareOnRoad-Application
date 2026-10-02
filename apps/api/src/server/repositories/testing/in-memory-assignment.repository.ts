@@ -7,6 +7,7 @@ import type {
   CreateAssignmentStatusHistory,
   MechanicActiveWorkload
 } from "../contracts/assignment.repository";
+import { filterPage, type ListFilter, type PageCursor } from "@/lib/list-pagination";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "../contracts/assignment.repository";
 import type { AuditActorRole } from "../contracts/audit.repository";
 import type { RescuePaymentTiming } from "../contracts/quote.repository";
@@ -21,6 +22,24 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
     private readonly notifications: Notification[] = []
   ) {}
 
+  async listHistory(id: string, limit: number, cursor?: PageCursor) {
+    return filterPage(this.history.filter((row) => row.assignmentId === id), { limit, cursor }).map(cloneHistory);
+  }
+
+  async hasAnyByRequest(requestId: string) {
+    return this.assignments.some((item) => item.requestId === requestId);
+  }
+
+  async hasTravelHistory(id: string) {
+    return this.history.some((item) => item.assignmentId === id && !["accepted", "canceled", "recovery_canceled"].includes(item.toStatus));
+  }
+
+  async setReservation(input: Parameters<AssignmentRepository["setReservation"]>[0]) {
+    const assignment = this.assignments.find((item) => item.id === input.id);
+    if (assignment) Object.assign(assignment, { scheduledStartAt: input.scheduledStartAt, reservationStartAt: input.start,
+      reservationEndAt: input.end, updatedAt: input.updatedAt });
+  }
+
   async activate(input: { id: string; now: Date }) {
     const assignment = this.assignments.find((item) => item.id === input.id);
     if (assignment) {
@@ -31,6 +50,12 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
     }
   }
 
+  async findCancellationHistory(id: string): Promise<AssignmentStatusHistory | undefined> {
+    const found = this.history.filter((item) => item.assignmentId === id && item.toStatus === "canceled")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+    return found ? { ...found } : undefined;
+  }
+
   async findReservationConflict(input: Parameters<AssignmentRepository["findReservationConflict"]>[0]) {
     const found = this.assignments.find((item) => item.mechanicId === input.mechanicId && item.id !== input.excludeId &&
       isActiveStatus(item.status) && (item.reservationStartAt ?? item.acceptedAt) < input.end &&
@@ -39,9 +64,9 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
   }
 
   async listScheduledForPreparation(input: { now: Date; limit: number }) {
-    return this.assignments.filter((item) => item.scheduledStartAt && item.reservationStartAt &&
+    return this.assignments.filter((item) => item.scheduledStartAt && item.scheduledStartAt >= input.now && item.reservationStartAt &&
       item.reservationStartAt <= input.now && !item.activatedAt && isActiveStatus(item.status) &&
-      !this.notifications.some((notification) => notification.dedupeKey === `maintenance.prepare:${item.id}:rider`))
+      !this.notifications.some((notification) => [`maintenance.prepare:${item.id}:rider`, `appointment.prepare:${item.id}:rider`].includes(notification.dedupeKey ?? "")))
       .sort((a, b) => a.scheduledStartAt!.getTime() - b.scheduledStartAt!.getTime())
       .slice(0, input.limit).map(cloneAssignment);
   }
@@ -71,6 +96,12 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
   }
 
   async create(input: CreateAssignment): Promise<Assignment> {
+    const source = input.source ?? "offer";
+    if (source === "offer" ? !input.acceptedCandidateId || input.assignedByAdminId || input.supersedesAssignmentId :
+      input.acceptedCandidateId || !input.assignedByAdminId || input.dispatchDistanceMeters === undefined || input.dispatchDistanceMeters < 0 ||
+      (source === "admin_manual" ? input.supersedesAssignmentId : !input.supersedesAssignmentId)) throw new Error("ASSIGNMENT_SOURCE_INVALID");
+    if (input.supersedesAssignmentId && !this.assignments.some((row) => row.id === input.supersedesAssignmentId && row.requestId === input.requestId &&
+      row.status === "recovery_canceled" && row.mechanicId !== input.mechanicId)) throw new Error("ASSIGNMENT_REPLACEMENT_INVALID");
     if (
       this.assignments.some(
         (assignment) =>
@@ -87,13 +118,14 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
     ) {
       throw new Error("ASSIGNMENT_ACTIVE_MECHANIC_EXISTS");
     }
-    if (
+    if (input.acceptedCandidateId &&
       this.assignments.some(
         (assignment) => assignment.acceptedCandidateId === input.acceptedCandidateId
       )
     ) {
       throw new Error("ASSIGNMENT_CANDIDATE_EXISTS");
     }
+    if (input.supersedesAssignmentId && this.assignments.some((row) => row.supersedesAssignmentId === input.supersedesAssignmentId)) throw new Error("ASSIGNMENT_REPLACEMENT_EXISTS");
     if (input.reservationStartAt && input.reservationEndAt && await this.findReservationConflict({
       mechanicId: input.mechanicId, start: input.reservationStartAt, end: input.reservationEndAt
     })) throw new Error("ASSIGNMENT_RESERVATION_OVERLAP");
@@ -156,31 +188,29 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
       }));
   }
 
+  async findUnfinishedByMechanicForUpdate(mechanicId: string): Promise<Assignment | undefined> {
+    const assignment = this.assignments.find((item) => item.mechanicId === mechanicId && isActiveStatus(item.status));
+    return assignment ? cloneAssignment(assignment) : undefined;
+  }
+
   async listVisibleToActor(actor: {
     id: string;
     roles: AuditActorRole[];
-  }): Promise<Assignment[]> {
-    if (actor.roles.includes("admin")) {
-      return this.assignments
-        .slice()
-        .sort(sortNewestFirst)
-        .map(cloneAssignment);
-    }
-    if (actor.roles.includes("mechanic")) {
-      return this.assignments
-        .filter((assignment) => assignment.mechanicId === actor.id)
-        .sort(sortNewestFirst)
-        .map(cloneAssignment);
-    }
+  }, input: ListFilter = { limit: 20 }): Promise<Assignment[]> {
     const ownedRequestIds = new Set(
       this.serviceRequests
         .filter((request) => request.riderId === actor.id)
         .map((request) => request.id)
     );
-    return this.assignments
-      .filter((assignment) => ownedRequestIds.has(assignment.requestId))
-      .sort(sortNewestFirst)
-      .map(cloneAssignment);
+    return filterPage(this.assignments.filter((assignment) => actor.roles.includes("admin") ||
+        (actor.roles.includes("mechanic") && assignment.mechanicId === actor.id) ||
+        (actor.roles.includes("rider") && ownedRequestIds.has(assignment.requestId))), input).map(cloneAssignment);
+  }
+
+  async hasVisibleByRequest(actor: { id: string; roles: AuditActorRole[] }, requestId: string): Promise<boolean> {
+    return this.assignments.some((assignment) => assignment.requestId === requestId &&
+      (actor.roles.includes("admin") || (actor.roles.includes("mechanic") && assignment.mechanicId === actor.id) ||
+        (actor.roles.includes("rider") && this.serviceRequests.some((request) => request.id === requestId && request.riderId === actor.id))));
   }
 
   async updateStatus(input: {
@@ -223,10 +253,6 @@ function isActiveStatus(status: AssignmentStatus): boolean {
 
 function isCurrent(assignment: Assignment): boolean {
   return isActiveStatus(assignment.status) && (!assignment.scheduledStartAt || Boolean(assignment.activatedAt));
-}
-
-function sortNewestFirst(left: Assignment, right: Assignment): number {
-  return right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id);
 }
 
 function cloneAssignment(assignment: Assignment): Assignment {

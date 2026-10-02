@@ -71,7 +71,7 @@ describeDatabase("mechanic operations media repository integration", () => {
           "outbox_events",
           "idempotency_records"
         ],
-        { resetAppendOnlyAuditLogs: true }
+        { resetAppendOnlyTables: true }
       );
     } finally {
       await sql.unsafe(

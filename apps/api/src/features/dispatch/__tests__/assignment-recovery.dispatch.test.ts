@@ -12,6 +12,8 @@ const nextMechanicId = "33333333-3333-4333-8333-333333333333";
 describe("recovered request dispatch", () => {
   it("starts one next round and treats replay as already started", async () => {
     const unitOfWork = new InMemoryUnitOfWork({
+      users: [oldMechanicId, nextMechanicId].map((id) => ({ id, status: "active", createdAt: now, updatedAt: now })),
+      userRoles: [oldMechanicId, nextMechanicId].map((userId) => ({ userId, role: "mechanic" })),
       serviceRequests: [{
         id: requestId,
         requestCode: "COR-MOB-20260823-1",

@@ -23,6 +23,28 @@ const timestamp = new Date("2026-07-06T06:00:00.000Z");
 const reason = { reason: "Administrator approved request operation" };
 
 describe("admin service-request route handlers", () => {
+  it("requires admin, reason, key and confirmed duration for reservation repair, with read-only preview by default", async () => {
+    const input = { ...reason, assignment_id: ASSIGNMENT_ID, estimated_duration_minutes: 60 };
+    const response = await createHandlers().repairReservation(command("repair-reservation", input, "repair-reservation-key"), REQUEST_ID);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ dry_run: true, repairable: false, reason_code: "not_legacy_future_booking" });
+    await expectApiError(await createHandlers(RIDER_USER_ID).repairReservation(command("repair-reservation", input, "repair-reservation-key"), REQUEST_ID), 403, "FORBIDDEN");
+    await expectApiError(await createHandlers().repairReservation(command("repair-reservation", { assignment_id: ASSIGNMENT_ID, ...reason }, "repair-reservation-key"), REQUEST_ID), 400, "INVALID_INPUT");
+    await expectApiError(await createHandlers().repairReservation(createAdminRequest(`/api/v1/admin/service-requests/${REQUEST_ID}/repair-reservation`, {
+      method: "POST", token: "valid-token", body: input
+    }), REQUEST_ID), 400, "INVALID_INPUT");
+  });
+  it("protects cancellation repair with admin/reason/idempotency and defaults to dry-run", async () => {
+    const input = { ...reason, assignment_id: ASSIGNMENT_ID };
+    const response = await createHandlers().repairCancellation(command("repair-cancellation", input, "repair-route-test-key"), REQUEST_ID);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ dry_run: true, repairable: false, reason_code: "history_insufficient" });
+    await expectApiError(await createHandlers(RIDER_USER_ID).repairCancellation(
+      command("repair-cancellation", input, "repair-route-test-key"), REQUEST_ID), 403, "FORBIDDEN");
+    await expectApiError(await createHandlers().repairCancellation(createAdminRequest(`/api/v1/admin/service-requests/${REQUEST_ID}/repair-cancellation`, {
+      method: "POST", token: "valid-token", body: input
+    }), REQUEST_ID), 400, "INVALID_INPUT");
+  });
   it("enforces authentication and active-admin authorization", async () => {
     await expectApiError(
       await createHandlers().listRequests(

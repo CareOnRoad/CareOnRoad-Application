@@ -8,6 +8,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { MechanicDiagnosisService } from "@/features/mechanic-diagnosis/mechanic-diagnosis.service";
 import { MechanicAssignmentMetadataService } from "@/features/mechanic-operations/mechanic-assignment-metadata.service";
+import { AdminSupervisionService } from "@/features/admin/admin-supervision.service";
+import { AdminAssignmentService } from "@/features/admin/admin-assignment.service";
 import { QuoteService } from "@/features/quotes/quote.service";
 import {
   cleanupPostgresTables,
@@ -19,7 +21,7 @@ import {
 import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
-const migrationFiles = legacyCompatibleMigrationFiles();
+const migrationFiles = sourceMigrationFiles();
 
 describeDatabase("diagnosis and quote repository integration", () => {
   let context: IsolatedPostgresTestContext;
@@ -73,6 +75,45 @@ describeDatabase("diagnosis and quote repository integration", () => {
     await context?.dispose();
   }, 30_000);
 
+  it.each(["void", "quote_revision", "expire"] as const)("serializes admin %s versus rider approval and preserves published content", async (command) => {
+    const uow = new PostgresUnitOfWork(sql);
+    const quotes = new QuoteService(uow, { now: () => now }); const admin = new AdminSupervisionService(uow, { now: () => now });
+    const diagnosis = await new MechanicDiagnosisService(uow, { now: () => now }).upsertDiagnosis(identity(mechanicId), assignmentId, diagnosisInput("Private diagnosis"));
+    const input = { ...quoteInput(assignmentId, diagnosis.id, "Private quote work", 100_000), expires_at: new Date(now.getTime() + (command === "expire" ? -1000 : 600_000)).toISOString() };
+    const quote = await quotes.createQuote(identity(mechanicId), requestId, input);
+    const before = await sql`select request_id, assignment_id, diagnosis_id, version, total_amount, notes from quotes where id = ${quote.id}`;
+    const lines = await sql`select * from quote_lines where quote_id = ${quote.id}`;
+    const race = await Promise.allSettled([admin.command(identity(adminId), quote.id, command, { reason: "Checked pending quote before resolving" }, `admin-race-${command}`), quotes.approveQuote(identity(riderId), quote.id)]);
+    expect(race.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(race.filter((r) => r.status === "rejected").every((r) => r.status === "rejected" && r.reason.status === 409)).toBe(true);
+    expect(await sql`select request_id, assignment_id, diagnosis_id, version, total_amount, notes from quotes where id = ${quote.id}`).toEqual(before);
+    expect(await sql`select * from quote_lines where quote_id = ${quote.id}`).toEqual(lines);
+    await expect(sql`update quotes set total_amount = total_amount + 1, subtotal_amount = subtotal_amount + 1 where id = ${quote.id}`).rejects.toMatchObject({ code: "55000" });
+    const [closed] = await sql<{ status: string }[]>`select status from quotes where id = ${quote.id}`;
+    if (closed!.status !== "approved") {
+      expect(await sql`select id from admin_supervision_actions where quote_id = ${quote.id}`).toHaveLength(1);
+      await expect(sql`update admin_supervision_actions set reason = 'Changed private reason' where quote_id = ${quote.id}`).rejects.toMatchObject({ code: "55000" });
+      await new AdminAssignmentService(uow, { now: () => now }).command(identity(adminId), assignmentId, "cancel", { reason: "Canceled after quote safely closed" }, "closed-cancel-native");
+      expect(await sql`select status from service_requests where id = ${requestId}`).toEqual([{ status: "canceled" }]);
+    } else await expect(admin.command(identity(adminId), quote.id, "void", { reason: "Attempted void after rider approval" }, "approved-void-native")).rejects.toMatchObject({ status: 409 });
+  }, 30_000);
+
+  it("requires supervision evidence for void and allows a new version after canonical closure", async () => {
+    const uow = new PostgresUnitOfWork(sql); const quotes = new QuoteService(uow, { now: () => now });
+    const diagnosis = await new MechanicDiagnosisService(uow, { now: () => now }).upsertDiagnosis(identity(mechanicId), assignmentId, diagnosisInput("Diagnosis original"));
+    const input = quoteInput(assignmentId, diagnosis.id, "Original private work", 100_000);
+    const quote = await quotes.createQuote(identity(mechanicId), requestId, input);
+    await expect(sql`update quotes set status = 'voided', responded_at = ${now} where id = ${quote.id}`).rejects.toMatchObject({ code: "23514" });
+    const admin = new AdminSupervisionService(uow, { now: () => now });
+    await admin.command(identity(adminId), quote.id, "quote_revision", { reason: "Requested revised immutable quote" }, "native-revision-key");
+    await expect(sql`truncate admin_supervision_actions`).rejects.toMatchObject({ code: "55000" });
+    expect(await sql`select id from admin_supervision_actions where quote_id = ${quote.id}`).toHaveLength(1);
+    const revised = await quotes.createQuote(identity(mechanicId), requestId, input);
+    expect(revised.version).toBe(2); await quotes.approveQuote(identity(riderId), revised.id);
+    expect(await sql`select status from assignments where id = ${assignmentId}`).toEqual([{ status: "awaiting_payment" }]);
+    expect(JSON.stringify(await admin.read(identity(adminId), quote.id, "quote"))).not.toContain("private");
+  }, 30_000);
+
   it("authorizes diagnosis writes, serializes revisions, and emits sanitized atomic events", async () => {
     const service = new MechanicDiagnosisService(new PostgresUnitOfWork(sql), {
       now: () => now
@@ -114,6 +155,27 @@ describeDatabase("diagnosis and quote repository integration", () => {
     expect(outboxRows).toHaveLength(3);
     expect(JSON.stringify({ auditRows, outboxRows })).not.toContain("Bugi mon");
   }, 30_000);
+
+  it("rejects invalid standard replacements atomically and blocks a legacy zero approval", async () => {
+    const uow = new PostgresUnitOfWork(sql); const service = new QuoteService(uow, { now: () => now });
+    const diagnosis = await new MechanicDiagnosisService(uow, { now: () => now }).upsertDiagnosis(identity(mechanicId), assignmentId, diagnosisInput("Bugi mon."));
+    const input = quoteInput(assignmentId, diagnosis.id, "Cong kiem tra", 50_000);
+    const pending = await service.createQuote(identity(mechanicId), requestId, input);
+    await expect(service.createQuote(identity(mechanicId), requestId, { ...input, discount_amount: 50_000 })).rejects.toMatchObject({ status: 400 });
+    expect((await sql`select status from quotes where id = ${pending.id}`)[0].status).toBe("pending");
+    expect(await sql`select id from quotes`).toHaveLength(1);
+    // Reproduce a legacy zero row through the repository; do not rewrite an immutable quote.
+    await service.rejectQuote(identity(riderId), pending.id);
+    const legacyId = randomUUID();
+    await uow.execute(({ quotes }) => quotes.create({ id: legacyId, requestId, assignmentId, version: 2, subtotalAmount: 0,
+      discountAmount: 0, totalAmount: 0, createdBy: mechanicId, createdAt: now, lines: [] }));
+    await expect(service.approveQuote(identity(riderId), legacyId)).rejects.toMatchObject({ status: 409 });
+    expect((await sql`select status from quotes where id = ${legacyId}`)[0].status).toBe("pending");
+    expect((await sql`select status from assignments where id = ${assignmentId}`)[0].status).toBe("quoted");
+    expect(await sql`select id from payment_orders`).toHaveLength(0);
+    const fixed = await service.createQuote(identity(mechanicId), requestId, input);
+    expect(await service.approveQuote(identity(riderId), fixed.id)).toMatchObject({ status: "approved" });
+  });
 
   it("allocates immutable quote versions under concurrency and synchronizes rider approval", async () => {
     const diagnosisService = new MechanicDiagnosisService(new PostgresUnitOfWork(sql), {
@@ -373,7 +435,7 @@ describeDatabase("diagnosis and quote repository integration", () => {
         "outbox_events",
         "idempotency_records"
       ],
-      { resetAppendOnlyAuditLogs: true }
+      { resetAppendOnlyTables: true }
     );
   }
 
@@ -454,9 +516,10 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
   }
 }
 
-function legacyCompatibleMigrationFiles(): string[] {
+function sourceMigrationFiles(): string[] {
   return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter((name) => name.endsWith(".sql")).sort();
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
 }
 
 function identity(subject: string): VerifiedSupabaseIdentity {

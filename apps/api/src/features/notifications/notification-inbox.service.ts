@@ -24,7 +24,7 @@ export type InboxNotificationResponse = {
   title: string;
   body: string;
   data: Record<string, unknown>;
-  status: "pending" | "sent" | "failed";
+  status: "pending" | "sent" | "failed" | "canceled";
   read_at?: string;
   created_at: string;
   sent_at?: string;

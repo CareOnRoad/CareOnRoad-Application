@@ -74,10 +74,7 @@ describe("dispatch ranking", () => {
   });
 
   it("applies radius steps, batch size, and 300-second freshness boundaries", async () => {
-    const repository = new InMemoryDispatchRepository(
-      [],
-      [],
-      [
+    const profiles = [
         profile("fresh", {
           location: { latitude: 10.762622, longitude: 106.660172 },
           locationUpdatedAt: new Date(now.getTime() - DISPATCH_LOCATION_MAX_AGE_SECONDS * 1000)
@@ -105,7 +102,11 @@ describe("dispatch ranking", () => {
             ratingAvg: 5 - index * 0.01
           })
         )
-      ]
+      ];
+    const repository = new InMemoryDispatchRepository(
+      [], [], profiles,
+      profiles.map(({ userId: id }) => ({ id, status: "active", createdAt: now, updatedAt: now })),
+      profiles.map(({ userId }) => ({ userId, role: "mechanic" }))
     );
 
     const mechanics = await repository.findCandidateMechanics({
@@ -126,6 +127,15 @@ describe("dispatch ranking", () => {
     expect(ranked.map((item) => item.mechanicId)).not.toContain("wrong-skill");
     expect(ranked.map((item) => item.mechanicId)).not.toContain("unavailable");
     expect(ranked.map((item) => item.mechanicId)).not.toContain("outside-radius");
+  });
+
+  it.each(["missing_role", "suspended_user"])("excludes an operational profile with %s", async (reason) => {
+    const mechanic = profile("former", { location: { latitude: 10.762622, longitude: 106.660172 } });
+    const repository = new InMemoryDispatchRepository([], [], [mechanic],
+      [{ id: mechanic.userId, status: reason === "suspended_user" ? "suspended" : "active", createdAt: now, updatedAt: now }],
+      [{ userId: mechanic.userId, role: reason === "missing_role" ? "rider" : "mechanic" }]);
+    expect(await repository.findCandidateMechanics({ serviceType: "mobile_repair",
+      origin: mechanic.latestLocation!, radiusMeters: 2000, now, maxLocationAgeSeconds: 300 })).toEqual([]);
   });
 });
 

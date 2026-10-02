@@ -17,7 +17,7 @@ export type PostgresCleanupExecutor = {
 };
 
 export type PostgresCleanupOptions = {
-  resetAppendOnlyAuditLogs?: boolean;
+  resetAppendOnlyTables?: boolean;
 };
 
 export type IsolatedPostgresTestContext = {
@@ -92,25 +92,38 @@ export async function cleanupPostgresTables(
     return;
   }
 
-  const quotedTables = uniqueTableNames.map(quoteQualifiedIdentifier);
-  const auditLogTable = uniqueTableNames.find((name) => name.split(".").at(-1) === "audit_logs");
-  const quotedAuditLogTable = auditLogTable ? quoteQualifiedIdentifier(auditLogTable) : undefined;
-
-  if (options.resetAppendOnlyAuditLogs && quotedAuditLogTable) {
-    await executor.unsafe(
-      `ALTER TABLE ${quotedAuditLogTable} DISABLE TRIGGER audit_logs_reject_truncate`
-    );
+  uniqueTableNames.forEach(quoteQualifiedIdentifier);
+  const [row] = await executor.unsafe("SELECT current_schema() AS schema") as { schema: string }[];
+  if (!/^careonroad_test_[a-f0-9]{32}$/.test(row?.schema ?? "")) {
+    throw new Error("PostgreSQL cleanup requires an isolated test schema.");
   }
-
-  try {
-    await executor.unsafe(`TRUNCATE TABLE ${quotedTables.join(", ")} RESTART IDENTITY CASCADE`);
-  } finally {
-    if (options.resetAppendOnlyAuditLogs && quotedAuditLogTable) {
-      await executor.unsafe(
-        `ALTER TABLE ${quotedAuditLogTable} ENABLE TRIGGER audit_logs_reject_truncate`
-      );
+  const quotedTables = uniqueTableNames.map((name) => {
+    const parts = name.split(".");
+    if (parts.length === 2 && parts[0] !== row.schema) {
+      throw new Error("PostgreSQL cleanup cannot target another schema.");
     }
+    return quoteQualifiedIdentifier(`${row.schema}.${parts.at(-1)}`);
+  });
+  const truncate = `TRUNCATE TABLE ${quotedTables.join(", ")} RESTART IDENTITY CASCADE;`;
+  if (!options.resetAppendOnlyTables) {
+    await executor.unsafe(truncate);
+    return;
   }
+  const guards = await executor.unsafe(`
+    SELECT c.relname AS table_name, t.tgname AS trigger_name, t.tgenabled AS mode
+    FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = current_schema() AND NOT t.tgisinternal
+      AND (t.tgtype & 32) <> 0 AND t.tgenabled <> 'D'
+  `) as { table_name: string; trigger_name: string; mode: string }[];
+  const alter = (guard: typeof guards[number], action: string) =>
+    `ALTER TABLE ${quoteQualifiedIdentifier(`${row.schema}.${guard.table_name}`)} ${action} TRIGGER ${quoteQualifiedIdentifier(guard.trigger_name)};`;
+  // One atomic statement restores all guards automatically if cleanup fails.
+  await executor.unsafe(`DO $cleanup$ BEGIN
+    ${guards.map((guard) => alter(guard, "DISABLE")).join("\n")}
+    ${truncate}
+    ${guards.map((guard) => alter(guard, guard.mode === "A" ? "ENABLE ALWAYS" : guard.mode === "R" ? "ENABLE REPLICA" : "ENABLE")).join("\n")}
+  END $cleanup$;`);
 }
 
 function quoteQualifiedIdentifier(identifier: string): string {

@@ -112,7 +112,7 @@ describeDatabase("admin service-request PostgreSQL integration", () => {
   );
 
   it(
-    "serializes cancel versus escalation and keeps one consistent winner",
+    "serializes cancel versus escalation, allowing cancellation after escalation",
     async () => {
       const fixture = await seedRequestWithActiveDispatch();
       const results = await Promise.allSettled([
@@ -129,16 +129,17 @@ describeDatabase("admin service-request PostgreSQL integration", () => {
           "postgres-race-escalate"
         )
       ]);
-      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(
-        1
-      );
-      expect(results.filter((result) => result.status === "rejected")).toHaveLength(
-        1
-      );
+      expect(results[0].status).toBe("fulfilled");
       const rows = await sql<{ status: string }[]>`
         select status::text from service_requests where id = ${fixture.requestId}
       `;
-      expect(["canceled", "manual_escalation"]).toContain(rows[0]?.status);
+      expect(rows[0]?.status).toBe("canceled");
+      const history = await sql`select from_status, to_status from request_status_history where request_id = ${fixture.requestId} order by created_at, id`;
+      expect(history.filter((row) => row.to_status === 'canceled')).toHaveLength(1);
+      if (results[1].status === "fulfilled") expect(history).toEqual(expect.arrayContaining([
+        expect.objectContaining({ from_status: "offered", to_status: "manual_escalation" }),
+        expect.objectContaining({ from_status: "manual_escalation", to_status: "canceled" })
+      ]));
       await expect(
         sql`select status from dispatch_rounds where id = ${fixture.roundId}`
       ).resolves.toEqual([{ status: "canceled" }]);
@@ -252,11 +253,11 @@ describeDatabase("admin service-request PostgreSQL integration", () => {
     await sql`
       insert into service_requests (
         id, request_code, rider_id, motorcycle_id, service_type,
-        problem_description, status, priority, address_text, created_at, updated_at
+        service_location, problem_description, status, priority, address_text, created_at, updated_at
       )
       values (
         ${requestId}, ${`COR-MOB-20260706-${requestSequence}`},
-        ${riderId}, ${motorcycleId}, 'mobile_repair', 'Private integration text',
+        ${riderId}, ${motorcycleId}, 'mobile_repair', ST_SetSRID(ST_MakePoint(106.69, 10.77), 4326)::geography, 'Private integration text',
         'offered', 'high', 'Private integration address', ${now}, ${now}
       )
     `;

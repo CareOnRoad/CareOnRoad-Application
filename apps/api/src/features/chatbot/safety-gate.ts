@@ -58,7 +58,9 @@ const dangerousPatterns: DangerousPattern[] = [
   {
     code: "ENGINE_SHUTDOWN_WHILE_RIDING",
     riskLevel: "high",
-    keywords: ["xe tắt máy giữa đường", "chết máy khi đang chạy"]
+    keywords: ["xe tắt máy giữa đường", "xe chết máy giữa đường", "chết máy khi đang chạy",
+      "tắt máy khi đang chạy", "đang chạy thì chết máy", "đang chạy bị chết máy",
+      "đang chạy chết máy", "đang chạy thì tắt máy", "đang chạy bị tắt máy"]
   }
 ];
 
@@ -70,7 +72,9 @@ export function runSafetyGate(input: string): SafetyGateResult {
         keyword,
         normalizedKeyword: normalizeVietnameseText(keyword)
       }))
-      .filter(({ normalizedKeyword }) => normalizedInput.includes(` ${normalizedKeyword} `))
+      .filter(({ normalizedKeyword }) => pattern.code === "ENGINE_SHUTDOWN_WHILE_RIDING"
+        ? hasAffirmativeShutdown(normalizedInput, normalizedKeyword)
+        : normalizedInput.includes(` ${normalizedKeyword} `))
       .map(({ keyword, normalizedKeyword }) => ({
         code: pattern.code,
         keyword,
@@ -101,4 +105,14 @@ export function runSafetyGate(input: string): SafetyGateResult {
     recommended_action_type: "emergency_rescue",
     matches
   };
+}
+
+function hasAffirmativeShutdown(input: string, phrase: string): boolean {
+  // ponytail: negation covers these shutdown phrases; expand only with reviewed sentence cases.
+  return [...input.matchAll(new RegExp(` ${phrase}(?= )`, "g"))].some((match) => {
+    const prefix = input.slice(0, match.index);
+    const negated = /(?:^| )(?:khong|chua|chang)(?: (?:bi|he|phai)){0,2}\s*$/.test(prefix);
+    const doubleNegative = /(?:^| )khong phai (?:khong|chua)(?: bi| he)?\s*$/.test(prefix);
+    return !negated || doubleNegative;
+  });
 }

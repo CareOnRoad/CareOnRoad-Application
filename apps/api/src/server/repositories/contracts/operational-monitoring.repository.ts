@@ -24,6 +24,6 @@ export interface OperationalMonitoringRepository {
   listDeadLetters(input: OperationalPageInput): Promise<DeadLetterItem[]>;
   listNeedsReviewPayments(input: OperationalPageInput): Promise<NeedsReviewPaymentItem[]>;
   listStuckDispatch(input: OperationalPageInput & { staleBefore: Date; now: Date }): Promise<StuckDispatchItem[]>;
-  listWorkerRuns(input: OperationalPageInput): Promise<WorkerRunRecord[]>;
+  listWorkerRuns(input: OperationalPageInput & { workerName?: string }): Promise<WorkerRunRecord[]>;
   appendWorkerRun(input: AppendWorkerRun): Promise<WorkerRunRecord>;
 }

@@ -22,6 +22,7 @@ import type {
 export type AuthRouteDependencies = {
   authenticate(request: Request): Promise<VerifiedSupabaseIdentity>;
   authService: {
+    updateProfile?(identity: VerifiedSupabaseIdentity, input: unknown): Promise<RequestActor>;
     getCurrentActor(identity: VerifiedSupabaseIdentity): Promise<RequestActor>;
     bootstrapProfile(
       identity: VerifiedSupabaseIdentity,
@@ -74,6 +75,14 @@ export function createAuthRouteHandlers(dependencies: AuthRouteDependencies) {
       } catch (error) {
         return authRouteError(error);
       }
+    },
+
+    async updateProfile(request: Request) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        if (!dependencies.authService.updateProfile) throw new Error("Profile updates are not configured.");
+        return NextResponse.json(await dependencies.authService.updateProfile(identity, await readOptionalJson(request)));
+      } catch (error) { return authRouteError(error); }
     },
 
     async registerDevice(request: Request) {

@@ -6,6 +6,7 @@ import type { Sql } from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { ServiceRequestService } from "@/features/service-requests/service-request.service";
+import { AuthService } from "@/features/auth/auth.service";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import {
   cleanupPostgresTables,
@@ -17,7 +18,7 @@ import {
 import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
-const migrationFiles = legacyCompatibleMigrationFiles();
+const migrationFiles = sourceMigrationFiles();
 
 describeDatabase("service request repositories integration", () => {
   let context: IsolatedPostgresTestContext;
@@ -63,7 +64,7 @@ describeDatabase("service request repositories integration", () => {
         "outbox_events",
         "idempotency_records"
       ],
-      { resetAppendOnlyAuditLogs: true }
+      { resetAppendOnlyTables: true }
     );
     await seedRider(riderId);
     await seedRider(otherRiderId);
@@ -96,6 +97,24 @@ describeDatabase("service request repositories integration", () => {
     );
   }, 120_000);
 
+  it("updates only the locked actor and applies owner, dates, status and tied-cursor pagination in SQL", async () => {
+    const uow = new PostgresUnitOfWork(sql); const auth = new AuthService(uow);
+    const profile = await auth.updateProfile(riderIdentity, { display_name: "Changed" });
+    expect(profile.display_name).toBe("Changed");
+    expect((await auth.getCurrentActor(otherRiderIdentity)).display_name).not.toBe("Changed");
+    expect((await auth.bootstrapProfile(riderIdentity, { display_name: "Ignored" })).display_name).toBe("Changed");
+    const service = new ServiceRequestService(uow, { now: () => new Date("2026-10-02T00:00:00Z") });
+    for (let index = 0; index < 5; index++) await service.createServiceRequest(riderIdentity, validInput({}), `pagination-${index}`);
+    await service.createServiceRequest(otherRiderIdentity, validInput({ motorcycle_id: otherMotorcycleId }), "other-page");
+    const page = await service.listServiceRequests(riderIdentity, { limit: 2, status: "submitted", date_from: "2026-10-01T00:00:00Z", date_to: "2026-10-03T00:00:00Z" });
+    const second = await service.listServiceRequests(riderIdentity, { limit: 2, cursor: page.page.next_cursor });
+    const third = await service.listServiceRequests(riderIdentity, { limit: 2, cursor: second.page.next_cursor });
+    expect(new Set([...page.items, ...second.items, ...third.items].map((item) => item.id)).size).toBe(5);
+    expect(third.page).toEqual({ next_cursor: null, has_more: false });
+    expect((await service.listServiceRequests(riderIdentity, { status: "canceled" })).items).toHaveLength(0);
+    expect((await service.listServiceRequests(riderIdentity, { date_to: "2026-10-01T00:00:00Z" })).items).toHaveLength(0);
+  });
+
   it("replays concurrent creation with one key and persists one logical request", async () => {
     const service = new ServiceRequestService(new PostgresUnitOfWork(sql), { now: () => new Date("2026-06-25T07:00:00Z") });
     const input = validInput({ service_type: "mobile_repair", address_text: "1 Nguyen Trai" });
@@ -124,6 +143,7 @@ describeDatabase("service request repositories integration", () => {
       },
       {
         service_type: "periodic_maintenance",
+        location: { latitude: 10.762622, longitude: 106.660172 },
         scheduled_start_at: "2026-06-26T07:00:00.000Z"
       },
       {
@@ -316,6 +336,7 @@ describeDatabase("service request repositories integration", () => {
       motorcycle_id: motorcycleId,
       service_type: "mobile_repair",
       problem_description: "Xe can ho tro",
+      location: { latitude: 10.77, longitude: 106.69 },
       address_text: "1 Nguyen Trai",
       ...overrides
     };
@@ -330,13 +351,10 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
   }
 }
 
-function legacyCompatibleMigrationFiles(): string[] {
-  const files = readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
+function sourceMigrationFiles(): string[] {
+  return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
+    .filter((name) => name.endsWith(".sql"))
     .sort();
-  return [...files, "202606250021_dispatch_round_leases.sql"];
 }
 
 function identity(subject: string): VerifiedSupabaseIdentity {

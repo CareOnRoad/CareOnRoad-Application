@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { cancelUncommittedAssignment, CancellationConflict } from "@/features/assignments/assignment-cancellation";
 
 import type { ApiErrorCode } from "@/lib/api-error";
 import { prepareIdempotency } from "@/lib/idempotency";
+import { toPage, type Page } from "@/lib/list-pagination";
 import type { ServiceType } from "@/features/motorcycles/motorcycle.schemas";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { requireActorRole } from "@/features/auth/authorization";
@@ -18,6 +20,7 @@ import type { RequestMediaMetadata } from "@/server/repositories/contracts/reque
 import { RequestCodeService } from "./request-code.service";
 import {
   cancelServiceRequestInputSchema,
+  serviceRequestListSchema,
   appointmentUpdateSchema,
   requestMediaMetadataInputSchema,
   serviceRequestInputSchema,
@@ -92,11 +95,13 @@ export class ServiceRequestService {
     throw new ServiceRequestError("CONFLICT", "Could not allocate a request code.", 409);
   }
 
-  listServiceRequests(identity: VerifiedSupabaseIdentity): Promise<{ items: ServiceRequestResponse[] }> {
+  listServiceRequests(identity: VerifiedSupabaseIdentity, input: unknown = {}): Promise<{ items: ServiceRequestResponse[]; page: Page }> {
+    const parsed = serviceRequestListSchema.safeParse(input);
+    if (!parsed.success) throw new ServiceRequestError("INVALID_INPUT", "List query is invalid.", 400);
     return this.unitOfWork.execute(async ({ serviceRequests, users }) => {
       const actor = await loadRiderActor(users, identity.subject);
-      const requests = await serviceRequests.listByRider(actor.id);
-      return { items: requests.map((request) => toServiceRequestResponse(request)) };
+      const requests = await serviceRequests.listByRider(actor.id, parsed.data);
+      return toPage(requests, parsed.data.limit, toServiceRequestResponse);
     });
   }
 
@@ -118,28 +123,34 @@ export class ServiceRequestService {
       const existing = await repositories.serviceRequests.findByIdForUpdate(requestId);
       if (!existing) throw new ServiceRequestError("NOT_FOUND", "Service request not found.", 404);
       if (existing.riderId !== actor.id) throw new ServiceRequestError("FORBIDDEN", "Request ownership is required.", 403);
-      if (existing.serviceType !== "periodic_maintenance" || existing.status !== "submitted" ||
+      if (!["submitted", "manual_escalation"].includes(existing.status) ||
         (await repositories.dispatch.listRoundsByRequest(existing.id)).length ||
-        await repositories.assignments.findActiveByRequestForUpdate(existing.id)) {
-        throw new ServiceRequestError("CONFLICT", "Only maintenance requests before matching can be edited.", 409);
+        await repositories.assignments.hasAnyByRequest(existing.id) ||
+        await repositories.quotes.findLatestByRequest(existing.id) ||
+        await repositories.payments.hasUnresolvedForRequest({ requestId: existing.id })) {
+        throw new ServiceRequestError("CONFLICT", "Only requests before matching and commitments can be edited.", 409);
       }
       await loadOwnedMotorcycle(repositories.motorcycles, existing.motorcycleId, actor.id);
       const location = parsed.data.location ?? existing.serviceLocation;
       const start = parsed.data.scheduled_start_at === null ? undefined :
         parsed.data.scheduled_start_at ? new Date(parsed.data.scheduled_start_at) : existing.scheduledStartAt;
-      if (!location || (start && start <= now) || (!start && !existing.reminderContextId)) {
-        throw invalidMatrix("A location and a future appointment or reminder origin are required.");
-      }
+      validateServiceTypeMatrix({ motorcycle_id: existing.motorcycleId, service_type: existing.serviceType,
+        fulfillment_mode: existing.fulfillmentMode, problem_description: existing.problemDescription,
+        location, address_text: parsed.data.address_text ?? existing.addressText, scheduled_start_at: start?.toISOString(),
+        reminder_id: existing.reminderId, reminder_context_id: existing.reminderContextId }, now);
+      if (!location) throw invalidMatrix("location coordinates are required.");
       const updated = await repositories.serviceRequests.updateAppointment({
         id: existing.id, location, addressText: parsed.data.address_text ?? existing.addressText,
         scheduledStartAt: start, updatedAt: now
       });
       await appendRequestMutationAuditOutbox({ action: "service_request.appointment_updated", request: updated,
         actorId: actor.id, audit: repositories.audit, outbox: repositories.outbox, now, createId });
-      const eventId = createId();
-      await repositories.outbox.append({ id: eventId, topic: "maintenance.dispatch.requested", aggregateType: "service_request",
-        aggregateId: existing.id, dedupeKey: `maintenance.dispatch.requested:${existing.id}:${eventId}`,
-        payload: { request_id: existing.id }, createdAt: now, nextAttemptAt: now });
+      if (updated.serviceType === "periodic_maintenance" && updated.status === "submitted") {
+        const eventId = createId();
+        await repositories.outbox.append({ id: eventId, topic: "maintenance.dispatch.requested", aggregateType: "service_request",
+          aggregateId: existing.id, dedupeKey: `maintenance.dispatch.requested:${existing.id}:${eventId}`,
+          payload: { request_id: existing.id }, createdAt: now, nextAttemptAt: now });
+      }
       const response = toServiceRequestResponse(updated);
       await repositories.idempotency.complete({ actorId: actor.id, scope, idempotencyKey: key,
         responseStatus: 200, responseBody: response as unknown as Record<string, unknown>,
@@ -188,21 +199,21 @@ export class ServiceRequestService {
       if (existing.riderId !== actor.id) {
         throw new ServiceRequestError("FORBIDDEN", "Service request ownership is required.", 403);
       }
-      if (!["submitted", "dispatching", "offered"].includes(existing.status)) {
-        throw new ServiceRequestError("CONFLICT", "Service request cannot be canceled in its current state.", 409);
+      if (!["submitted", "dispatching", "offered", "manual_escalation", "assigned"].includes(existing.status)) {
+        throw new CancellationConflict("request_state");
       }
-      if (await assignments.findActiveByRequestForUpdate(existing.id)) {
-        throw new ServiceRequestError(
-          "CONFLICT",
-          "An active assignment must be resolved through the assignment workflow.",
-          409
-        );
-      }
+      const assignment = await assignments.findActiveByRequestForUpdate(existing.id);
+      if (await repositories.payments.hasUnresolvedForRequest({ requestId: existing.id })) throw new CancellationConflict("payment_unresolved");
+      if (assignment && (assignment.status !== "accepted" || existing.status !== "assigned")) throw new CancellationConflict("travel_started");
+      if (!assignment && existing.status === "assigned") throw new CancellationConflict("assignment_missing");
       assertRequestStatusTransition(existing.status, "canceled");
 
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
-      const offeredMechanics = existing.serviceType === "periodic_maintenance" ?
+      if (assignment) await cancelUncommittedAssignment(repositories, assignment, {
+        actorId: actor.id, actorRole: "rider", reason: parsed.data.reason ?? "rider_canceled", now, createId
+      });
+      const offeredMechanics = existing.serviceType === "periodic_maintenance" || existing.scheduledStartAt ?
         [...new Set((await dispatch.listCandidatesByRequest(existing.id))
           .filter((candidate) => candidate.status === "offered").map((candidate) => candidate.mechanicId))] : [];
       const reconciliation = await dispatch.cancelOpenDispatchForRequest({
@@ -242,9 +253,10 @@ export class ServiceRequestService {
       });
 
       for (const mechanicId of offeredMechanics) await persistNotification(repositories, {
-        userId: mechanicId, type: "maintenance.booking.canceled", title: "Khách đã hủy yêu cầu bảo dưỡng",
+        userId: mechanicId, type: existing.serviceType === "periodic_maintenance" ? "maintenance.booking.canceled" : "appointment.booking.canceled",
+        title: existing.serviceType === "periodic_maintenance" ? "Khách đã hủy yêu cầu bảo dưỡng" : "Khách đã hủy lịch phục vụ",
         body: "Yêu cầu này không còn nhận thợ. Kiểm tra danh sách lời mời để xem yêu cầu khác.",
-        data: { request_id: updated.id }, dedupeKey: `maintenance.booking.canceled:${updated.id}:${mechanicId}`,
+        data: { request_id: updated.id }, dedupeKey: `${existing.serviceType === "periodic_maintenance" ? "maintenance" : "appointment"}.booking.canceled:${updated.id}:${mechanicId}`,
         requestId: updated.id
       }, now, createId);
 
@@ -458,10 +470,11 @@ function validateServiceTypeMatrix(input: ServiceRequestInput, now: Date): void 
       prohibitSchedule(input);
       return;
     case "mobile_repair":
-      requireLocationOrAddress(input);
+      requireLocation(input);
       prohibitSchedule(input);
       return;
     case "at_home_service":
+      requireLocation(input);
       requireAddress(input);
       requireFutureSchedule(input, now);
       return;
@@ -529,23 +542,18 @@ function validateOther(input: ServiceRequestInput, now: Date): void {
     throw invalidMatrix("Other service requests require fulfillment_mode.");
   }
   if (input.fulfillment_mode === "immediate_location") {
-    requireLocationOrAddress(input);
+    requireLocation(input);
     prohibitSchedule(input);
     return;
   }
+  requireLocation(input);
   requireAddress(input);
   requireFutureSchedule(input, now);
 }
 
 function requireLocation(input: ServiceRequestInput): void {
   if (!input.location) {
-    throw invalidMatrix("A pickup location is required for this service type.");
-  }
-}
-
-function requireLocationOrAddress(input: ServiceRequestInput): void {
-  if (!input.location && !input.address_text) {
-    throw invalidMatrix("A pickup location or service address is required for this service type.");
+    throw invalidMatrix("location coordinates are required for this service type.");
   }
 }
 
@@ -596,7 +604,7 @@ async function loadOwnedMotorcycle(
   motorcycleId: string,
   riderId: string
 ): Promise<Motorcycle> {
-  const motorcycle = await motorcycles.findById(motorcycleId);
+  const motorcycle = await motorcycles.findByIdForUpdate(motorcycleId);
   if (!motorcycle || motorcycle.archivedAt) {
     throw new ServiceRequestError("NOT_FOUND", "Motorcycle not found.", 404);
   }
