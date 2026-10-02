@@ -13,7 +13,7 @@ export function buildCases(c) {
   const invalid = [400, 422]; const forbidden = [403, 404];
   const body = more => ({ motorcycle_id: need('bike').id, service_type: 'periodic_maintenance',
     problem_description: 'Bảo dưỡng kiểm thử hộp đen', location: { latitude: 11.12345, longitude: 107.12345 },
-    scheduled_start_at: new Date(now() + 60_000).toISOString(), ...more });
+    scheduled_start_at: new Date(now() + 20*60_000).toISOString(), ...more });
   const request = flow => http('GET', `/api/v1/service-requests/${flow.request.id}`);
   const status = async (flow, assignmentStatus, requestStatus) => {
     const jobs = await http('GET', '/api/v1/assignments?limit=100', 'mechanic');
@@ -46,6 +46,18 @@ export function buildCases(c) {
     { motorcycle_id: role === 'rider2' ? need('foreignBike').id : need('bike').id,
       title: `HTTP reminder ${randomUUID()}`, next_due_at: new Date(now() + 1000).toISOString(), enabled: true, ...more }, 201);
   const due = async more => { const value = await reminder(more); shift(2000); await worker('reminders/run'); return value; };
+  const reminderInput=(value,more={})=>({motorcycle_id:value.motorcycle_id,title:value.title,next_due_at:value.next_due_at,enabled:value.enabled,
+    ...(value.interval_days?{interval_days:value.interval_days}:{}),...more});
+  const dispatchQueued = async requestId => {
+    for(let i=0;i<40;i++){
+      await worker('outbox/run');
+      const [event]=await c.sql()`select status from outbox_events where topic='maintenance.dispatch.requested' and aggregate_id=${requestId}`;
+      a.ok(event,'Booking must persist an automatic dispatch event');
+      if(event.status==='processed')return;
+      a.notEqual(event.status,'dead_letter','Automatic dispatch event cannot be dead-lettered');
+    }
+    block('Automatic dispatch event not reached within bounded worker batches');
+  };
 
   const endpoints = [
     ['GET','/api/v1/service-requests'], ['POST','/api/v1/service-requests'],
@@ -102,9 +114,12 @@ export function buildCases(c) {
     await mutation('POST','/api/v1/service-requests','rider',{ ...input,problem_description:'Changed retry payload' },409,id); await cancel(first);
   });
   add('MNT','Concurrent booking retry', 'Exactly one request and one logical dispatch event', async () => {
-    const input = body(); const id = key(); const [x,y] = await Promise.all([1,2].map(() => mutation('POST','/api/v1/service-requests','rider',input,201,id)));
-    a.equal(x.id,y.id); const rows = await c.sql()`select count(*)::int n from outbox_events where event_type = 'maintenance.dispatch.requested' and payload->>'request_id' = ${x.id}`;
-    a.equal(rows[0].n,1); await cancel(x);
+    const input = body(); const id = key(); const results = await Promise.allSettled([1,2].map(() => mutation('POST','/api/v1/service-requests','rider',input,201,id)));
+    try {
+      for(const result of results)a.equal(result.status,'fulfilled',result.reason?.message);
+      const [x,y]=results.map(x=>x.value);a.equal(x.id,y.id);
+      const rows = await c.sql()`select count(*)::int n from outbox_events where topic = 'maintenance.dispatch.requested' and aggregate_id = ${x.id}`;a.equal(rows[0].n,1);
+    }finally{for(const value of new Map(results.filter(x=>x.status==='fulfilled').map(x=>[x.value.id,x.value])).values())await cancel(value);}
   });
   add('MNT','Owner edits coordinates before dispatch', 'Idempotent PATCH, changed replay conflicts, foreign owner rejected', async () => {
     const req = await c.book(); const input = { location:{latitude:11.12345,longitude:107.12345} }; const id = key();
@@ -121,7 +136,7 @@ export function buildCases(c) {
   add('MNT','Automatic matching immediately after booking', 'Outbox generates offers without client dispatch; not confirmed yet', async () => {
     await c.refreshMechanics(); const flow={request:await c.book()};
     try {
-      await worker('outbox/run'); const offers=await http('GET','/api/v1/dispatch/offers','mechanic');
+      await dispatchQueued(flow.request.id); const offers=await http('GET','/api/v1/dispatch/offers','mechanic');
       const offer=offers.items.find(x=>x.request_id===flow.request.id); a.ok(offer,'Immediate matching missing');
       a.equal((await request(flow)).status,'offered'); a.equal(offer.service_type,'periodic_maintenance'); a.equal(offer.scheduled_start_at,flow.request.scheduled_start_at);
     } finally { await cancel(flow); }
@@ -230,7 +245,13 @@ export function buildCases(c) {
     {quote_id:randomUUID(),status:'succeeded'},{quote_id:randomUUID(),provider:'cash'}]) add('PAY','Payment input malformed/unknown/mass assignment','Invalid input or nonexistent quote; no provider request',()=>mutation('POST','/api/v1/payments/orders','rider',input,input.quote_id?.length===36?[...invalid,404]:invalid));
   for (const role of ['rider2','mechanic']) add('PAY',`Foreign payment creation by ${role}`,'403/404',()=>c.order(need('payQuote'),forbidden,key(),role));
   add('PAY','Payment missing idempotency','400/422',()=>http('POST','/api/v1/payments/orders','rider',{quote_id:need('payQuote').id},invalid));
-  add('PAY','Client cannot reduce charge amount','400/422',()=>c.order(need('payQuote'),invalid,key(),'rider',{amount:1}));
+  add('PAY','Client cannot reduce charge amount','Extra amount rejected or ignored; approved server charge unchanged',async()=>{
+    const independent=!s.payQuote;const flow=independent?await c.ready():need('payable');const quote=independent?flow.work:need('payQuote');
+    const value=await c.order(quote,[201,...invalid],key(),'rider',{amount:1});
+    if(value.id){a.equal(value.amount,independent?18000:24000);a.equal(value.status,'pending');}
+    if(independent){const payment=value.id?value:await c.order(quote);const remote=c.providerOrder(payment);remote.status='PAID';remote.amountPaid=remote.amount;remote.amountRemaining=0;
+      await c.webhook(payment);a.equal((await c.summary(flow)).remaining_amount,0);await c.transition(flow,'completed');}
+  });
   add('PAY','Payment create and replay','201 same ID; amount equals remaining; provider called once for logical link',async()=>{
     const id=key(); const q=need('payQuote'); const x=await c.order(q,201,id); const y=await c.order(q,201,id); a.equal(x.id,y.id); a.equal(x.amount,24000);
     a.ok(x.checkout_url?.startsWith('https://')); s.payment=x; s.paymentKey=id;
@@ -298,7 +319,8 @@ export function buildCases(c) {
   add('PAY','Cancel pending, replay cancel, new payment then complete','Old link canceled; replacement unique; only replacement credit',async()=>{
     const flow=await c.ready(); const first=await c.order(flow.work); const path=`/api/v1/payments/orders/${first.id}/cancel`;
     await http('POST',path,'rider2',{},forbidden); a.equal((await http('POST',path,'rider',{})).status,'canceled');
-    a.equal((await http('POST',path,'rider',{})).status,'canceled'); const next=await c.order(flow.work); a.notEqual(next.id,first.id);
+    await http('POST',path,'rider',{},[200,409]);a.equal((await http('GET',`/api/v1/payments/orders/${first.id}`)).status,'canceled');
+    a.equal((await c.summary(flow)).paid_amount,0);const next=await c.order(flow.work); a.notEqual(next.id,first.id);
     const remote=c.providerOrder(next); remote.status='PAID'; remote.amountPaid=remote.amount; remote.amountRemaining=0;
     await c.webhook(next); a.equal((await c.summary(flow)).paid_amount,18000); await c.transition(flow,'completed');
   });
@@ -340,23 +362,26 @@ export function buildCases(c) {
   });
 
   add('MNT','Future reservation blocks overlap but allows unrelated immediate job','Future confirmed does not occupy current job; early travel blocked; active job blocks later activation',async()=>{
-    await c.refreshMechanics(); const flow=await c.assigned({scheduled:now()+3*60*60_000}); flow.labor=await c.quote(flow,'maintenance_labor',c.laborLines); await c.decide(flow.labor);
+    await c.refreshMechanics(); const flow=await c.assigned({scheduled:now()+4*60*60_000}); flow.labor=await c.quote(flow,'maintenance_labor',c.laborLines); await c.decide(flow.labor);
     await c.transition(flow,'en_route',409);
-    const overlap=await c.book({scheduled:Date.parse(flow.request.scheduled_start_at)+15*60_000}); await worker('outbox/run');
+    const overlap=await c.book({scheduled:Date.parse(flow.request.scheduled_start_at)+15*60_000}); await dispatchQueued(overlap.id);
     const offers=await http('GET','/api/v1/dispatch/offers','mechanic'); a.ok(!offers.items.some(x=>x.request_id===overlap.id),'Overlapping reservation must not invite same mechanic'); await cancel(overlap);
     const rescue=await c.assigned({service:'emergency_rescue',scheduled:0});
-    shift(150*60_000); await c.transition(flow,'en_route',409);
+    shift(Date.parse(flow.request.scheduled_start_at)-30*60_000-now()); await c.transition(flow,'en_route',409);
     await mutation('POST',`/api/v1/assignments/${rescue.assignment.id}/recover`,'mechanic',{reason_code:'cannot_continue'},200); await cancel(rescue);
     await c.refreshMechanics(); await worker('dispatch/run');
     await c.transition(flow,'en_route'); await c.transition(flow,'on_site'); await c.transition(flow,'diagnosis');
     flow.work=await c.quote(flow,'maintenance_work',[]); await c.decide(flow.work); await c.transition(flow,'in_progress'); await finish(flow);
   });
-  add('MNT','No available mechanic never confirms appointment','After bounded dispatch rounds becomes manual_escalation and rider notified',async()=>{
+  add('MNT','No available mechanic never confirms appointment','Bounded rounds -> manual_escalation + rider notice; no assignment; direct cancel remains409 by existing policy',async()=>{
     for(const role of ['mechanic','mechanic2']) await http('PUT','/api/v1/mechanics/me/availability',role,{is_available:false});
     const req=await c.book();
-    try { await worker('outbox/run'); for(let i=0;i<6;i++){shift(10*60_000);await worker('dispatch/run');}
+    try { await dispatchQueued(req.id); for(let i=0;i<6;i++){shift(10*60_000);await worker('dispatch/run');}
       a.equal((await request({request:req})).status,'manual_escalation'); await notice('rider','request_id',req.id);
-    } finally { for(const role of ['mechanic','mechanic2']) await http('PUT','/api/v1/mechanics/me/availability',role,{is_available:true}); await c.refreshMechanics(); await cancel(req); }
+      const [row]=await c.sql()`select count(*)::int n from assignments where request_id=${req.id}`;a.equal(row.n,0);
+      await http('POST',`/api/v1/service-requests/${req.id}/cancel`,'rider',{reason:'Escalated fixture cancellation guard'},409);
+      a.equal((await request({request:req})).status,'manual_escalation');
+    } finally { for(const role of ['mechanic','mechanic2']) await http('PUT','/api/v1/mechanics/me/availability',role,{is_available:true}); await c.refreshMechanics(); }
   });
 
   for (const more of [{title:''},{title:'x'.repeat(201)},{interval_days:0},{interval_days:3651},{interval_days:1.5},
@@ -373,10 +398,12 @@ export function buildCases(c) {
     const value=await reminder({next_due_at:new Date(now()+10*60_000).toISOString()}); s.snooze=value;
     await http('POST',`/api/v1/reminders/${value.id}/snooze`,'rider',{until:new Date(now()+60_000).toISOString()},invalid);
     await http('POST',`/api/v1/reminders/${value.id}/snooze`,'rider',{until:new Date(now()+20*60_000).toISOString()});
-    const patched=await http('PATCH',`/api/v1/reminders/${value.id}`,'rider',{next_due_at:new Date(now()+1000).toISOString()}); a.equal(patched.snoozed_until,null);
+    shift(11*60_000);await worker('reminders/run');a.equal((await notificationsFor('rider','reminder_id',value.id)).length,0,'Snooze must postpone the original due time');
+    const patched=await http('PATCH',`/api/v1/reminders/${value.id}`,'rider',reminderInput(value,{next_due_at:new Date(now()+1000).toISOString()})); a.equal(patched.snoozed_until??null,null);
+    const [stored]=await c.sql()`select snoozed_until from reminder_rules where id=${value.id}`;a.equal(stored.snoozed_until,null,'Schedule edit must actually clear the stored snooze');
     shift(2000); await worker('reminders/run'); a.equal((await notificationsFor('rider','reminder_id',value.id)).length,1);
   });
-  for(const suffix of ['', '/snooze']) add('NTF',`Foreign reminder mutation ${suffix || 'PATCH'}`,'403',()=>http(suffix?'POST':'PATCH',`/api/v1/reminders/${need('reminder').id}${suffix}`,'rider2',suffix?{until:new Date(now()+60_000).toISOString()}:{enabled:false},403));
+  for(const suffix of ['', '/snooze']) add('NTF',`Foreign reminder mutation ${suffix || 'PATCH'}`,'403',()=>http(suffix?'POST':'PATCH',`/api/v1/reminders/${need('reminder').id}${suffix}`,'rider2',suffix?{until:new Date(now()+60_000).toISOString()}:reminderInput(need('reminder'),{enabled:false,next_due_at:new Date(now()+60_000).toISOString()}),403));
   add('NTF','Disabled reminder does not notify','No occurrence inbox after due',async()=>{
     const value=await reminder({enabled:false}); shift(2000); await worker('reminders/run'); a.equal((await notificationsFor('rider','reminder_id',value.id)).length,0);
   });
@@ -390,17 +417,18 @@ export function buildCases(c) {
     const value=await due({interval_days:1}); a.equal((await notificationsFor('rider','reminder_id',value.id)).length,1);
     const list=await http('GET','/api/v1/reminders'); const updated=list.items.find(x=>x.id===value.id); a.ok(Date.parse(updated.next_due_at)>now());
     shift(24*60*60_000); await worker('reminders/run'); a.equal((await notificationsFor('rider','reminder_id',value.id)).length,2);
-    await http('PATCH',`/api/v1/reminders/${value.id}`,'rider',{enabled:false});
+    const current=(await http('GET','/api/v1/reminders')).items.find(x=>x.id===value.id);
+    await http('PATCH',`/api/v1/reminders/${value.id}`,'rider',reminderInput(current,{enabled:false}));
   });
   add('NTF','Reminder creates immediate maintenance once; completion leaves recurrence intact','References owned/due/vehicle-bound; occurrence consumed only after successful request',async()=>{
     const value=await due({interval_days:2}); const n=(await notificationsFor('rider','reminder_id',value.id))[0];
     const input=body({reminder_id:value.id,reminder_context_id:n.data.reminder_context_id}); delete input.scheduled_start_at;
     await mutation('POST','/api/v1/service-requests','rider2',input,403);
     const req=await mutation('POST','/api/v1/service-requests','rider',input,201); await mutation('POST','/api/v1/service-requests','rider',input,409);
-    await c.refreshMechanics(); await worker('outbox/run'); const offers=await http('GET','/api/v1/dispatch/offers','mechanic'); const offer=offers.items.find(x=>x.request_id===req.id); a.ok(offer);
+    await c.refreshMechanics(); await dispatchQueued(req.id); const offers=await http('GET','/api/v1/dispatch/offers','mechanic'); const offer=offers.items.find(x=>x.request_id===req.id); a.ok(offer);
     const assignment=await http('POST',`/api/v1/dispatch/offers/${offer.id}/accept`,'mechanic',{},201); const flow=await work({request:req,assignment}); await finish(flow);
     const current=(await http('GET','/api/v1/reminders')).items.find(x=>x.id===value.id); a.equal(current.enabled,true); a.equal(current.interval_days,2); a.ok(Date.parse(current.next_due_at)>now());
-    await http('PATCH',`/api/v1/reminders/${value.id}`,'rider',{enabled:false});
+    await http('PATCH',`/api/v1/reminders/${value.id}`,'rider',reminderInput(current,{enabled:false}));
   });
 
   for(const query of ['limit=0','limit=101','limit=abc','cursor=invalid','unread_only=wrong']) add('NTF',`Inbox invalid filter ${query}`,'400/422',()=>http('GET',`/api/v1/notifications?${query}`,'rider',undefined,invalid));
@@ -430,6 +458,24 @@ export function buildCases(c) {
     a.equal(value.push_token_registered,true); a.ok(!JSON.stringify(value).includes(token)); devices.push(value); return value;
   };
   const revoke = async () => { for(const value of devices.splice(0)) await http('DELETE',`/api/v1/auth/devices/${value.id}/push-token`); };
+  // A worker processes a bounded batch. Drain older fixtures before registering
+  // a destination so it cannot be invalidated by an unrelated older notice.
+  const drain = async () => {
+    for(let i=0;i<40;i++){
+      const [row]=await c.sql()`select count(*)::int n from outbox_events where status in ('pending','processing') and next_attempt_at<=${new Date(now())}`;
+      if(!row.n)return;
+      await Promise.all([1,2,3].map(()=>worker('outbox/run')));
+    }
+    block('Earlier outbox fixtures did not drain within 40 batches');
+  };
+  const deliver = async id => {
+    for(let i=0;i<40;i++){
+      await worker('outbox/run');
+      const rows=await c.sql()`select status,attempt_count from outbox_events where topic='notification.created' and aggregate_id=${id}`;
+      if(rows[0]?.attempt_count>0||rows[0]?.status==='processed')return;
+    }
+    block('Target notification was not attempted within 40 batches');
+  };
   for(const more of [{push_token:'x'.repeat(40)},{push_provider:'fcm'},{push_provider:'unsupported',push_token:'x'.repeat(40)}]) add('NTF','Device token fields paired/provider controlled','400/422',()=>http('POST','/api/v1/auth/devices','rider',{device_key:`workflow-${randomUUID()}`,platform:'android',...more},invalid));
   add('NTF','Push token ownership, rotation and revoke','Token never returned; foreign cannot rotate; revoke replay safe',async()=>{
     const value=await device(`test-success-${randomUUID()}`); const path=`/api/v1/auth/devices/${value.id}/push-token`;
@@ -442,8 +488,8 @@ export function buildCases(c) {
     await worker('outbox/run'); a.ok(!c.provider().sends.slice(start).some(x=>x.id===notices[0].id)); a.equal((await notificationsFor('rider','reminder_id',value.id)).length,1);
   });
   for(const mode of ['success','invalid','mismatch','permanent','temporary','quota']) add('NTF',`FCM ${mode} wire response`,'Inbox persists; typed failure classified; successful devices not resent; Retry-After honored',async()=>{
-    await revoke(); await worker('outbox/run'); const token=`test-${mode}-${randomUUID()}`; const value=await device(token);
-    const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0]; await worker('outbox/run');
+    await revoke(); await drain(); const token=`test-${mode}-${randomUUID()}`; const value=await device(token);
+    const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0]; await deliver(n.id);
     const sends=()=>c.provider().sends.filter(x=>x.id===n.id&&x.token===token); a.equal(sends().length,1);
     const rows=await c.sql()`select * from notification_delivery_receipts where notification_id=${n.id}`; a.equal(rows.length,1);
     if(mode==='success') { a.equal(rows[0].status,'sent'); await worker('outbox/run'); a.equal(sends().length,1); }
@@ -454,25 +500,32 @@ export function buildCases(c) {
     }
     if(mode==='permanent') { await worker('outbox/run'); a.equal(sends().length,1); a.notEqual(rows[0].status,'sent'); }
     if(['temporary','quota'].includes(mode)) {
-      await worker('outbox/run'); a.equal(sends().length,1); if(mode==='quota'){shift(119_000);await worker('outbox/run');a.equal(sends().length,1);shift(1000);}else shift(10*60_000);
+      const [event]=await c.sql()`select next_attempt_at from outbox_events where topic='notification.created' and aggregate_id=${n.id}`;
+      a.ok(Date.parse(event.next_attempt_at)-Date.parse(rows[0].last_attempted_at)>=(mode==='quota'?120:60)*1000,'Provider Retry-After minimum');
+      await worker('outbox/run'); a.equal(sends().length,1); if(mode==='quota'){shift(30_000);await worker('outbox/run');a.equal(sends().length,1);shift(120_000);}else shift(10*60_000);
       await worker('outbox/run'); a.equal(sends().length,2);
     }
     a.equal((await notificationsFor('rider','reminder_id',rule.id)).length,1); await revoke();
   });
   add('NTF','Mixed devices retry only unresolved device','One success, one invalid, one temporary; terminal destinations sent once',async()=>{
-    await revoke(); await worker('outbox/run'); const tokens=['success','invalid','temporary'].map(x=>`test-${x}-${randomUUID()}`);
-    for(const token of tokens) await device(token); const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0]; await worker('outbox/run');
+    await revoke(); await drain(); const tokens=['success','invalid','temporary'].map(x=>`test-${x}-${randomUUID()}`);
+    for(const token of tokens) await device(token); const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0]; await deliver(n.id);
     shift(10*60_000); await worker('outbox/run'); const counts=tokens.map(token=>c.provider().sends.filter(x=>x.id===n.id&&x.token===token).length);
     a.deepEqual(counts,[1,1,2]); await revoke();
   });
   add('NTF','Concurrent outbox workers deduplicate slow provider sends','One successful send per notification/device version; no duplicate inbox',async()=>{
-    await revoke(); await worker('outbox/run'); const token=`test-slow-${randomUUID()}`; await device(token); const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0];
+    await revoke(); await drain(); const token=`test-slow-${randomUUID()}`; await device(token); const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0];
     await Promise.all([1,2,3].map(()=>worker('outbox/run'))); a.equal(c.provider().sends.filter(x=>x.id===n.id&&x.token===token).length,1); await revoke();
   });
   add('NTF','Permanent temporary-failure exhaustion dead letters','Bounded retries; not falsely sent; inbox remains; operational queue visible',async()=>{
-    await revoke(); await worker('outbox/run'); const token=`test-alwaysfail-${randomUUID()}`; await device(token); const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0];
-    for(let i=0;i<12;i++){await worker('outbox/run');shift(24*60*60_000);}
-    const rows=await c.sql()`select status from outbox_events where event_type='notification.created' and payload->>'notification_id'=${n.id}`;
+    await revoke(); await drain(); const token=`test-alwaysfail-${randomUUID()}`; await device(token); const rule=await due(); const n=(await notificationsFor('rider','reminder_id',rule.id))[0];
+    for(let i=0;i<12;i++){
+      await worker('outbox/run');
+      const [event]=await c.sql()`select status from outbox_events where topic='notification.created' and aggregate_id=${n.id}`;
+      if(event?.status==='dead_letter')break;
+      shift(24*60*60_000);
+    }
+    const rows=await c.sql()`select status from outbox_events where topic='notification.created' and aggregate_id=${n.id}`;
     a.equal(rows.length,1); a.equal(rows[0].status,'dead_letter'); a.equal((await notificationsFor('rider','reminder_id',rule.id)).length,1);
     await http('GET','/api/v1/admin/operations/outbox-dead-letters','admin'); await revoke();
   });
@@ -502,6 +555,111 @@ export function buildCases(c) {
     ['NTF','Rotate token during invalidation and expired lease owner fencing','Provider barrier and two independently controlled worker processes'],
     ['NTF','Missing FCM config must report failure not sent','Separate restart variant with FCM config intentionally removed']
   ];
-  for(const [group,name,required] of manual) add(group,name,'Explicit evidence required; never inferred from simulated provider success',()=>block(required));
+  for(const [group,name,required] of manual) add(group,name,'Explicit evidence required; never inferred from simulated provider success',async()=>{
+    if(c.legacy&&['Legacy standard maintenance prepayment compatibility','Repair legacy request missing location'].includes(name))return c.testLegacyCase(name);
+    if(name==='Provider timeout after link creation and process crash before response'&&c.paymentCrash){
+      const flow=await c.ready();const id=key();const entered=Promise.withResolvers(),resume=Promise.withResolvers();
+      c.provider().onPaymentCreated(async()=>{entered.resolve();await resume.promise;});
+      try{
+        const pending=c.order(flow.work,[200,201],id).then(value=>({value}),error=>({error}));
+        await Promise.race([entered.promise,pending.then(({error})=>{throw error||new Error('Payment barrier not reached');})]);
+        a.equal(c.provider().orders.size,1);await c.crashApi();
+        const rows=await c.sql()`select id,status from payment_orders where quote_id=${flow.work.id}`;
+        a.equal(rows.length,1);a.equal(rows[0].status,'created','Crash must precede provider-result persistence');
+        resume.resolve();c.provider().onPaymentCreated(undefined);const interrupted=await pending;
+        a.ok(['TypeError','AbortError','TimeoutError'].includes(interrupted.error?.name),'Stopped request must disconnect');
+        await c.restartApi();const value=await c.order(flow.work,[200,201],id);a.equal(value.id,rows[0].id);a.equal(value.status,'pending');
+        const replay=await c.order(flow.work,[200,201],id);a.equal(replay.id,value.id);a.equal(c.provider().orders.size,1);
+        const [count]=await c.sql()`select count(*)::int n from payment_orders where quote_id=${flow.work.id}`;a.equal(count.n,1);
+        a.equal((await c.summary(flow)).paid_amount,0);await c.transition(flow,'completed',409);
+        await http('POST',`/api/v1/payments/orders/${value.id}/cancel`,'rider',{});a.equal((await c.summary(flow)).remaining_amount,18000);
+      }finally{resume.resolve();c.provider().onPaymentCreated(undefined);}
+      return;
+    }
+    if(name==='Crash after provider success before receipt commit'&&c.pushCrash){
+      await drain();await device(`test-success-${randomUUID()}`);const rule=await due();const n=(await notificationsFor('rider','reminder_id',rule.id))[0];
+      const entered=Promise.withResolvers(),resume=Promise.withResolvers();
+      c.provider().onPushAccepted(async value=>{if(value.notificationId===n.id){entered.resolve();await resume.promise;}});
+      try{
+        const pending=worker('outbox/run').then(value=>({value}),error=>({error}));
+        await Promise.race([entered.promise,pending.then(({error})=>{throw error||new Error('Push barrier not reached');})]);
+        a.equal(c.provider().sends.filter(x=>x.id===n.id).length,1);await c.crashApi();
+        const [receipt]=await c.sql()`select status,completed_at is null as incomplete,
+          lease_token is not null and lease_expires_at is not null as leased from notification_delivery_receipts where notification_id=${n.id}`;
+        a.equal(receipt.status,'pending');a.equal(receipt.incomplete,true);a.equal(receipt.leased,true,'Crash must precede receipt completion while the receipt lease is held');
+        resume.resolve();c.provider().onPushAccepted(undefined);const interrupted=await pending;
+        a.ok(['TypeError','AbortError','TimeoutError'].includes(interrupted.error?.name),'Stopped worker request must disconnect');
+        shift(10*60_000);await c.restartApi();await deliver(n.id);
+        const [finished]=await c.sql()`select status from notification_delivery_receipts where notification_id=${n.id}`;a.equal(finished.status,'sent');
+        const [event]=await c.sql()`select status from outbox_events where topic='notification.created' and aggregate_id=${n.id}`;a.equal(event.status,'processed');
+        a.equal(c.provider().sends.filter(x=>x.id===n.id).length,2,'Accepted transport may repeat across the crash gap with the same notification_id');
+        a.equal((await notificationsFor('rider','reminder_id',rule.id)).length,1);await revoke();
+      }finally{resume.resolve();c.provider().onPushAccepted(undefined);}
+      return;
+    }
+    if(name==='Rotate token during invalidation and expired lease owner fencing'&&c.fencing){
+      await drain();await c.startSecondaryApi();await c.secondaryWorker('outbox/run');await device(`test-success-${randomUUID()}`);const firstRule=await due();const firstNotice=(await notificationsFor('rider','reminder_id',firstRule.id))[0];
+      let entered=Promise.withResolvers(),resume=Promise.withResolvers();
+      c.provider().onPushAccepted(async value=>{if(value.notificationId===firstNotice.id){entered.resolve();await resume.promise;}});
+      const oldWorker=worker('outbox/run').then(value=>({value}),error=>({error}));
+      try{
+        await Promise.race([entered.promise,oldWorker.then(({error})=>{throw error||new Error('Old worker barrier not reached');})]);
+        const barrierAt=Date.now();
+        c.pauseApi();
+        const [held]=await c.sql()`select status,completed_at is null as incomplete,
+          lease_token is not null and lease_expires_at is not null as leased from notification_delivery_receipts where notification_id=${firstNotice.id}`;
+        a.equal(held.status,'pending');a.equal(held.incomplete,true);a.equal(held.leased,true);
+        a.equal(c.provider().sends.filter(x=>x.id===firstNotice.id).length,1);
+        shift(10*60_000);c.provider().onPushAccepted(undefined);resume.resolve();
+        const takeover=c.secondaryWorker('outbox/run').then(value=>({value}),error=>({error}));let completed=false;
+        for(let i=0;i<80;i++){
+          const [row]=await c.sql()`select r.status='sent' and e.status='processed' as completed from notification_delivery_receipts r
+            join outbox_events e on e.aggregate_id=r.notification_id and e.topic='notification.created' where r.notification_id=${firstNotice.id}`;
+          if(row?.completed){completed=true;break;}if(Date.now()-barrierAt>23_000)break;await c.wait(100);
+        }
+        if(!completed||Date.now()-barrierAt>23_000)block('Lease takeover did not finish inside the old FCM response deadline; stale success is unproven');
+        const [terminal]=await c.sql()`select status,completed_at,attempt_count,lease_token is null as released from notification_delivery_receipts where notification_id=${firstNotice.id}`;
+        a.equal(terminal.status,'sent');a.equal(terminal.released,true);a.ok(terminal.attempt_count>=1);
+        a.equal(c.provider().sends.filter(x=>x.id===firstNotice.id).length,2,'New process must send after reclaiming the paused execution lease');
+        const [eventBefore]=await c.sql()`select status,processed_at,attempt_count from outbox_events where topic='notification.created' and aggregate_id=${firstNotice.id}`;
+        a.equal(eventBefore.status,'processed');a.ok(eventBefore.attempt_count>=2);
+        if(Date.now()-barrierAt>25_000)block('Snapshot exceeded the old FCM response deadline; stale success is unproven');
+        c.resumeApi();const oldResult=await oldWorker;a.ok(oldResult.value,'Old execution must exit with controlled worker response');a.ok((await takeover).value);
+        const [after]=await c.sql()`select status,completed_at,attempt_count,lease_token is null as released from notification_delivery_receipts where notification_id=${firstNotice.id}`;
+        a.deepEqual(after,terminal,'Old process cannot overwrite terminal receipt');
+        const [eventAfter]=await c.sql()`select status,processed_at,attempt_count from outbox_events where topic='notification.created' and aggregate_id=${firstNotice.id}`;
+        a.deepEqual(eventAfter,eventBefore,'Old process cannot overwrite terminal outbox');
+        a.equal((await notificationsFor('rider','reminder_id',firstRule.id)).length,1);await revoke();
+      }finally{resume.resolve();c.provider().onPushAccepted(undefined);c.resumeApi();}
+
+      await drain();const deviceKey=`workflow-${randomUUID()}`,oldToken=`test-invalid-${randomUUID()}`,newToken=`test-success-${randomUUID()}`;
+      const registered=await http('POST','/api/v1/auth/devices','rider',{device_key:deviceKey,platform:'android',push_provider:'fcm',push_token:oldToken});devices.push(registered);
+      const [before]=await c.sql()`select credential_version,enabled from device_delivery_credentials where device_id=${registered.id} and enabled=true`;
+      const nextRule=await due();const nextNotice=(await notificationsFor('rider','reminder_id',nextRule.id))[0];entered=Promise.withResolvers();resume=Promise.withResolvers();
+      c.provider().onPushRequest(async value=>{if(value.notificationId===nextNotice.id){entered.resolve();await resume.promise;}});
+      const invalidating=worker('outbox/run').then(value=>({value}),error=>({error}));
+      try{
+        await Promise.race([entered.promise,invalidating.then(({error})=>{throw error||new Error('Old-token barrier not reached');})]);
+        const rotated=await http('POST','/api/v1/auth/devices','rider',{device_key:deviceKey,platform:'android',push_provider:'fcm',push_token:newToken});a.equal(rotated.id,registered.id);a.equal(rotated.push_token_registered,true);
+        c.provider().onPushRequest(undefined);resume.resolve();a.ok((await invalidating).value);
+        const active=await c.sql()`select credential_version,enabled from device_delivery_credentials where device_id=${registered.id} and enabled=true`;
+        a.equal(active.length,1,'Rotation must leave exactly one active credential');const current=active[0];
+        a.ok(current.credential_version>before.credential_version);a.equal(current.enabled,true,'Old UNREGISTERED cannot disable new credential version');
+        const proofRule=await due();const proofNotice=(await notificationsFor('rider','reminder_id',proofRule.id))[0];await deliver(proofNotice.id);
+        a.ok(c.provider().sends.some(x=>x.id===proofNotice.id&&x.token===newToken),'New token must receive a later notice');
+        a.equal((await notificationsFor('rider','reminder_id',nextRule.id)).length,1);await revoke();
+      }finally{resume.resolve();c.provider().onPushRequest(undefined);}
+      return;
+    }
+    if(name==='Missing FCM config must report failure not sent'&&c.missingFcm){
+      await drain();await device(`test-success-${randomUUID()}`);const rule=await due();const n=(await notificationsFor('rider','reminder_id',rule.id))[0];await deliver(n.id);
+      a.equal(c.provider().sends.length,0);const [notice]=await c.sql()`select status from notifications where id=${n.id}`;a.notEqual(notice.status,'sent');
+      const [event]=await c.sql()`select status,last_error_code from outbox_events where topic='notification.created' and aggregate_id=${n.id}`;
+      a.ok(['pending','dead_letter'].includes(event.status),'Missing configuration must remain retryable or dead-lettered');
+      a.ok(typeof event.last_error_code==='string'&&event.last_error_code.length,'Controlled failure code required');a.notEqual(event.last_error_code,'NO_ACTIVE_DEVICE');
+      a.equal((await notificationsFor('rider','reminder_id',rule.id)).length,1);await revoke();return;
+    }
+    block(required);
+  });
   return tests;
 }

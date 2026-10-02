@@ -13,10 +13,10 @@ const provider=await startProviders(checksum);
 try {
   const body={orderCode:123,amount:3000,description:'TEST',returnUrl:'https://example.test/return',cancelUrl:'https://example.test/cancel'};
   body.signature=sign(body,checksum);
-  const response=await fetch(`${provider.origin}/payos/v2/payment-requests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const response=await fetch(`${provider.origin}/payos/v2/payment-requests`,{method:'POST',headers:{'Content-Type':'application/json','x-client-id':'isolated-client','x-api-key':'isolated-api-key'},body:JSON.stringify(body)});
   assert.equal(response.status,200); const result=await response.json(); assert.equal(result.data.status,'PENDING'); assert.equal(result.signature,sign(result.data,checksum));
-  const push=await fetch(`${provider.origin}/fcm/v1/projects/workflow-test/messages:send`,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({message:{token:'test-invalid-token',data:{notification_id:'test-id'}}})});
+  const push=await fetch(`${provider.origin}/fcm/v1/projects/workflow-test/messages:send`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer isolated-fcm-access'},
+    body:JSON.stringify({message:{token:'test-invalid-token',notification:{title:'Test',body:'Test'},data:{notification_id:'test-id'}}})});
   assert.equal(push.status,404); assert.equal((await push.json()).error.details[0].errorCode,'UNREGISTERED');
   console.log('Provider wire contract checks: PASS (official signature vector, arrays, payment create, typed FCM error)');
 } finally { await provider.close(); }

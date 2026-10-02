@@ -44,3 +44,18 @@
 - [ ] PostgreSQL integration on a separate confirmed test database; currently configured test DB is the application DB, so execution is intentionally deferred
 
 Implementation and API usage: [apps/api/MAINTENANCE-NOTIFICATIONS.md](apps/api/MAINTENANCE-NOTIFICATIONS.md).
+
+## HTTP acceptance follow-up
+
+- [x] Freeze an independent oracle from business/API/provider contracts before auditing implementation; retain baseline reports and test hashes.
+- [x] Run the 303-case baseline through HTTP, real Supabase JWTs and private PostgreSQL schema:257 PASS,35 FAIL,11 BLOCKED. Some failures were fixture/contract errors; do not interpret this as35 backend defects.
+- [x] Fix four reproduced backend gaps: concurrent same-key request replay, calendar-overlap offer filtering, signed currency-mismatch review handling and payOS outage classification. Preserve signature rejection and zero credit for mismatches.
+- [x] API regression after four fixes:168 files /568 tests. Final workspace recheck including concurrent health/schema changes:169 files /578 tests; API typecheck/lint and all-app build passed.
+- [x] Real payOS create/read/cancel smoke and missing-FCM restart smoke passed; no bank transfer or physical device receipt was inferred.
+- [x] Finish isolated HTTP rechecks and aggregate final evidence by case ID:301 PASS,0 FAIL,5 BLOCKED /306 distinct cases. This is baseline plus targeted rechecks, with source provenance per run. The separate guarded DB suite remains deferred; private-schema HTTP checks provide actual PostgreSQL evidence without running that suite on application data.
+- [x] Payment/push process crash recovery and stale-success/credential-rotation fencing passed with actual owned process control and simulated provider wire responses.
+- [x] Genuine legacy fixtures created through the Git pre-034/035 API, then upgraded in a private schema: unpaid standard prepayment, preserved paid order and owner-only missing-location repair passed.
+- [ ] Physical Android/iOS receipt and bank settlement still require their own observers/execution.
+
+Test source and usage: [tests/workflows/README.md](tests/workflows/README.md).
+Final evidence: [tests/workflows/FINAL-REPORT.md](tests/workflows/FINAL-REPORT.md).

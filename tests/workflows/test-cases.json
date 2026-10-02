@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-01T14:12:41.036Z",
+  "generated_at": "2026-10-01T20:39:25.199Z",
   "sources": [
     "apps/api/MAINTENANCE-WORKFLOW.md",
     "apps/api/MAINTENANCE-NOTIFICATIONS.md",
@@ -13,12 +13,174 @@
     "https://payos.vn/docs/tich-hop-webhook/kiem-tra-du-lieu-voi-signature/",
     "https://firebase.google.com/docs/cloud-messaging/error-codes"
   ],
-  "hashes": {
-    "cases.mjs": "a438df0157bdc1c3d5ac5f2fa16034449e901b5092a1bab2aaeeb7cdb8a3721a",
-    "run.mjs": "f9992f3fa65e21539b1643e3005924817ea4e292f85ded45c81f3bf12acb316d",
-    "providers.mjs": "e0854db0b3248ac5685a66f8f9bc9e7a715179a00e49dda30242380c4c06a46d",
-    "sandbox.cjs": "155ad4530a2a270610d59aa0fe69d323c3bc02cfa01768a47107c05b079a9a62"
-  },
+  "catalogues_by_run": [
+    {
+      "id": "2026-10-01T15-05-10.391Z-933b7576"
+    },
+    {
+      "id": "2026-10-01T17-23-09.921Z-06e836f5"
+    },
+    {
+      "id": "2026-10-01T18-15-30.756Z-cdec95f8",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "8ee2e9e07ae295268912834d52bba943e70aaaac1e85388d3f4260f9d969ff41"
+      }
+    },
+    {
+      "id": "2026-10-01T17-57-02.040Z-ae97fd20",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "api_diff_sha256": "8ee2e9e07ae295268912834d52bba943e70aaaac1e85388d3f4260f9d969ff41"
+      }
+    },
+    {
+      "id": "2026-10-01T17-59-44.285Z-c7d5b7a2",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "8ee2e9e07ae295268912834d52bba943e70aaaac1e85388d3f4260f9d969ff41"
+      }
+    },
+    {
+      "id": "2026-10-01T18-00-30.601Z-5476c720",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "8ee2e9e07ae295268912834d52bba943e70aaaac1e85388d3f4260f9d969ff41"
+      }
+    },
+    {
+      "id": "2026-10-01T18-04-29.096Z-68080d25",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "8ee2e9e07ae295268912834d52bba943e70aaaac1e85388d3f4260f9d969ff41"
+      }
+    },
+    {
+      "id": "2026-10-01T18-10-48.792Z-03babd5a",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "8ee2e9e07ae295268912834d52bba943e70aaaac1e85388d3f4260f9d969ff41"
+      }
+    },
+    {
+      "id": "2026-10-01T18-26-39.360Z-7ad33cef",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "8ee2e9e07ae295268912834d52bba943e70aaaac1e85388d3f4260f9d969ff41"
+      }
+    },
+    {
+      "id": "2026-10-01T18-40-10.338Z-39d6511f",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "ef2aa97f22597e938cd14c6c48ceaedc80d8bedf9176269452981790b907c531"
+      }
+    },
+    {
+      "id": "2026-10-01T18-48-16.894Z-ed57fc68",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "ef2aa97f22597e938cd14c6c48ceaedc80d8bedf9176269452981790b907c531"
+      }
+    },
+    {
+      "id": "2026-10-01T18-48-51.984Z-cf440875",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "ef2aa97f22597e938cd14c6c48ceaedc80d8bedf9176269452981790b907c531"
+      }
+    },
+    {
+      "id": "2026-10-01T18-50-53.230Z-89b5c649",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "ef2aa97f22597e938cd14c6c48ceaedc80d8bedf9176269452981790b907c531"
+      }
+    },
+    {
+      "id": "2026-10-01T18-54-44.746Z-a384f2c6",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "ef2aa97f22597e938cd14c6c48ceaedc80d8bedf9176269452981790b907c531"
+      }
+    },
+    {
+      "id": "2026-10-01T19-10-00.684Z-4bd0e49c",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "ef2aa97f22597e938cd14c6c48ceaedc80d8bedf9176269452981790b907c531"
+      }
+    },
+    {
+      "id": "2026-10-01T19-20-36.493Z-8eb7dea4",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "ef2aa97f22597e938cd14c6c48ceaedc80d8bedf9176269452981790b907c531"
+      }
+    },
+    {
+      "id": "2026-10-01T19-31-22.553Z-40ca5d4c",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "521ca33fd1fe1e4a8025ca2290868d97ef7e1d77f578502ae123c2a849033f90"
+      }
+    },
+    {
+      "id": "2026-10-01T19-31-08.375Z-607d1474",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "521ca33fd1fe1e4a8025ca2290868d97ef7e1d77f578502ae123c2a849033f90"
+      }
+    },
+    {
+      "id": "2026-10-01T19-36-22.017Z-884ce102",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "193108063dd3f4c2a52dfe7ae0aced2dc74eaaebf97bc038de29fc0dd82f3637"
+      }
+    },
+    {
+      "id": "2026-10-01T19-39-13.713Z-c8b0696f",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "c100ef0d5a58977393cebd9cf240642d16e6b99ae58f75f60fb728bc2733a5a1"
+      }
+    },
+    {
+      "id": "2026-10-01T20-12-15.997Z-9da4d433",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "api_diff_sha256": "c100ef0d5a58977393cebd9cf240642d16e6b99ae58f75f60fb728bc2733a5a1"
+      }
+    },
+    {
+      "id": "2026-10-01T20-07-53.513Z-cf2f2859",
+      "application": {
+        "git_head": "a9d0b60b4b88f8f3963af255706b33b00ff7b219",
+        "workspace_kind": "unchanged-source-copy-with-own-next-output",
+        "legacy_origin_commit": "5307fcc67057ff3964475a89a3dc98bd745c09f9",
+        "api_diff_sha256": "c100ef0d5a58977393cebd9cf240642d16e6b99ae58f75f60fb728bc2733a5a1"
+      }
+    }
+  ],
   "cases": [
     {
       "id": "SEC-001",
@@ -647,7 +809,7 @@
     {
       "id": "MNT-017",
       "group": "MNT",
-      "name": "Booking rejects invalid rider_id: \"f20acd3f-4cf4-476f-9a25-a36cdc6ee3f2\"",
+      "name": "Booking rejects invalid rider_id: \"73c52a46-2357-4a7f-9554-19fa670a4feb\"",
       "expectation": "400/422; no invalid request persisted"
     },
     {
@@ -665,13 +827,13 @@
     {
       "id": "MNT-020",
       "group": "MNT",
-      "name": "Booking rejects invalid reminder_id: \"5cf97b46-1e6f-45bb-8c7d-06669b41439a\"",
+      "name": "Booking rejects invalid reminder_id: \"a3868b08-5e6a-4db0-95ec-d3977fb4e644\"",
       "expectation": "400/422; no invalid request persisted"
     },
     {
       "id": "MNT-021",
       "group": "MNT",
-      "name": "Booking rejects invalid reminder_context_id: \"ea4aa10a-349a-45c2-b28b-5cdf82187e63\"",
+      "name": "Booking rejects invalid reminder_context_id: \"34d5e3b0-0470-4571-8664-b70bea5129f5\"",
       "expectation": "400/422; no invalid request persisted"
     },
     {
@@ -912,7 +1074,7 @@
       "id": "MNT-061",
       "group": "MNT",
       "name": "New maintenance rejects legacy standard purpose",
-      "expectation": "409"
+      "expectation": "Invalid purpose rejected; no quote or payment"
     },
     {
       "id": "MNT-062",
@@ -1164,7 +1326,7 @@
       "id": "PAY-017",
       "group": "PAY",
       "name": "Client cannot reduce charge amount",
-      "expectation": "400/422"
+      "expectation": "Extra amount rejected or ignored; approved server charge unchanged"
     },
     {
       "id": "PAY-018",
@@ -1368,7 +1530,7 @@
       "id": "MNT-094",
       "group": "MNT",
       "name": "No available mechanic never confirms appointment",
-      "expectation": "After bounded dispatch rounds becomes manual_escalation and rider notified"
+      "expectation": "Bounded rounds -> manual_escalation + rider notice; no assignment; direct cancel remains409 by existing policy"
     },
     {
       "id": "NTF-002",
@@ -1643,18 +1805,6 @@
     {
       "id": "MNT-095",
       "group": "MNT",
-      "name": "Maximum duration 480 and adjacent buffered reservation boundary",
-      "expectation": "Explicit evidence required; never inferred from simulated provider success"
-    },
-    {
-      "id": "MNT-096",
-      "group": "MNT",
-      "name": "Simultaneous cancellation versus offer acceptance",
-      "expectation": "Explicit evidence required; never inferred from simulated provider success"
-    },
-    {
-      "id": "MNT-097",
-      "group": "MNT",
       "name": "Repair legacy request missing location",
       "expectation": "Explicit evidence required; never inferred from simulated provider success"
     },
@@ -1699,6 +1849,174 @@
       "group": "NTF",
       "name": "Missing FCM config must report failure not sent",
       "expectation": "Explicit evidence required; never inferred from simulated provider success"
+    },
+    {
+      "id": "EXT-001",
+      "group": "EXT",
+      "name": "Malformed/incorrect JSON booking: {",
+      "expectation": "400/422, no request creation"
+    },
+    {
+      "id": "EXT-002",
+      "group": "EXT",
+      "name": "Malformed/incorrect JSON booking: []",
+      "expectation": "400/422, no request creation"
+    },
+    {
+      "id": "EXT-003",
+      "group": "EXT",
+      "name": "Malformed/incorrect JSON booking: null",
+      "expectation": "400/422, no request creation"
+    },
+    {
+      "id": "EXT-004",
+      "group": "EXT",
+      "name": "Malformed/incorrect JSON booking: true",
+      "expectation": "400/422, no request creation"
+    },
+    {
+      "id": "EXT-005",
+      "group": "EXT",
+      "name": "Legal coordinate boundary 90,180",
+      "expectation": "Request accepted with legal coordinates then canceled; no out-of-range coercion"
+    },
+    {
+      "id": "EXT-006",
+      "group": "EXT",
+      "name": "Legal coordinate boundary -90,-180",
+      "expectation": "Request accepted with legal coordinates then canceled; no out-of-range coercion"
+    },
+    {
+      "id": "EXT-007",
+      "group": "EXT",
+      "name": "Legal coordinate boundary 0,0",
+      "expectation": "Request accepted with legal coordinates then canceled; no out-of-range coercion"
+    },
+    {
+      "id": "EXT-008",
+      "group": "EXT",
+      "name": "Booking accepts ISO time with +07:00 offset",
+      "expectation": "Stored appointment denotes the same instant, not a shifted timezone"
+    },
+    {
+      "id": "EXT-009",
+      "group": "EXT",
+      "name": "Archived motorcycle cannot book maintenance",
+      "expectation": "404; archived owner vehicle unusable"
+    },
+    {
+      "id": "EXT-010",
+      "group": "EXT",
+      "name": "Dispatch excludes mechanic: missing skill",
+      "expectation": "Ineligible mechanic receives no live maintenance offer; other eligible mechanic unaffected"
+    },
+    {
+      "id": "EXT-011",
+      "group": "EXT",
+      "name": "Dispatch excludes mechanic: outside radius",
+      "expectation": "Ineligible mechanic receives no live maintenance offer; other eligible mechanic unaffected"
+    },
+    {
+      "id": "EXT-012",
+      "group": "EXT",
+      "name": "Dispatch excludes mechanic: stale location",
+      "expectation": "Ineligible mechanic receives no live maintenance offer; other eligible mechanic unaffected"
+    },
+    {
+      "id": "EXT-013",
+      "group": "EXT",
+      "name": "Dispatch excludes mechanic: unavailable",
+      "expectation": "Ineligible mechanic receives no live maintenance offer; other eligible mechanic unaffected"
+    },
+    {
+      "id": "EXT-014",
+      "group": "EXT",
+      "name": "Dispatch excludes mechanic: suspended",
+      "expectation": "Ineligible mechanic receives no live maintenance offer; other eligible mechanic unaffected"
+    },
+    {
+      "id": "EXT-015",
+      "group": "EXT",
+      "name": "Expired offer cannot assign a mechanic",
+      "expectation": "409; no assignment committed"
+    },
+    {
+      "id": "EXT-016",
+      "group": "EXT",
+      "name": "Two mechanics concurrently accept one request",
+      "expectation": "Exactly one assignment, losing mechanic rejected; cleanup through recovery API"
+    },
+    {
+      "id": "EXT-017",
+      "group": "EXT",
+      "name": "Same mechanic concurrently retries same offer",
+      "expectation": "Same logical assignment; no duplicate reservation"
+    },
+    {
+      "id": "EXT-018",
+      "group": "EXT",
+      "name": "One mechanic concurrently accepts overlapping requests",
+      "expectation": "One succeeds; no two active overlapping reservations"
+    },
+    {
+      "id": "EXT-019",
+      "group": "EXT",
+      "name": "Cancel versus accept race preserves state consistency",
+      "expectation": "Canceled request never has an active assignment; accepted winner recoverable"
+    },
+    {
+      "id": "EXT-020",
+      "group": "EXT",
+      "name": "480 minute maximum and adjacent buffered boundary",
+      "expectation": "480 accepted; exactly adjacent reservation allowed; one minute overlap excluded"
+    },
+    {
+      "id": "EXT-021",
+      "group": "EXT",
+      "name": "Appointment preparation notification once for both parties",
+      "expectation": "Dispatch worker emits owner and assigned mechanic preparation notices once at -30 minute boundary"
+    },
+    {
+      "id": "EXT-022",
+      "group": "EXT",
+      "name": "Failed provider event cannot credit an approved maintenance order",
+      "expectation": "Signed outer/inner failure acknowledgments never imply payment; valid later payment completes"
+    },
+    {
+      "id": "EXT-023",
+      "group": "EXT",
+      "name": "Forged order amount/status/provider fields cannot alter server charge",
+      "expectation": "Extra fields rejected or ignored; never 1 dong/cash/succeeded from rider input"
+    },
+    {
+      "id": "EXT-024",
+      "group": "EXT",
+      "name": "Reconciliation mismatch requires review, no automatic closing",
+      "expectation": "Provider PAID but amountPaid under expected -> needs_review; full independently verified proof required"
+    },
+    {
+      "id": "EXT-025",
+      "group": "EXT",
+      "name": "Admin close_unpaid requires provider termination and zero received",
+      "expectation": "Cannot confirm unreceived money; canceled/zero order can be closed unpaid and replaced"
+    },
+    {
+      "id": "EXT-026",
+      "group": "EXT",
+      "name": "Official payOS full webhook shape and local timestamp",
+      "expectation": "Canonical provider fields/Vietnamese desc/counterparty fields are signed and accepted; exact money credited once"
+    },
+    {
+      "id": "EXT-027",
+      "group": "EXT",
+      "name": "Valid diagnosis and cumulative additions of every line type",
+      "expectation": "Approved labor + parts + added part/labor/other =27000; stale approved quote cannot be charged"
+    },
+    {
+      "id": "LIVE-001",
+      "group": "LIVE",
+      "name": "Real payOS create/read/cancel after maintenance work",
+      "expectation": "Real provider link pending then canceled; no funds credited or job completed; no bank transfer"
     }
   ]
 }
