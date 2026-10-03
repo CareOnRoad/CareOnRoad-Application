@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { router, type Href } from 'expo-router';
 import {
   Bell,
   Check,
@@ -13,23 +14,16 @@ import {
   Info,
 } from 'lucide-react-native';
 
-import { useAuth } from '@/contexts/auth-context';
 import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
-import {
-  getUnreadCount,
-  listNotifications,
-  markRead as markNotificationRead,
-  markAllRead as markAllNotificationsRead,
-  type NotificationCategory,
-  type NotificationItem,
-} from '@/lib/notifications-service';
-
-const POLL_MS = 20000;
+import { useNotifications } from '@/hooks/use-notifications';
+import { useAuth } from '@/contexts/auth-context';
+import type { NotificationCategory, NotificationItem } from '@/lib/notifications-service';
+import { hrefForNotification } from '@/lib/notification-routing';
 
 function categoryIcon(c: NotificationCategory) {
   switch (c) {
@@ -69,63 +63,29 @@ function timeAgo(iso: string): string {
  */
 export default function NotificationInboxScreen() {
   const { isBackendConfigured } = useAuth();
-  const [items, setItems] = useState<NotificationItem[]>([]);
-  const [unread, setUnread] = useState<number>(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = async () => {
-    if (!isBackendConfigured) {
-      setItems([]);
-      setUnread(0);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [list, count] = await Promise.all([
-        listNotifications({ limit: 50 }),
-        getUnreadCount().catch(() => 0),
-      ]);
-      setItems(list.items);
-      setUnread(count);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không thể tải thông báo');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void reload();
-    const t = setInterval(() => void reload(), POLL_MS);
-    return () => clearInterval(t);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const {
+    unreadCount: unread,
+    recent: items,
+    loading,
+    error,
+    reload,
+    markRead,
+    markAllRead,
+  } = useNotifications({ pollIntervalMs: 15_000 });
 
   const handleMarkRead = async (n: NotificationItem) => {
     if (n.read_at) return;
-    // optimistic
-    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)));
-    setUnread((c) => Math.max(0, c - 1));
-    try {
-      await markNotificationRead(n.id);
-    } catch (e) {
-      // rollback
-      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: undefined } : x)));
-      setUnread((c) => c + 1);
-      setError(e instanceof Error ? e.message : 'Không thể đánh dấu đã đọc');
-    }
+    await markRead(n.id);
+  };
+
+  const handleTap = async (n: NotificationItem) => {
+    await handleMarkRead(n);
+    const href = hrefForNotification(n, 'mechanic');
+    if (href) router.push(href as Href);
   };
 
   const handleMarkAll = async () => {
-    setUnread(0);
-    setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
-    try {
-      await markAllNotificationsRead();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không thể đánh dấu tất cả');
-      void reload();
-    }
+    await markAllRead();
   };
 
   return (
@@ -139,7 +99,7 @@ export default function NotificationInboxScreen() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Đánh dấu tất cả đã đọc"
-                onPress={handleMarkAll}
+                onPress={() => void handleMarkAll()}
                 className="flex-row items-center gap-1 rounded-full bg-primary/10 px-3 py-1.5 active:opacity-70"
               >
                 <Check size={12} color="#1974f7" />
@@ -185,7 +145,7 @@ export default function NotificationInboxScreen() {
         ) : (
           <View className="gap-3">
             {items.map((n) => (
-              <NotificationCard key={n.id} item={n} onPress={() => void handleMarkRead(n)} />
+              <NotificationCard key={n.id} item={n} onPress={() => void handleTap(n)} />
             ))}
           </View>
         )}

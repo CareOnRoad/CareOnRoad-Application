@@ -139,3 +139,72 @@ function formatGeocodedAddress(addr: Location.LocationGeocodedAddress): string {
 function formatCoordFallback(lat: number, lng: number): string {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
+
+// =========================================================
+// Watch position (continuous streaming)
+// =========================================================
+
+export type LocationWatchHandle = {
+  /** Dừng theo dõi vị trí, giải phóng tài nguyên GPS. */
+  stop: () => void;
+};
+
+export interface WatchOptions {
+  /** Khoảng cách tối thiểu giữa 2 lần update (mét). Mặc định 25m. */
+  distanceInterval?: number;
+  /** Khoảng thời gian tối thiểu giữa 2 lần update (ms). Mặc định 15000 (15s). */
+  timeInterval?: number;
+  /** Mức accuracy tối thiểu yêu cầu. Mặc định Balanced. */
+  accuracy?: Location.Accuracy;
+}
+
+/**
+ * Theo dõi vị trí liên tục và gọi `onUpdate` mỗi khi có fix mới.
+ *
+ * Dùng cho flow mechanic publish live-location: BE rate-limit theo
+ * `LIVE_TRACKING_MIN_UPDATE_INTERVAL_SECONDS`, nên 15s interval là hợp lý.
+ *
+ * Lưu ý:
+ *  - Phải gọi `handle.stop()` khi không dùng nữa (rời màn hình, job completed).
+ *  - Permission đã được khai báo trong `app.config.ts`.
+ *  - `onError` chỉ được gọi khi permission bị từ chối lúc khởi tạo watch. Lỗi
+ *    runtime (timeout, GPS off) sẽ không gọi callback này mà chỉ im lặng.
+ *
+ * @throws LocationCaptureError với code `PERMISSION_DENIED` nếu user không cấp quyền.
+ */
+export async function watchCurrentPosition(
+  onUpdate: (loc: CapturedLocation) => void,
+  onError?: (err: LocationCaptureError) => void,
+  options: WatchOptions = {},
+): Promise<LocationWatchHandle> {
+  const granted = await ensureLocationPermission();
+  if (!granted) {
+    const err = new LocationCaptureError(
+      'PERMISSION_DENIED',
+      'Bạn cần cấp quyền vị trí để dùng tính năng này.',
+    );
+    onError?.(err);
+    throw err;
+  }
+
+  const subscription = await Location.watchPositionAsync(
+    {
+      accuracy: options.accuracy ?? Location.Accuracy.Balanced,
+      timeInterval: options.timeInterval ?? 15_000,
+      distanceInterval: options.distanceInterval ?? 25,
+    },
+    (pos) => {
+      const { latitude, longitude, accuracy } = pos.coords;
+      onUpdate({
+        latitude,
+        longitude,
+        address: formatCoordFallback(latitude, longitude),
+        ...(typeof accuracy === 'number' ? { accuracy } : {}),
+      });
+    },
+  );
+
+  return {
+    stop: () => subscription.remove(),
+  };
+}

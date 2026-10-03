@@ -319,6 +319,8 @@ export async function startGoogleSignIn(
     );
   }
 
+  // Tạo redirect URL từ app scheme: careonroad://auth/callback
+  // Lưu ý: createURL trả về URL đầy đủ kèm path; truyền thẳng vào redirectTo.
   const redirectUrl = createURL('auth/callback');
 
   // Lưu desiredRole vào AsyncStorage để deep-link handler đọc sau khi OAuth
@@ -336,11 +338,18 @@ export async function startGoogleSignIn(
     }
   }
 
+  // PKCE flow: chỉ định flowType='pkce' để Supabase tạo code_verifier và
+  // yêu cầu dùng authorization code (thay vì implicit flow với fragment).
+  // queryParams cũng được truyền để provider Google chấp nhận offline_access.
   const { data, error } = await client.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: redirectUrl,
       skipBrowserRedirect: true,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      },
     },
   });
 
@@ -376,19 +385,48 @@ export async function completeGoogleSignIn(
   }
 
   // Supabase PKCE: detect code trong URL và đổi lấy session.
-  // Nếu detectSessionInUrl=false, phải gọi exchangeCodeForSession thủ công.
-  // Client đã set detectSessionInUrl=false để tránh auto-handle; ta exchange thủ công.
+  // Vì `detectSessionInUrl=false` (xem supabase-client.ts), ta exchange thủ công.
   const url = new URL(callbackUrl);
   const code = url.searchParams.get('code');
-  if (!code) {
-    throw new Error('Callback URL thiếu authorization code.');
+  let session: Session | null = null;
+
+  if (code) {
+    // Thử exchange code trước (path bình thường).
+    const { data: exchanged, error: exchangeError } =
+      await client.auth.exchangeCodeForSession(code);
+    if (!exchangeError && exchanged.session) {
+      session = exchanged.session;
+    } else {
+      // Race condition: code đã được consume (vd do background listener đã chạy
+      // trước). Đo lường: thử đọc session hiện có — nếu đã tồn tại thì dùng,
+      // nếu không thì mới throw error thật.
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[auth-service] exchangeCodeForSession failed, kiểm tra session hiện tại:',
+          exchangeError?.message,
+        );
+      }
+      const existing = await client.auth.getSession();
+      if (existing.data.session) {
+        session = existing.data.session;
+      } else {
+        throw mapSupabaseError(exchangeError);
+      }
+    }
+  } else {
+    // Không có code (vd fragment-based implicit flow / token đã được set thẳng).
+    // Đọc session hiện tại từ storage.
+    const existing = await client.auth.getSession();
+    if (!existing.data.session) {
+      throw new Error('Callback URL thiếu authorization code.');
+    }
+    session = existing.data.session;
   }
-  const { data: exchanged, error: exchangeError } =
-    await client.auth.exchangeCodeForSession(code);
-  if (exchangeError || !exchanged.session) {
-    throw mapSupabaseError(exchangeError);
+
+  if (!session) {
+    throw new Error('Không lấy được session từ OAuth callback.');
   }
-  const session = exchanged.session;
 
   setAccessTokenProvider(() =>
     client.auth.getSession().then((s) => s.data.session?.access_token ?? null)

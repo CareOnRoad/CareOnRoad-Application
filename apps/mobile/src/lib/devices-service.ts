@@ -87,7 +87,10 @@ export async function registerCurrentDevice(): Promise<string | null> {
         device_key: deviceKey,
         platform: resolvePlatform(),
       },
-      { headers: { 'X-Idempotency-Key': idem } },
+      {
+        headers: { 'X-Idempotency-Key': idem },
+        timeoutMs: 15000,
+      },
     );
     const deviceId = res.id ?? res.device_id ?? null;
     if (deviceId) {
@@ -96,8 +99,13 @@ export async function registerCurrentDevice(): Promise<string | null> {
     return deviceId;
   } catch (err) {
     if (__DEV__) {
+      // Log đầy đủ stack để debug 500 errors từ BE.
       // eslint-disable-next-line no-console
-      console.warn('[device] register failed:', err instanceof Error ? err.message : err);
+      console.warn(
+        '[device] register failed:',
+        err instanceof Error ? err.message : err,
+        err,
+      );
     }
     return null;
   }

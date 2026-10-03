@@ -208,6 +208,50 @@ export async function getMechanicPerformance(
 }
 
 // =========================================================
+// Available mechanics (rider preview)
+//
+// Hiển thị "X thợ sẵn sàng trong bán kính Y km" trên màn hình booking
+// confirmation. BE endpoint `GET /api/v1/mechanics/available` chưa được build —
+// sẽ cần implement ở BE trước khi activate. Hiện tại hàm này throw 404 từ BE
+// và FE caller (NearMechanicsCard) sẽ fallback sang UI "Sẽ có thợ nhận job".
+// =========================================================
+
+export interface AvailableMechanic {
+  mechanic_id: string;
+  display_name: string;
+  rating_avg: number;
+  rating_count: number;
+  distance_km: number;
+  is_available: boolean;
+  service_types: ServiceType[];
+}
+
+export interface AvailableMechanicsResponse {
+  items: AvailableMechanic[];
+  total: number;
+  radius_km: number;
+}
+
+export async function listAvailableMechanics(
+  query: {
+    latitude: number;
+    longitude: number;
+    service_type?: ServiceType;
+    radius_km?: number;
+  },
+): Promise<AvailableMechanicsResponse> {
+  return apiGet<AvailableMechanicsResponse>('/api/v1/mechanics/available', {
+    query: {
+      lat: query.latitude,
+      lng: query.longitude,
+      ...(query.service_type ? { service_type: query.service_type } : {}),
+      ...(query.radius_km !== undefined ? { radius_km: query.radius_km } : {}),
+    },
+    timeoutMs: 10000,
+  });
+}
+
+// =========================================================
 // Helpers
 // =========================================================
 

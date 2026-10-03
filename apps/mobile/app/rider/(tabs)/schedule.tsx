@@ -36,7 +36,6 @@ import type { ServiceRequestResponse } from '@/lib/service-requests-service';
 import {
   deriveStatus,
   intervalDaysToRecurrence,
-  listReminders,
   recurrenceLabel,
   type Reminder,
   type ReminderRecurrence,
@@ -110,7 +109,7 @@ function requestToCanceled(req: ServiceRequestResponse, vehicleName: string): Ca
  * Mỗi filter có EmptyState riêng để hướng dẫn user.
  */
 export default function ScheduleScreen() {
-  const { vehicles } = useApp();
+  const { vehicles, reminders, remindersLoading, remindersError, reloadReminders } = useApp();
   const sr = useServiceRequests();
   const { status: authStatus, isBackendConfigured } = useAuth();
   const [tab, setTab] = useState<HistoryTab>('maintenance');
@@ -118,27 +117,9 @@ export default function ScheduleScreen() {
   const [cancelling, setCancelling] = useState<Appointment | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
-  // Reminders state
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [remindersLoading, setRemindersLoading] = useState(false);
-  const [remindersError, setRemindersError] = useState<string | null>(null);
-
   // Guard: nếu chưa authenticated hoặc BE chưa cấu hình → render sớm.
   // Tránh flash EmptyState vì lý do auth.
   const authed = authStatus === 'authenticated' && isBackendConfigured;
-
-  const reloadReminders = async () => {
-    setRemindersLoading(true);
-    setRemindersError(null);
-    try {
-      const items = await listReminders();
-      setReminders(items);
-    } catch (e) {
-      setRemindersError(e instanceof Error ? e.message : 'Không thể tải nhắc nhở');
-    } finally {
-      setRemindersLoading(false);
-    }
-  };
 
   useEffect(() => {
     if (!authed) return;

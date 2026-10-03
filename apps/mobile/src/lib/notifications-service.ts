@@ -20,7 +20,17 @@ export type NotificationCategory =
 export interface NotificationItem {
   id: string;
   user_id: string;
+  /**
+   * Derived category từ `type` BE trả về, dùng cho UI icon/tone/label.
+   * BE trả `type` dạng `"assignment.en_route"`, `"quote.created"`, ...
+   * Xem {@link normalizeNotificationType}.
+   */
   category: NotificationCategory;
+  /**
+   * Raw BE type (e.g. `"quote.created"`, `"payment.succeeded"`) - dùng cho
+   * deep-link routing khi cần phân biệt chính xác (xem `notification-routing.ts`).
+   */
+  type?: string;
   title: string;
   body: string;
   data?: Record<string, unknown>;
@@ -33,12 +43,48 @@ export interface NotificationListResponse {
   next_cursor?: string;
 }
 
+/**
+ * Map raw BE notification `type` về `NotificationCategory` cho UI.
+ *
+ * BE trả `type` dạng dot-separated (`"<namespace>.<event>"`). Một số ít
+ * notification không có namespace (vd `maintenance.reminder`) — vẫn parse
+ * theo prefix để gom nhóm.
+ */
+export function normalizeNotificationType(type: string | undefined | null): NotificationCategory {
+  if (!type) return 'system';
+  const value = String(type).toLowerCase();
+  if (value.startsWith('rescue.') || value.startsWith('maintenance.booking')) {
+    return 'service_request';
+  }
+  if (value.startsWith('assignment.')) return 'assignment';
+  if (value.startsWith('quote.')) return 'quote';
+  if (value.startsWith('payment.')) return 'payment';
+  if (value === 'maintenance.reminder' || value.startsWith('reminder.')) return 'reminder';
+  if (value.startsWith('review.')) return 'review';
+  return 'system';
+}
+
+function mapInboxItem(raw: NotificationItem & { type?: string }): NotificationItem {
+  const type = raw.type ?? (raw as unknown as { type?: string }).type;
+  return {
+    ...raw,
+    type,
+    category: normalizeNotificationType(type),
+  };
+}
+
 export async function listNotifications(params: {
   cursor?: string;
   limit?: number;
   unread_only?: boolean;
 } = {}): Promise<NotificationListResponse> {
-  return apiGet<NotificationListResponse>('/api/v1/notifications', { query: params });
+  const res = await apiGet<NotificationListResponse>('/api/v1/notifications', {
+    query: params,
+  });
+  return {
+    ...res,
+    items: (res.items ?? []).map(mapInboxItem),
+  };
 }
 
 export async function getUnreadCount(): Promise<number> {
@@ -47,8 +93,12 @@ export async function getUnreadCount(): Promise<number> {
   return res.count;
 }
 
-export async function markRead(notificationId: string): Promise<void> {
-  await apiPost(`/api/v1/notifications/${encodeURIComponent(notificationId)}/read`, {});
+export async function markRead(notificationId: string): Promise<NotificationItem> {
+  const res = await apiPost<NotificationItem>(
+    `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+    {},
+  );
+  return mapInboxItem(res);
 }
 
 export async function markAllRead(): Promise<{ updated: number }> {

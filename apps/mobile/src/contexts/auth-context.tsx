@@ -128,16 +128,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function handleDeepLink(url: string | null) {
       if (!url) return;
       try {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[auth] Deep-link URL received:', url);
+        }
         const parsed = new URL(url);
         // Deep-link format: careonroad://auth/callback?code=xxx
         // (Supabase OAuth PKCE flow)
         const isAuthCallback =
           parsed.pathname.endsWith('/auth/callback') ||
-          (parsed.host === 'auth' && parsed.pathname === '/callback');
-        if (!isAuthCallback) return;
+          (parsed.host === 'auth' && parsed.pathname === '/callback') ||
+          url.includes('/auth/callback') ||
+          url.includes('auth/callback');
+        if (!isAuthCallback) {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log('[auth] Deep-link không phải auth callback, bỏ qua:', parsed.pathname);
+          }
+          return;
+        }
 
         const code = parsed.searchParams.get('code');
-        if (!code) return;
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[auth] Auth callback parsed - code present:', !!code);
+        }
+        if (!code) {
+          // Có thể là implicit flow (token trong fragment) — vẫn thử completeGoogleSignIn
+          // để nó fallback sang đọc session từ storage.
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log('[auth] No code in callback, trying session-based flow');
+          }
+        }
 
         // Đọc desiredRole từ AsyncStorage (đã set trước khi gọi OAuth).
         let desiredRole: AuthRole = 'rider';

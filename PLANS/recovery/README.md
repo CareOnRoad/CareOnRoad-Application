@@ -8,3 +8,4 @@ sau khi nhánh `mono/mobile/break` bị tách rời.
 - `DEPENDENCY-WORKSPACE-RECOVERY-PLAN.md` — Kế hoạch recovery dependencies & workspace (680 dòng)
 - `RECOVERY-PHASE-0-BASELINE.md` — Baseline record trước khi recovery
 - `RECOVERY-PHASE-1-RESULT.md` đến `RECOVERY-PHASE-7-RESULT.md` — Kết quả từng phase
+- `wire_mobile_fe_to_be_after_merge_execution_log.md` — Log thực thi plan wire mobile FE ↔ BE sau merge 3 PRs

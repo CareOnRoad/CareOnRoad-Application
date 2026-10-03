@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -9,6 +9,8 @@ import {
   Disc,
   Droplet,
   LucideIcon,
+  MapPin,
+  RefreshCcw,
   Wrench,
 } from 'lucide-react-native';
 
@@ -33,6 +35,11 @@ import {
   createReminder,
   type ReminderRecurrence,
 } from '@/lib/reminders-service';
+import {
+  captureCurrentLocation,
+  LocationCaptureError,
+  type CapturedLocation,
+} from '@/lib/location-service';
 
 const serviceIcons: Record<string, LucideIcon> = {
   oil: Droplet,
@@ -89,6 +96,14 @@ export default function BookingScreen() {
   const [maintenanceDate, setMaintenanceDate] = useState<Date | null>(null);
   const [maintenanceTime, setMaintenanceTime] = useState<Date | null>(null);
 
+  // Maintenance location (BẮT BUỘC cho BE periodic_maintenance).
+  // Pattern giống rescue.tsx: 1-shot capture khi mở + nút refresh + cho phép
+  // user nhập tay nếu GPS fail.
+  const [captured, setCaptured] = useState<CapturedLocation | null>(null);
+  const [maintenanceAddress, setMaintenanceAddress] = useState('');
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
   // Reminder fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -120,13 +135,73 @@ export default function BookingScreen() {
 
   const selectedService = serviceTypes.find((s) => s.id === service);
   const maintenanceValid =
-    !!vehicleId && !!service && !!maintenanceIsoDate && !!maintenanceIsoTime && !maintenancePast;
+    !!vehicleId &&
+    !!service &&
+    !!maintenanceIsoDate &&
+    !!maintenanceIsoTime &&
+    !!captured && // BE periodic_maintenance BẮT BUỘC có location
+    !maintenancePast;
   const reminderValid =
     !!title.trim() &&
     !!reminderIsoDate &&
     !!reminderIsoTime &&
     !!reminderVehicleId &&
     !reminderPast;
+
+  // Auto-capture location khi mở screen (chỉ khi ở mode maintenance).
+  // Pattern giống rescue.tsx: lấy 1 lần + cho phép refresh.
+  useEffect(() => {
+    if (mode !== 'maintenance') return;
+    let cancelled = false;
+    void (async () => {
+      setLocationBusy(true);
+      setLocationError(null);
+      try {
+        const loc = await captureCurrentLocation();
+        if (cancelled) return;
+        setCaptured(loc);
+        // Autofill address nếu user chưa sửa.
+        setMaintenanceAddress((prev) => (prev.trim() ? prev : loc.address));
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof LocationCaptureError) {
+          setLocationError(err.message);
+        } else {
+          setLocationError(
+            err instanceof Error ? err.message : 'Không lấy được vị trí',
+          );
+        }
+      } finally {
+        if (!cancelled) setLocationBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
+
+  /**
+   * Refresh location thủ công (user bấm nút trên UI).
+   */
+  const refreshLocation = async () => {
+    setLocationBusy(true);
+    setLocationError(null);
+    try {
+      const loc = await captureCurrentLocation();
+      setCaptured(loc);
+      setMaintenanceAddress((prev) => (prev.trim() ? prev : loc.address));
+    } catch (err) {
+      if (err instanceof LocationCaptureError) {
+        setLocationError(err.message);
+      } else {
+        setLocationError(
+          err instanceof Error ? err.message : 'Không lấy được vị trí',
+        );
+      }
+    } finally {
+      setLocationBusy(false);
+    }
+  };
 
   const submit = async () => {
     setError(null);
@@ -144,6 +219,14 @@ export default function BookingScreen() {
         setError('Vui lòng điền đầy đủ các trường để tiếp tục.');
         return;
       }
+      if (!captured) {
+        setError(
+          locationError
+            ? `Chưa lấy được vị trí: ${locationError}. Vui lòng thử lại hoặc nhập địa chỉ.`
+            : 'Đang lấy vị trí hiện tại, vui lòng chờ...',
+        );
+        return;
+      }
       setSubmitting(true);
       try {
         const vehicle = vehicles.find((v) => v.id === vehicleId);
@@ -151,6 +234,7 @@ export default function BookingScreen() {
         // BE: `periodic_maintenance` thuộc nhóm fixed-mode (chỉ `other` mới nhận
         // `fulfillment_mode`). Lịch hẹn được xác định bằng `scheduled_start_at`.
         // Gửi `fulfillment_mode` sẽ bị BE trả 400 INVALID_INPUT.
+        // Location BẮT BUỘC cho periodic_maintenance (PostGIS dispatch radius).
         const created = await createServiceRequest({
           motorcycle_id: vehicleId,
           service_type: 'periodic_maintenance',
@@ -158,11 +242,22 @@ export default function BookingScreen() {
             vehicle?.name ?? ''
           }`,
           scheduled_start_at: scheduledAt,
+          location: {
+            latitude: captured.latitude,
+            longitude: captured.longitude,
+          },
+          address_text: maintenanceAddress.trim() || captured.address,
           ...(vehicle?.name ? { maintenance_notes: `Xe: ${vehicle.name}` } : {}),
         });
         router.replace({
           pathname: '/rider/schedule/confirmed',
-          params: { id: created.id, code: created.request_code },
+          params: {
+            id: created.id,
+            code: created.request_code,
+            lat: String(captured.latitude),
+            lng: String(captured.longitude),
+            address: maintenanceAddress.trim() || captured.address,
+          },
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Không thể đặt lịch');
@@ -249,6 +344,12 @@ export default function BookingScreen() {
             onChangeTime={setMaintenanceTime}
             today={today}
             dateError={maintenancePast}
+            captured={captured}
+            address={maintenanceAddress}
+            onChangeAddress={setMaintenanceAddress}
+            locationBusy={locationBusy}
+            locationError={locationError}
+            onRefreshLocation={refreshLocation}
           />
         ) : (
           <>
@@ -292,6 +393,14 @@ export default function BookingScreen() {
             <RowLine label="Chi phí ước tính" value={formatVND(selectedService.price)} />
             {maintenanceIsoDate && <RowLine label="Ngày" value={maintenanceIsoDate} />}
             {maintenanceIsoTime && <RowLine label="Giờ" value={maintenanceIsoTime} />}
+            {captured && (
+              <RowLine
+                label="Vị trí"
+                value={
+                  maintenanceAddress.trim() || captured.address
+                }
+              />
+            )}
           </Card>
         )}
 
@@ -376,6 +485,12 @@ function MaintenanceForm({
   onChangeTime,
   today,
   dateError,
+  captured,
+  address,
+  onChangeAddress,
+  locationBusy,
+  locationError,
+  onRefreshLocation,
 }: {
   vehicles: ReturnType<typeof useApp>['vehicles'];
   vehicleId: string;
@@ -388,6 +503,12 @@ function MaintenanceForm({
   onChangeTime: (d: Date) => void;
   today: Date;
   dateError: boolean;
+  captured: CapturedLocation | null;
+  address: string;
+  onChangeAddress: (s: string) => void;
+  locationBusy: boolean;
+  locationError: string | null;
+  onRefreshLocation: () => void;
 }) {
   return (
     <>
@@ -545,6 +666,76 @@ function MaintenanceForm({
             );
           })}
         </View>
+      </View>
+
+      {/* Bước 5: Vị trí & địa chỉ - BẮT BUỘC cho BE periodic_maintenance (PostGIS dispatch). */}
+      <SectionHeader className="mt-6" title="Bước 5 · Vị trí & địa chỉ" />
+      <View className="mt-3 gap-3">
+        <Field
+          label="Vị trí hiện tại"
+          hint="Chúng tôi cần vị trí để tìm thợ gần bạn"
+          required
+          error={locationError ?? undefined}
+        >
+          <View className="flex-row items-center gap-2 rounded-xl border border-border bg-card px-3 py-3">
+            <MapPin size={18} color="#16202f" />
+            <View className="flex-1">
+              {captured ? (
+                <>
+                  <Text
+                    className="text-sm font-semibold text-foreground"
+                    numberOfLines={1}
+                  >
+                    {address || captured.address}
+                  </Text>
+                  <Text className="text-xs text-muted-foreground">
+                    {captured.latitude.toFixed(5)},{' '}
+                    {captured.longitude.toFixed(5)}
+                    {typeof captured.accuracy === 'number'
+                      ? ` · ±${Math.round(captured.accuracy)}m`
+                      : ''}
+                  </Text>
+                </>
+              ) : (
+                <Text className="text-sm text-muted-foreground">
+                  {locationBusy
+                    ? 'Đang lấy vị trí hiện tại…'
+                    : locationError
+                      ? 'Chưa lấy được vị trí. Vui lòng thử lại hoặc nhập địa chỉ bên dưới.'
+                      : 'Chưa có vị trí.'}
+                </Text>
+              )}
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Lấy lại vị trí"
+              onPress={onRefreshLocation}
+              disabled={locationBusy}
+              className={cn(
+                'rounded-full bg-secondary px-3 py-2 active:scale-95',
+                locationBusy && 'opacity-50',
+              )}
+            >
+              {locationBusy ? (
+                <ActivityIndicator size="small" />
+              ) : (
+                <RefreshCcw size={16} color="#16202f" />
+              )}
+            </Pressable>
+          </View>
+        </Field>
+
+        <Field
+          label="Địa chỉ (cho phép chỉnh sửa)"
+          hint="Bạn có thể sửa địa chỉ để chính xác hơn"
+        >
+          <FormTextInput
+            value={address}
+            onChangeText={onChangeAddress}
+            placeholder="Số nhà, đường, phường/quận, thành phố"
+            accessibilityLabel="Địa chỉ bảo dưỡng"
+          />
+        </Field>
       </View>
     </>
   );

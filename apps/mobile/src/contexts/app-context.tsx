@@ -20,6 +20,12 @@ import {
 } from '@/lib/service-requests-service';
 import { listAssignments, type AssignmentListItem } from '@/lib/assignments-service';
 import { getLatestPendingQuote, type Quote } from '@/lib/quotes-service';
+import { listReminders, type Reminder } from '@/lib/reminders-service';
+import {
+  getUnreadCount,
+  listNotifications,
+  type NotificationItem,
+} from '@/lib/notifications-service';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/contexts/auth-context';
 import type {
@@ -78,6 +84,23 @@ interface AppState {
   toggleDarkMode: () => void;
 
   user: { name: string; phone: string; email: string; avatar: string; address: string };
+
+  // ---- Reminders aggregate (3.1) ----
+  reminders: Reminder[];
+  remindersLoading: boolean;
+  remindersError: string | null;
+  reloadReminders: () => Promise<void>;
+
+  // ---- Notifications aggregate (3.1) ----
+  /**
+   * Top-10 notifications mới nhất, phục vụ bell badge + home screen preview.
+   * List đầy đủ + markRead/markAllRead vẫn ở `useNotifications` hook
+   * (xem `app/rider/notifications.tsx` + `app/mechanic/notifications.tsx`).
+   */
+  notifications: NotificationItem[];
+  unreadCount: number;
+  notificationsLoading: boolean;
+  reloadNotifications: () => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -222,6 +245,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState(false);
 
+  // ---- Reminders aggregate (3.1) ----
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [remindersLoading, setRemindersLoading] = useState(false);
+  const [remindersError, setRemindersError] = useState<string | null>(null);
+
+  // ---- Notifications aggregate (3.1) ----
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+
   // =========================================================
   // Vehicles: reload từ BE
   // =========================================================
@@ -325,6 +358,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isBackendConfigured, vehicles]);
 
+  // =========================================================
+  // Reminders reload
+  // =========================================================
+  const reloadReminders = useCallback(async () => {
+    if (!isBackendConfigured) {
+      setReminders([]);
+      return;
+    }
+    setRemindersLoading(true);
+    setRemindersError(null);
+    try {
+      const items = await listReminders();
+      setReminders(items);
+    } catch (e) {
+      const message =
+        e instanceof ApiError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : 'Không thể tải nhắc nhở';
+      setRemindersError(message);
+    } finally {
+      setRemindersLoading(false);
+    }
+  }, [isBackendConfigured]);
+
+  // =========================================================
+  // Notifications aggregate reload - chỉ lấy top-10 + unread count
+  // cho bell badge + home preview. Detail screen dùng useNotifications hook.
+  // =========================================================
+  const reloadNotifications = useCallback(async () => {
+    if (!isBackendConfigured) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+    setNotificationsLoading(true);
+    try {
+      const [count, listRes] = await Promise.all([
+        getUnreadCount().catch(() => 0),
+        listNotifications({ limit: 10 }).catch(() => ({ items: [] as NotificationItem[] })),
+      ]);
+      setUnreadCount(count);
+      setNotifications(listRes.items);
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, [isBackendConfigured]);
+
   // Trigger reloadVehicles khi auth thay đổi
   useEffect(() => {
     if (!isBackendConfigured) return;
@@ -341,6 +423,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void reloadServices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBackendConfigured, authStatus, vehiclesLoading]);
+
+  // Reminders + notifications aggregate - load khi auth ready
+  useEffect(() => {
+    if (!isBackendConfigured) return;
+    if (authStatus !== 'authenticated') return;
+    void reloadReminders();
+    void reloadNotifications();
+    // Polling unread count mỗi 60s (ít hơn hook 30s vì chỉ cần bell badge).
+    const interval = setInterval(() => {
+      void reloadNotifications();
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [isBackendConfigured, authStatus, reloadReminders, reloadNotifications]);
 
   // =========================================================
   // Vehicles CRUD
@@ -457,6 +552,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       darkMode,
       toggleDarkMode,
       user: mergedUser,
+      reminders,
+      remindersLoading,
+      remindersError,
+      reloadReminders,
+      notifications,
+      unreadCount,
+      notificationsLoading,
+      reloadNotifications,
     }),
     [
       vehicles,
@@ -478,6 +581,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       darkMode,
       toggleDarkMode,
       mergedUser,
+      reminders,
+      remindersLoading,
+      remindersError,
+      reloadReminders,
+      notifications,
+      unreadCount,
+      notificationsLoading,
+      reloadNotifications,
     ],
   );
 

@@ -10,17 +10,10 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { JobCard } from '@/components/mechanic/cards/job-card';
 import { cn } from '@/lib/utils';
-import type { MechanicJobStatus } from '@/lib/mechanic-types';
-
-type Filter = 'all' | MechanicJobStatus;
-
-const filters: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'Tất cả' },
-  { id: 'pending', label: 'Chờ' },
-  { id: 'in_progress', label: 'Đang làm' },
-  { id: 'awaiting_parts', label: 'Chờ phụ tùng' },
-  { id: 'completed', label: 'Hoàn tất' },
-];
+import {
+  MECHANIC_JOB_FILTERS,
+  type MechanicJobFilter,
+} from '@/lib/mechanic-types';
 
 /**
  * MechanicJobsScreen - danh sách công việc của thợ.
@@ -29,11 +22,19 @@ const filters: { id: Filter; label: string }[] = [
  * mở chi tiết job.
  */
 export default function MechanicJobsScreen() {
-  const { jobs } = useMechanicApp();
-  const [filter, setFilter] = useState<Filter>('all');
+  const { jobs, getAssignmentStatus } = useMechanicApp();
+  const [filter, setFilter] = useState<MechanicJobFilter>('all');
 
+  /**
+   * Filter theo BE assignment status (raw) thay vì UI MechanicJobStatus gộp.
+   * UI status vẫn hiển thị trên JobCard (logic cũ không đổi).
+   */
   const filtered = jobs
-    .filter((j) => (filter === 'all' ? true : j.status === filter))
+    .filter((j) => {
+      if (filter === 'all') return true;
+      const beStatus = getAssignmentStatus(j.id);
+      return beStatus === filter;
+    })
     .sort((a, b) => {
       if (a.status === 'completed' && b.status !== 'completed') return 1;
       if (a.status !== 'completed' && b.status === 'completed') return -1;
@@ -42,15 +43,23 @@ export default function MechanicJobsScreen() {
       );
     });
 
-  const counts: Record<Filter, number> = {
-    all: jobs.length,
-    pending: jobs.filter((j) => j.status === 'pending').length,
-    in_progress: jobs.filter((j) => j.status === 'in_progress').length,
-    awaiting_parts: jobs.filter((j) => j.status === 'awaiting_parts').length,
-    completed: jobs.filter((j) => j.status === 'completed').length,
-  };
+  const counts: Record<MechanicJobFilter, number> = { all: 0, accepted: 0, en_route: 0, on_site: 0, diagnosis: 0, quoted: 0, awaiting_payment: 0, in_progress: 0, completed: 0, canceled: 0 };
+  for (const j of jobs) {
+    counts.all += 1;
+    const beStatus = getAssignmentStatus(j.id);
+    if (beStatus && beStatus in counts) {
+      counts[beStatus as MechanicJobFilter] += 1;
+    }
+  }
 
-  const activeCount = counts.pending + counts.in_progress + counts.awaiting_parts;
+  const activeCount =
+    counts.accepted +
+    counts.en_route +
+    counts.on_site +
+    counts.diagnosis +
+    counts.quoted +
+    counts.awaiting_payment +
+    counts.in_progress;
 
   return (
     <View className="flex-1 bg-background">
@@ -61,7 +70,7 @@ export default function MechanicJobsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: 8 }}
         >
-          {filters.map((f) => (
+          {MECHANIC_JOB_FILTERS.map((f) => (
             <Pressable
               key={f.id}
               accessibilityRole="tab"
@@ -105,13 +114,18 @@ export default function MechanicJobsScreen() {
           <EmptyState
             icon={Inbox}
             title="Không có công việc nào"
-            description="Thử bỏ filter hoặc chọn tab khác để xem thêm."
+            description={
+              filter === 'all'
+                ? 'Bạn chưa nhận job nào. Hệ thống sẽ gửi offer khi có yêu cầu cứu hộ hoặc bảo dưỡng gần bạn. Hãy bật trạng thái "Sẵn sàng" và đảm bảo vị trí GPS đã được cập nhật.'
+                : 'Không có công việc nào ở trạng thái này. Thử bỏ filter hoặc chọn tab khác để xem thêm.'
+            }
             action={
               <Card
                 className="border-dashed bg-secondary/40 p-3"
               >
                 <Text className="text-center text-xs text-muted-foreground">
-                  Khi tích hợp backend, danh sách sẽ đồng bộ với máy chủ theo thời gian thực.
+                  Jobs bảo dưỡng đặt lịch sẽ xuất hiện khi tới giờ hẹn (khoảng 15 phút
+                  trước) — worker tự động gửi offer cho các thợ sẵn sàng.
                 </Text>
               </Card>
             }

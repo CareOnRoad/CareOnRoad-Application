@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import {
   ArrowRight,
   Bike,
@@ -27,12 +27,7 @@ import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { SectionHeader } from '@/components/ui/form';
 import { StatTile } from '@/components/ui/stat-tile';
 import { formatDdMmYyyyHHmm } from '@/lib/format';
-import { getUnreadCount } from '@/lib/notifications-service';
-import {
-  deriveStatus,
-  listReminders,
-  type Reminder,
-} from '@/lib/reminders-service';
+import { deriveStatus } from '@/lib/reminders-service';
 
 type QuickAction = {
   id: string;
@@ -99,38 +94,26 @@ const toneStyles: Record<QuickAction['tone'], { bg: string; fg: string }> = {
  *  6. Promo card (limited offer).
  */
 export default function HomeScreen() {
-  const { user: appUser, vehicles, services } = useApp();
+  const {
+    user: appUser,
+    vehicles,
+    services,
+    reminders,
+    unreadCount: unread,
+    reloadNotifications,
+    reloadReminders,
+  } = useApp();
   const { user: authUser } = useAuth();
-  const [unread, setUnread] = useState(0);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
 
-  const refreshUnread = useCallback(async () => {
-    try {
-      const c = await getUnreadCount();
-      setUnread(c);
-    } catch {
-      // im lặng
-    }
-  }, []);
+  // Khi Home được focus lại (sau khi đọc notification, tạo request, v.v.) → reload.
+  useFocusEffect(
+    React.useCallback(() => {
+      void reloadNotifications();
+      void reloadReminders();
+    }, [reloadNotifications, reloadReminders]),
+  );
 
-  const refreshReminders = useCallback(async () => {
-    try {
-      const items = await listReminders();
-      setReminders(items);
-    } catch {
-      // im lặng – fallback về danh sách rỗng
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshUnread();
-    void refreshReminders();
-    // Refresh mỗi 60s — phase 7 sẽ chuyển sang foreground refresh khi focus.
-    const t = setInterval(() => void refreshUnread(), 60_000);
-    return () => clearInterval(t);
-  }, [refreshUnread, refreshReminders]);
-
-  // Ưu tiên tên từ auth session, fallback mock.
+  // Ưu tiên tên từ auth session, fallback empty.
   const displayName = authUser?.name ?? appUser.name;
   const displayAvatar = authUser?.avatar ?? appUser.avatar;
 

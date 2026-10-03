@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import {
   Bell,
   CheckCheck,
@@ -24,15 +24,9 @@ import { Banner } from '@/components/ui/banner';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
-import {
-  categoryIcon,
-  getUnreadCount,
-  listNotifications,
-  markAllRead,
-  markRead,
-  type NotificationCategory,
-  type NotificationItem,
-} from '@/lib/notifications-service';
+import { useNotifications } from '@/hooks/use-notifications';
+import { categoryIcon, type NotificationCategory, type NotificationItem } from '@/lib/notifications-service';
+import { hrefForNotification } from '@/lib/notification-routing';
 
 const iconMap: Record<string, typeof Bell> = {
   Siren,
@@ -45,74 +39,54 @@ const iconMap: Record<string, typeof Bell> = {
 };
 
 export default function NotificationsScreen() {
-  const [items, setItems] = useState<NotificationItem[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const {
+    unreadCount,
+    recent: items,
+    loading,
+    error,
+    reload,
+    markRead,
+    markAllRead,
+  } = useNotifications({ pollIntervalMs: 15_000 });
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const [list, count] = await Promise.all([
-        listNotifications({ limit: 50 }),
-        getUnreadCount(),
-      ]);
-      setItems(list.items);
-      setUnread(count);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không thể tải thông báo');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    void load();
-  };
+    await reload();
+    setRefreshing(false);
+  }, [reload]);
 
-  const handleRead = async (n: NotificationItem) => {
-    if (n.read_at) return;
-    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)));
-    setUnread((c) => Math.max(0, c - 1));
-    try {
+  const handleRead = useCallback(
+    async (n: NotificationItem) => {
+      if (n.read_at) return;
       await markRead(n.id);
-    } catch {
-      // rollback nếu fail
-      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: undefined } : x)));
-      setUnread((c) => c + 1);
-    }
-  };
+    },
+    [markRead],
+  );
 
-  const handleReadAll = async () => {
-    const prevItems = items;
-    const prevUnread = unread;
-    setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
-    setUnread(0);
-    try {
-      await markAllRead();
-    } catch {
-      setItems(prevItems);
-      setUnread(prevUnread);
-    }
-  };
+  const handleTap = useCallback(
+    async (n: NotificationItem) => {
+      await handleRead(n);
+      const href = hrefForNotification(n, 'rider');
+      if (href) router.push(href as Href);
+    },
+    [handleRead],
+  );
+
+  const handleReadAll = useCallback(async () => {
+    await markAllRead();
+  }, [markAllRead]);
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
       <AppHeader
         title="Thông báo"
-        subtitle={unread > 0 ? `${unread} chưa đọc` : 'Tất cả đã đọc'}
+        subtitle={unreadCount > 0 ? `${unreadCount} chưa đọc` : 'Tất cả đã đọc'}
         onBack={() => router.back()}
         right={
-          unread > 0 ? (
+          unreadCount > 0 ? (
             <Pressable
-              onPress={handleReadAll}
+              onPress={() => void handleReadAll()}
               accessibilityLabel="Đánh dấu tất cả đã đọc"
               className="rounded-full bg-primary/10 px-3 py-1.5 active:opacity-70"
             >
@@ -154,7 +128,7 @@ export default function NotificationsScreen() {
               key={n.id}
               notification={n}
               onPress={() => {
-                void handleRead(n);
+                void handleTap(n);
               }}
             />
           ))}

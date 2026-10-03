@@ -10,6 +10,8 @@ const ALLOWED_LEAF_KEYS = new Set([
   "completion_checklist_id",
   "dedupe_key",
   "delay_reason",
+  "demo_force",
+  "demo_force_mechanic_id",
   "device_id",
   "entity_id",
   "error_code",
@@ -35,6 +37,7 @@ const ALLOWED_LEAF_KEYS = new Set([
   "scope",
   "service_type",
   "safety_check_count",
+  "source",
   "status",
   "user_id"
 ]);

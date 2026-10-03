@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, Linking, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -21,10 +21,22 @@ import { Card } from '@/components/ui/card';
 import { Banner } from '@/components/ui/banner';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { CustomerCard } from '@/components/mechanic/cards/customer-card';
+import { LiveSharingCard } from '@/components/mechanic/cards/live-sharing-card';
 import { JobUpdateForm } from '@/components/mechanic/forms/job-update-form';
+import { DiagnosisForm } from '@/components/mechanic/forms/diagnosis-form';
+import { QuoteForm } from '@/components/mechanic/forms/quote-form';
+import { suggestPurposeForServiceType } from '@/lib/mechanic-quotes-service';
 import { formatDate, formatVND } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { MechanicJobStatus } from '@/lib/mechanic-types';
+
+const purposeLabelMap: Record<string, string> = {
+  standard: 'Sửa chữa thường',
+  rescue_labor: 'Cứu hộ · Trước',
+  rescue_final: 'Cứu hộ · Hoàn tất',
+  maintenance_labor: 'Bảo dưỡng · Công',
+  maintenance_work: 'Bảo dưỡng · Vật tư',
+};
 
 const timeline: { id: MechanicJobStatus; label: string }[] = [
   { id: 'pending', label: 'Đã nhận' },
@@ -77,8 +89,32 @@ const toneBg: Record<string, string> = {
  */
 export default function MechanicJobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getJob, updateJobStatus, completeJob } = useMechanicApp();
+  const {
+    getJob,
+    updateJobStatus,
+    completeJob,
+    getJobServiceType,
+    submitDiagnosisForJob,
+    submitQuoteForRequest,
+    getLatestDiagnosisForJob,
+    getLatestPendingQuote,
+    sharingAssignmentId,
+    sharingError,
+    toggleLiveSharing,
+  } = useMechanicApp();
   const job = id ? getJob(id) : undefined;
+  const diagnosis = id ? getLatestDiagnosisForJob(id) : null;
+  const latestQuote = id ? getLatestPendingQuote(id) : null;
+  const serviceType = id ? getJobServiceType(id) : undefined;
+  const quotePurpose = suggestPurposeForServiceType(serviceType ?? null);
+  const quotePurposeLabel = purposeLabelMap[quotePurpose] ?? quotePurpose;
+  const isSharing = sharingAssignmentId === id;
+  const canShare = job?.status !== 'completed';
+
+  const [diagnosisSubmitting, setDiagnosisSubmitting] = useState(false);
+  const [diagnosisError, setDiagnosisError] = useState<string | null>(null);
+  const [quoteSubmitting, setQuoteSubmitting] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
 
   if (!job) {
     return (
@@ -265,6 +301,61 @@ export default function MechanicJobDetailScreen() {
             />
           </Card>
         </View>
+
+        {/* Live location sharing - 1.2 */}
+        <View className="mt-5">
+          <Text className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Chia sẻ vị trí
+          </Text>
+          <LiveSharingCard
+            isSharing={isSharing}
+            canShare={canShare}
+            error={sharingError}
+            onToggle={() => {
+              if (id) void toggleLiveSharing(id);
+            }}
+          />
+        </View>
+
+        {/* Chẩn đoán + Báo giá - chỉ hiển thị khi job đang active */}
+        {job.status !== 'completed' && (
+          <View className="mt-5 gap-5">
+            <Card className="p-4">
+              <DiagnosisForm
+                existing={diagnosis}
+                submitting={diagnosisSubmitting}
+                errorMessage={diagnosisError}
+                onSubmit={async (input) => {
+                  setDiagnosisError(null);
+                  setDiagnosisSubmitting(true);
+                  try {
+                    await submitDiagnosisForJob(job.id, input);
+                  } finally {
+                    setDiagnosisSubmitting(false);
+                  }
+                }}
+              />
+            </Card>
+
+            <Card className="p-4">
+              <QuoteForm
+                existing={latestQuote}
+                purposeLabel={quotePurposeLabel}
+                submitting={quoteSubmitting}
+                errorMessage={quoteError}
+                onSubmit={async (input) => {
+                  setQuoteError(null);
+                  setQuoteSubmitting(true);
+                  try {
+                    await submitQuoteForRequest(job.id, input);
+                  } finally {
+                    setQuoteSubmitting(false);
+                  }
+                }}
+              />
+            </Card>
+          </View>
+        )}
 
         <Pressable
           accessibilityRole="link"

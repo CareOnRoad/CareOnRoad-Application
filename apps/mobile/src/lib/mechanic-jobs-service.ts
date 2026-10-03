@@ -199,6 +199,22 @@ export async function createDiagnosis(
   );
 }
 
+/** Lấy diagnosis mới nhất cho assignment (nếu có). Trả về null nếu chưa có. */
+export async function getLatestDiagnosis(
+  assignmentId: string,
+): Promise<DiagnosisRecord | null> {
+  try {
+    const res = await apiGet<{ items?: DiagnosisRecord[] } | DiagnosisRecord[]>(
+      `/api/v1/assignments/${encodeURIComponent(assignmentId)}/diagnoses`,
+      { query: { limit: 1 } },
+    );
+    const items = Array.isArray(res) ? res : (res.items ?? []);
+    return items[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // =========================================================
 // Recover (pre-quote)
 // =========================================================

@@ -10,6 +10,7 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Card } from '@/components/ui/card';
 import { Field, FormTextInput } from '@/components/ui/form';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { NearMechanicsCard } from '@/components/mechanic/cards/near-mechanics-card';
 import { getServiceRequest, type ServiceRequestResponse } from '@/lib/service-requests-service';
 import { formatDdMmYyyyHHmm } from '@/lib/format';
 
@@ -135,6 +136,20 @@ export default function ConfirmedScreen() {
               </View>
             )}
           </Card>
+        )}
+
+        {/* Hiển thị thợ sẵn sàng gần khu vực (chỉ khi có lat/lng). */}
+        {request && (
+          <NearMechanicsCard
+            {...(request.location?.latitude !== undefined
+              ? { latitude: request.location.latitude }
+              : {})}
+            {...(request.location?.longitude !== undefined
+              ? { longitude: request.location.longitude }
+              : {})}
+            serviceType={request.service_type}
+            radiusKm={5}
+          />
         )}
 
         {/* Tips */}

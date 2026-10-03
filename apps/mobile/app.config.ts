@@ -62,11 +62,17 @@ const config: ExpoConfig = {
     permissions: ['CAMERA', 'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'],
     // Intent filter để Android nhận deep-link scheme careonroad://
     // (vd: careonroad://auth/callback từ Google OAuth redirect).
+    // Lưu ý Android 11+ (API 30+) yêu cầu cả scheme + host/pathPrefix rõ ràng
+    // để intent filter hoạt động chính xác; chỉ khai báo scheme có thể bị
+    // OS bỏ qua khi app không ở foreground.
     intentFilters: [
       {
         action: 'VIEW',
         category: ['DEFAULT', 'BROWSABLE'],
-        data: [{ scheme: 'careonroad' }],
+        data: [
+          { scheme: 'careonroad', host: 'auth' },
+          { scheme: 'careonroad', host: 'auth', pathPrefix: '/callback' },
+        ],
       },
     ],
   },

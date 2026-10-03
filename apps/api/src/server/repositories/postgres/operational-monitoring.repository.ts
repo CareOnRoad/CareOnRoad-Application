@@ -65,7 +65,13 @@ export class PostgresOperationalMonitoringRepository implements OperationalMonit
 }
 
 type DeadLetterRow = { id: string; topic: string; aggregate_type: string; aggregate_id: string; attempt_count: number; last_error_code: string | null; created_at: Date };
-type NeedsReviewPaymentRow = { id: string; request_id: string; assignment_id: string; updated_at: Date };
+type NeedsReviewPaymentRow = {
+  id: string;
+  request_id: string;
+  assignment_id: string;
+  updated_at: Date;
+  request_code: string | null;
+};
 type StuckDispatchRow = { id: string; request_code: string; status: StuckDispatchItem["status"]; updated_at: Date; reason_code: "missing_location" | null };
 type WorkerRunRow = { id: string; worker_name: string; status: WorkerRunStatus; error_code: string | null; items_claimed: number; items_succeeded: number; items_failed: number; started_at: Date; completed_at: Date; created_at: Date };
 

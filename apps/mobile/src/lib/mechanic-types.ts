@@ -4,6 +4,40 @@ export type MechanicJobStatus =
   | 'awaiting_parts'
   | 'completed';
 
+/**
+ * Filter chip cho jobs screen - mirror BE `mechanicJobStatuses` enum.
+ *
+ * UI status (`MechanicJobStatus`) gộp 8 BE states vào 4 giá trị cho card display.
+ * `MechanicJobFilter` cho phép filter chi tiết theo BE state raw.
+ */
+export type MechanicJobFilter =
+  | 'all'
+  | 'accepted'
+  | 'en_route'
+  | 'on_site'
+  | 'diagnosis'
+  | 'quoted'
+  | 'awaiting_payment'
+  | 'in_progress'
+  | 'completed'
+  | 'canceled';
+
+export const MECHANIC_JOB_FILTERS: readonly {
+  id: MechanicJobFilter;
+  label: string;
+}[] = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'accepted', label: 'Chờ nhận' },
+  { id: 'en_route', label: 'Đang đến' },
+  { id: 'on_site', label: 'Đã tới' },
+  { id: 'diagnosis', label: 'Chẩn đoán' },
+  { id: 'quoted', label: 'Đã báo giá' },
+  { id: 'awaiting_payment', label: 'Chờ thanh toán' },
+  { id: 'in_progress', label: 'Đang sửa' },
+  { id: 'completed', label: 'Hoàn tất' },
+  { id: 'canceled', label: 'Đã huỷ' },
+];
+
 export type MechanicJobType =
   | 'Oil Change'
   | 'Brake Inspection'

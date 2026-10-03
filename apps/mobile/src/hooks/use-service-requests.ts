@@ -189,30 +189,45 @@ export function useServiceRequests(): UseServiceRequestsReturn {
 
   /**
    * Schedule tiếp theo: nếu cần polling, đặt timer.
+   *
+   * Polling matrix:
+   *  - request status: mỗi 5s khi searching/tracking/quote/payment/completed (đợi các transition)
+   *  - ETA: mỗi 30s khi có assignment active (tracking/quote/payment/completed)
+   *  - live-location: mỗi 15s khi assignment active
+   *
+   * completed/canceled chỉ poll 1 lần rồi dừng (sau ~5s) để chốt state.
    */
   const scheduleNextPoll = useCallback(
     (requestId: string, phase: Phase) => {
       clearTimers();
-      if (['searching', 'tracking'].includes(phase)) {
+      // Request status polling — luôn chạy cho mọi phase active
+      if (['searching', 'tracking', 'quote', 'payment', 'completed'].includes(phase)) {
         pollTimerRef.current = setTimeout(async () => {
           const next = await refreshActive(requestId);
-          if (next) scheduleNextPoll(requestId, next);
+          if (next && ['searching', 'tracking', 'quote', 'payment', 'completed'].includes(next)) {
+            scheduleNextPoll(requestId, next);
+          }
         }, POLL_REQUEST_MS);
       }
-      if (phase === 'tracking' || phase === 'quote' || phase === 'payment') {
+      // ETA + live-location chỉ khi có assignment active
+      if (['tracking', 'quote', 'payment', 'completed'].includes(phase)) {
         etaTimerRef.current = setTimeout(async () => {
           await refreshActive(requestId);
-          etaTimerRef.current = setTimeout(
-            () => scheduleNextPoll(requestId, phase),
-            POLL_ETA_MS,
-          );
+          if (['tracking', 'quote', 'payment', 'completed'].includes(phase)) {
+            etaTimerRef.current = setTimeout(
+              () => scheduleNextPoll(requestId, phase),
+              POLL_ETA_MS,
+            );
+          }
         }, POLL_ETA_MS);
         liveTimerRef.current = setTimeout(async () => {
           await refreshActive(requestId);
-          liveTimerRef.current = setTimeout(
-            () => scheduleNextPoll(requestId, phase),
-            POLL_LIVE_MS,
-          );
+          if (['tracking', 'quote', 'payment', 'completed'].includes(phase)) {
+            liveTimerRef.current = setTimeout(
+              () => scheduleNextPoll(requestId, phase),
+              POLL_LIVE_MS,
+            );
+          }
         }, POLL_LIVE_MS);
       }
     },

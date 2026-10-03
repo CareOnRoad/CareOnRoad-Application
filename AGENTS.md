@@ -507,6 +507,11 @@
 - `SEED_USER_PASSWORD` (local mock seeding only)
 - `INTERNAL_WORKER_SECRET`
 - `WORKER_API_BASE_URL` (worker CLI API origin)
+- `DEMO_FORCE_MECHANIC_ID` (demo only — must be unset in production; the backend
+ throws on startup if this is set with `NODE_ENV=production`. When set, all
+ dispatch rounds route their offer to the configured mechanic regardless of
+ distance, availability, location freshness, or active workload. Each forced
+ round is tagged with `demo_force: true` in `outbox_events` and `audit_log`.)
 - `PUSH_TOKEN_ENCRYPTION_KEY`
 - `FCM_PROJECT_ID`
 - `FCM_CLIENT_EMAIL`
@@ -595,7 +600,7 @@ Never expose `GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
   media storage, or new workflow scope unless explicitly requested.
 - Do not show raw model markdown or long explanations in the UI.
 - Do not remove fallback to make a model look reliable.
-- Do not push, deploy, or force-push without permission.
+- Do not push, deploy, commit or force-push without permission.
 
 ## When Stuck
 

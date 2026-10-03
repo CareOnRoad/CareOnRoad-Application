@@ -13,6 +13,7 @@ import {
 
 import { useMechanicApp } from '@/contexts/mechanic-app-context';
 import { useAuth } from '@/contexts/auth-context';
+import { useNotifications } from '@/hooks/use-notifications';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Card } from '@/components/ui/card';
@@ -38,6 +39,7 @@ import { JobCard } from '@/components/mechanic/cards/job-card';
 export default function MechanicDashboardScreen() {
   const { mechanic, garage, todayJobs, upcomingTodayJobs, updateJobStatus, earnings } = useMechanicApp();
   const { user: authUser } = useAuth();
+  const { unreadCount: unread } = useNotifications();
 
   const displayName = authUser?.name ?? mechanic.name;
   const displayAvatar = authUser?.avatar ?? mechanic.avatar;
@@ -64,6 +66,7 @@ export default function MechanicDashboardScreen() {
         right={
           <View className="flex-row items-center gap-2">
             <NotificationBell
+              count={unread}
               onPress={() => router.push('/mechanic/notifications' as never)}
             />
             <View className="size-9 overflow-hidden rounded-full bg-secondary">
