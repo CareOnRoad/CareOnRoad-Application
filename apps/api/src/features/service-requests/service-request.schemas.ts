@@ -1,4 +1,10 @@
 import { z } from "zod";
+import { listQuerySchema, validDateRange } from "@/lib/list-pagination";
+
+export const serviceRequestListSchema = listQuerySchema.extend({ status: z.enum([
+  "submitted", "dispatching", "offered", "assigned", "mechanic_en_route", "in_service",
+  "awaiting_quote_approval", "awaiting_payment", "completed", "manual_escalation", "canceled"
+]).optional() }).refine(validDateRange, "Invalid date range.");
 
 import { geoPointSchema, serviceTypes } from "@/features/motorcycles/motorcycle.schemas";
 

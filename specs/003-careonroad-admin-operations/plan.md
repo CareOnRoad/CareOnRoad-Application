@@ -8,6 +8,12 @@
 
 **Note**: This template is filled in by the `/speckit-plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
+Implementation update (02/10/2026): Patches A–I and explicitly authorized J implemented through
+role-flow Batch 15, source/local schema 046. Batch 14 uses real local Supabase JWT/PostgreSQL HTTP with simulated payOS;
+real provider/device acceptance and production rollout remain pending. Shared dispatch/cancellation helpers and two
+delivery route factories replace the separate wrappers proposed originally. See
+apps/api/ADMIN-RECOVERY-OPERATIONS.md and the root fix-batches report.
+
 ## Summary
 
 Add a backend-only administrative operations layer to the existing CareOnRoad
@@ -40,8 +46,8 @@ remain unchanged.
   outbox, notification, reminder, and assignment foundations.
 - No new runtime dependency is planned.
 
-**Storage**: Existing Supabase-managed PostgreSQL with PostGIS. Eight additive
-admin migrations are proposed after `202606250014_indexes_constraints_rls.sql`.
+**Storage**: Existing Supabase-managed PostgreSQL with PostGIS. Ten additive
+admin migrations occupy 015–016 and 039–046 after the baseline schema.
 This feature does not add payment tables, providers, routes, or repositories.
 
 **Testing**:
@@ -220,8 +226,9 @@ or complexity waiver is required.
 
 - Manual assignments are first-class assignment provenance, not synthetic
   offers or fake dispatch candidates.
-- Assignments gain an `assignment_source`, optional accepted candidate,
-  optional assigning admin, and optional superseded assignment.
+- Assignments gain an `source`, optional accepted candidate,
+  optional assigning admin, and optional superseded assignment and server-calculated `dispatch_distance_m`.
+  Source is offer/admin_manual/admin_reassignment; manual sources have no candidate.
 - Offer-accepted assignments still require a valid accepted candidate.
 - Admin-manual assignments require an assigning admin and no accepted candidate.
 - Manual assignment accepts requests in explicitly allowlisted assignable
@@ -246,7 +253,8 @@ or complexity waiver is required.
   a not-yet-delivered related outbox event.
 - Outbox abandon gains a durable `abandoned` status; dead-letter retry clears
   failure/lease metadata and schedules one controlled retry.
-- Processed events are never retried.
+- Domain processed events are not retried. Failed-notification recovery can
+  reopen its processed source atomically, only for eligible original receipts.
 - Reminder retry is allowed only for failed occurrences and uses the existing
   occurrence identity/dedupe semantics.
 
@@ -307,13 +315,13 @@ src/
 |   |-- admin-user-management.service.ts
 |   |-- admin-mechanic-management.service.ts
 |   |-- admin-service-request.service.ts
-|   |-- admin-dispatch-operations.service.ts
-|   |-- admin-assignment-operations.service.ts
-|   |-- admin-diagnosis-quote.service.ts
-|   |-- admin-reminder-management.service.ts
-|   |-- admin-notification-operations.service.ts
-|   |-- admin-outbox-operations.service.ts
-|   |-- admin-audit-query.service.ts
+|   |-- shared features/dispatch/dispatch.service.ts
+|   |-- admin-assignment.service.ts
+|   |-- admin-supervision.service.ts
+|   |-- admin-reminder.service.ts
+|   |-- admin-delivery.service.ts
+|   |-- admin-delivery.route-handlers.ts
+|   |-- admin-audit.service.ts
 |   |-- admin-dashboard.service.ts
 |   |-- admin-configuration.service.ts
 |   `-- __tests__/
@@ -346,12 +354,14 @@ src/server/repositories/
 supabase/migrations/
 |-- 202606250015_admin_foundation.sql
 |-- 202606250016_admin_mechanic_management.sql
-|-- 202606250017_admin_dispatch_assignment_operations.sql
-|-- 202606250018_admin_quote_status.sql
-|-- 202606250019_admin_supervision_actions.sql
-|-- 202606250020_admin_delivery_statuses.sql
-|-- 202606250021_admin_delivery_operations.sql
-`-- 202606250022_admin_operation_configs.sql
+|-- 202606250039_admin_assignment_provenance.sql
+|-- 202606250040_admin_quote_status.sql
+|-- 202606250041_admin_supervision_actions.sql
+|-- 202606250042_admin_delivery_statuses.sql
+|-- 202606250043_admin_delivery_operations.sql
+|-- 202606250044_admin_reminder_dashboard.sql
+|-- 202606250045_admin_dispatch_configuration.sql
+`-- 202606250046_dispatch_radius_policy_bounds.sql
 ```
 
 **Structure Decision**: Extend the existing modular monolith. Admin feature
@@ -359,24 +369,24 @@ services own authorization and orchestration while existing domain services,
 state helpers, repository contracts, and database constraints remain the source
 of truth. No new application, frontend tree, or dependency is introduced.
 
-## Proposed Migrations
+## Implemented Migrations
 
 | Migration | Patch | Additive change |
 |---|---|---|
 | `202606250015_admin_foundation.sql` | A/B/D/F | Add `audit_logs.admin_reason`; add append-only `admin_internal_notes`; add admin query indexes; keep direct authenticated writes revoked and RLS enabled. |
 | `202606250016_admin_mechanic_management.sql` | C | Add `rejected` mechanic profile status and bounded admin-list indexes; retain rating constraints. |
-| `202606250017_admin_dispatch_assignment_operations.sql` | E/F | Add assignment provenance/source, assigning admin, superseded assignment reference, nullable candidate with source-dependent constraints; replace candidate identity trigger safely. |
-| `202606250018_admin_quote_status.sql` | G | Add only the `voided` quote enum value and commit it before any trigger or constraint uses the new value. |
-| `202606250019_admin_supervision_actions.sql` | G | Add append-only diagnosis/quote supervision records and replace quote transition enforcement to allow pending-to-voided. |
-| `202606250020_admin_delivery_statuses.sql` | H | Add only notification `canceled` and outbox `abandoned` enum values and commit them before use. |
-| `202606250021_admin_delivery_operations.sql` | H | Add delivery terminal provenance, constraints, worker claim rules, and indexes that use the committed enum values. |
-| `202606250022_admin_operation_configs.sql` | J optional | Add current/version records and indexes for the four allowlisted non-secret dispatch configuration keys only. |
+| `202606250039_admin_assignment_provenance.sql` | E/F | Add assignment provenance/source, assigning admin, superseded assignment reference, nullable candidate with source-dependent constraints; replace candidate identity trigger safely. |
+| `202606250040_admin_quote_status.sql` | G | Add only the `voided` quote enum value and commit it before any trigger or constraint uses the new value. |
+| `202606250041_admin_supervision_actions.sql` | G | Add append-only diagnosis/quote supervision records and replace quote transition enforcement to allow pending-to-voided. |
+| `202606250042_admin_delivery_statuses.sql` | H | Add only notification `canceled` and outbox `abandoned` enum values and commit them before use. |
+| `202606250043_admin_delivery_operations.sql` | H | Add delivery terminal provenance, constraints, worker claim rules, and indexes that use the committed enum values. |
+| `202606250044_admin_reminder_dashboard.sql` | H2/I | Enabled reminder owner guard, bounded pagination and operational indexes. |
+| `202606250045_admin_dispatch_configuration.sql` | J optional | Four-key current/version rows, native bounds/budget/append-only guards, RLS and immutable episode policy snapshots. |
+| `202606250046_dispatch_radius_policy_bounds.sql` | J follow-up | Replace the original four-radius SQL allowlist with 1–100 km whole-meter bounds so configured radii can be persisted. |
 
 No migration in this admin-operations plan is named or reserved for payment.
-Payment now lives in feature 005 with its own later migration. If Patch J is
-deferred, migration 022 is not created until that patch is authorized; later
-migrations must still use a timestamp greater than the then-current latest
-migration.
+Payment lives in feature 005; existing migration slots 017–038 are occupied.
+Optional Patch J is authorized in this continuation and uses migration 045.
 
 ## Patch Sequence
 
@@ -420,7 +430,7 @@ migration.
 
 ### Patch E - Admin dispatch operations
 
-- Apply migration 017 assignment provenance needed by manual assignment.
+- Apply migration 039 assignment provenance needed by manual assignment.
 - Implement status/round/detail, overdue expiry, retry, cancel, eligible
   mechanic list, categorized failure explanation, and manual assignment.
 - Delegate request-based reassignment to the canonical assignment coordinator.
@@ -438,7 +448,7 @@ migration.
 
 ### Patch G - Admin diagnosis and quote supervision
 
-- Apply migrations 018 then 019 so the quote enum value commits before trigger
+- Apply migrations 040 then 041 so the quote enum value commits before trigger
   logic uses it.
 - Implement redacted diagnosis detail, quote version history, revision requests,
   pending quote void/expiry, and explicit dispute resolutions.
@@ -449,7 +459,7 @@ migration.
 
 ### Patch H - Admin audit, notification, outbox, and reminder operations
 
-- Apply migrations 020 then 021 so delivery enum values commit before
+- Apply migrations 042 then 043 so delivery enum values commit before
   constraints, indexes, and repository commands use them.
 - Implement source-row-preserving audit queries and an audited export command
   that appends exactly one sanitized export-access audit record per successful
@@ -467,15 +477,15 @@ migration.
 
 - Implement operational summary and bounded dispatch, assignment, mechanic,
   request, and worker metrics.
-- Implement six required stuck-workflow categories with deterministic reason
-  codes and safe next-command categories.
+- Implement the six required categories plus pending quote/payment and worker
+  missing progress, for nine categories with deterministic IDs and safe action codes.
 - Add aggregate reconciliation, threshold-boundary, duplicate-finding, read-only,
   pagination, and performance smoke tests.
 - Add no dashboard persistence table.
 
 ### Patch J - Admin configuration (optional)
 
-- Apply migration 022 only when this optional patch is authorized.
+- Migration 045 was assigned and applied only to the independently confirmed Docker test instance after explicit Batch 15 authorization.
 - Implement only these mutable dispatch keys and bounds:
   - `dispatch.radius_steps_km`: 1 to 8 ascending values, each 1 to 100 km,
     default `[2, 5, 8, 12]`;
@@ -511,7 +521,7 @@ Every patch follows tests-first task ordering and includes:
 5. PostgreSQL integration tests for migrations, constraints, concurrent
    commands, triggers, indexes, and RLS/direct access boundaries.
 6. Static tests proving no admin route contains `forceStatus`, rating setters,
-   payment artifacts, or sensitive DTO fields.
+   new payment mutation artifacts, or sensitive DTO fields. Existing commitment reads are required.
 7. PostgreSQL-backed performance acceptance tests exercise every bounded admin
    list/detail operation after five warm-ups, run 20 measured requests per
    operation, require at least 19 of 20 within two seconds, and assert response
@@ -525,7 +535,7 @@ Every patch follows tests-first task ordering and includes:
 - Patch A lands without domain command routes.
 - Patches B-I can be enabled sequentially after focused tests and hosted/dev
   migration verification.
-- Patch J is disabled unless explicitly configured after migration 022.
+- Patch J is disabled unless explicitly configured after its newly assigned migration.
 - No mock-data seed targets production. Admin fixtures remain test/dev-only.
 - Audit/outbox health and stuck-workflow results are checked before expanding
   administrator access.

@@ -2,6 +2,12 @@
 
 Ngày kiểm tra: **01/10/2026, giờ Việt Nam**. Phạm vi: working tree hiện tại, bao gồm các thay đổi chưa commit trong `apps/api` và migrations. Đây là audit; chưa sửa implementation hoặc áp dụng migration.
 
+Ghi chú đối chiếu sau implementation: nội dung dưới đây là baseline audit lịch sử.
+Các sửa đổi và bằng chứng local đến Batch 15 nằm trong
+[batch report](BACKEND-FIX-BATCHES-REPORT.md). Source/Docker test đã tới migration
+046; provider/device thật và production rollout vẫn cần gate riêng. Không dùng
+các số FAIL/schema cũ bên dưới làm trạng thái hiện tại của local implementation.
+
 ## Kết luận
 
 **Chưa thể xác nhận backend đã hoàn thành end-to-end hoặc đủ toàn bộ chức năng cho ba role.** Các luồng thuận lợi chính có thể chạy xuyên tầng service, nhưng còn lỗi nhánh ngoại lệ, thiếu chức năng vận hành và database chưa tương thích với code hiện tại.

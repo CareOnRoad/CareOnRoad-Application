@@ -54,10 +54,10 @@ describeDatabase("live tracking repository integration", () => {
     await sql`
       insert into service_requests (
         id, request_code, rider_id, motorcycle_id, service_type,
-        problem_description, address_text, status, priority, created_at, updated_at
+        service_location, problem_description, address_text, status, priority, created_at, updated_at
       ) values (
         ${requestId}, 'COR-MOB-20260823-932', ${riderId}, ${motorcycleId},
-        'mobile_repair', 'private', 'private', 'assigned', 'normal', ${now}, ${now}
+        'mobile_repair', ST_SetSRID(ST_MakePoint(106.69, 10.77), 4326)::geography, 'private', 'private', 'assigned', 'normal', ${now}, ${now}
       )
     `;
     await sql`

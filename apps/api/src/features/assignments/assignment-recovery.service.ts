@@ -12,6 +12,7 @@ import {
   type AssignmentRecoveryReason
 } from "./assignment-recovery.schemas";
 import { assertRequestStatusTransition } from "../service-requests/service-request-state";
+import { assertNoAssignmentCommitment, CancellationConflict } from "./assignment-cancellation";
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -50,16 +51,19 @@ export class AssignmentRecoveryService {
     const createId = this.options.createId ?? randomUUID;
 
     return this.unitOfWork.execute(async (repositories) => {
-      const actor = await loadRecoveryActor(repositories, identity.subject);
-      const assignment = await repositories.assignments.findByIdForUpdate(assignmentId);
-      if (!assignment) {
+      await loadRecoveryActor(repositories, identity.subject);
+      const snapshot = await repositories.assignments.findById(assignmentId);
+      if (!snapshot) {
         throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
       }
-      authorizeRecovery(actor, assignment.mechanicId, parsed.data.reason_code);
-      const request = await repositories.serviceRequests.findByIdForUpdate(assignment.requestId);
+      const request = await repositories.serviceRequests.findByIdForUpdate(snapshot.requestId);
       if (!request) {
         throw new AssignmentError("NOT_FOUND", "Service request not found.", 404);
       }
+      const assignment = await repositories.assignments.findByIdForUpdate(assignmentId);
+      if (!assignment) throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
+      const actor = await loadRecoveryActor(repositories, identity.subject);
+      authorizeRecovery(actor, assignment.mechanicId, parsed.data.reason_code);
 
       const scope = `POST /api/v1/assignments/${assignment.id}/recover`;
       const decision = await prepareIdempotency(repositories.idempotency, {
@@ -79,13 +83,14 @@ export class AssignmentRecoveryService {
       if (decision.action === "replay") {
         return decision.responseBody as AssignmentRecoveryResponse;
       }
+      await assertNoAssignmentCommitment(repositories, assignment);
 
       if (!["accepted", "en_route"].includes(assignment.status)) {
-        throw new AssignmentError("CONFLICT", "Assignment is not eligible for recovery.", 409);
+        throw new CancellationConflict("assignment_state");
       }
       const expectedRequestStatus = assignment.status === "accepted" ? "assigned" : "mechanic_en_route";
       if (request.status !== expectedRequestStatus) {
-        throw new AssignmentError("CONFLICT", "Service request state is not eligible for recovery.", 409);
+        throw new CancellationConflict("request_state");
       }
       assertAssignmentStatusTransition(assignment.status, "recovery_canceled");
       assertRequestStatusTransition(request.status, "submitted");
@@ -108,11 +113,12 @@ export class AssignmentRecoveryService {
         reason: parsed.data.reason_code,
         createdAt: now
       });
-      await repositories.serviceRequests.updateStatus({
+      const updatedRequest = await repositories.serviceRequests.updateStatus({
         id: request.id,
         status: "submitted",
         updatedAt: now
       });
+      if (!updatedRequest) throw new CancellationConflict("request_missing");
       await repositories.serviceRequests.appendStatusHistory({
         id: createId(),
         requestId: request.id,

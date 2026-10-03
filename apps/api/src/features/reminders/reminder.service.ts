@@ -86,8 +86,8 @@ export class ReminderService {
 
     return this.unitOfWork.execute(async ({ audit, motorcycles, outbox, reminders, users }) => {
       const actor = await loadRiderActor(users, identity.subject);
-      const existing = await loadOwnedReminderRule(reminders, reminderId, actor.id);
       const motorcycle = await loadOwnedMotorcycle(motorcycles, parsed.motorcycle_id, actor.id);
+      const existing = await loadOwnedReminderRule(reminders, reminderId, actor.id);
       const now = this.options.now?.() ?? new Date();
       const updated = await reminders.updateRule({
         id: existing.id,
@@ -230,7 +230,7 @@ async function loadOwnedMotorcycle(
   motorcycleId: string,
   riderId: string
 ): Promise<Motorcycle> {
-  const motorcycle = await motorcycles.findById(motorcycleId);
+  const motorcycle = await motorcycles.findByIdForUpdate(motorcycleId);
   if (!motorcycle || motorcycle.archivedAt) {
     throw new ReminderError("NOT_FOUND", "Motorcycle not found.", 404);
   }

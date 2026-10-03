@@ -7,6 +7,11 @@ info:
     active CareOnRoad admin. Every mutation additionally requires
     X-Idempotency-Key and a validated reason. Responses are admin-safe and
     redacted. This contract adds no payment or frontend capability.
+    Local implementation through Patch H1 / role-flow Batch 12 is verified with
+    schema 043. H2/I/J and deployed acceptance remain pending. Commitment reads
+    reuse existing payments; admin cannot advance money. Assignment source is
+    offer/admin_manual/admin_reassignment; accepted_candidate_id is null for
+    manual sources. See apps/api/ADMIN-RECOVERY-OPERATIONS.md for exact guards.
 servers:
   - url: /api/v1
 security:
@@ -451,6 +456,7 @@ paths:
     post:
       tags: [Admin Dispatch]
       operationId: adminRetryDispatch
+      description: Opens a new episode only from manual_escalation with no active assignment or quote/payment commitment. Maximum 3 admin retries per request; new episodes pin the effective dispatch policy, whose defaults are 4 rounds/360 seconds. Historical rounds and active episode policy are preserved.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -462,6 +468,7 @@ paths:
     post:
       tags: [Admin Dispatch]
       operationId: adminCancelDispatch
+      description: Stops matching and moves the request to manual_escalation. Does not cancel the rider request. Refuses an active worker lease or assignment/quote/payment commitment.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -499,11 +506,13 @@ paths:
       operationId: adminExplainDispatchFailure
       description: |
         Returns all applicable failure reason categories, safe counts per
-        category where meaningful, and only allowlisted next-command categories
+        category on the returned page (reason_counts_scope=page), and only allowlisted next-command categories
         valid for the request's current state. Private location history and
         secrets are never returned.
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
 
@@ -522,7 +531,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/AssignmentId"
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/assignments/{assignmentId}/cancel:
@@ -581,24 +590,62 @@ paths:
     get:
       tags: [Admin Diagnosis Quotes]
       operationId: adminGetDiagnosisDetail
+      description: Metadata only; referenced diagnoses remain immutable. History and supervision are separately paginated.
       parameters:
         - $ref: "#/components/parameters/AssignmentId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/RoleFlowLimit"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/diagnoses/{diagnosisId}/request-revision:
     post:
       tags: [Admin Diagnosis Quotes]
       operationId: adminRequestDiagnosisRevision
+      description: Append a revision request only before any quote references this diagnosis and while on_site/diagnosis. Does not edit its content.
       parameters:
         - $ref: "#/components/parameters/DiagnosisId"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody: { $ref: "#/components/requestBodies/AdminReason" }
       responses:
         "202": { $ref: "#/components/responses/AdminObject" }
+  /admin/quotes/{quoteId}:
+    get:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminGetQuoteDetail
+      description: Redacted immutable version metadata with a bounded supervision page.
+      parameters:
+        - $ref: "#/components/parameters/QuoteId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+      responses:
+        "200": { $ref: "#/components/responses/AdminObject" }
+  /admin/service-requests/{requestId}/quotes/history:
+    get:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminGetQuoteVersionHistory
+      description: Bounded immutable quote version metadata; no narrative or private reason.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
+  /admin/service-requests/{requestId}/supervision-actions:
+    get:
+      tags: [Admin Diagnosis Quotes]
+      operationId: adminGetSupervisionActions
+      description: Bounded append-only decision metadata; private reasons excluded.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+      responses:
+        "200": { $ref: "#/components/responses/PagedResult" }
   /admin/quotes/{quoteId}/request-revision:
     post:
       tags: [Admin Diagnosis Quotes]
       operationId: adminRequestQuoteRevision
+      description: Void the latest eligible pending version and require a new immutable version. No approved agreement or money mutation.
       parameters:
         - $ref: "#/components/parameters/QuoteId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -620,6 +667,7 @@ paths:
     post:
       tags: [Admin Diagnosis Quotes]
       operationId: adminExpireQuote
+      description: Latest pending only, with an explicit expires_at at or before now. Quotes without a passed expiry require void instead.
       parameters:
         - $ref: "#/components/parameters/QuoteId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -649,7 +697,12 @@ paths:
       operationId: adminListReminderRules
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
+        - name: rider_id
+          in: query
+          schema: { type: string, format: uuid }
         - name: enabled
           in: query
           schema: { type: boolean }
@@ -694,13 +747,19 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ReminderId"
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
+        - name: status
+          in: query
+          schema: { type: string, enum: [due, queued, sent, dismissed, failed] }
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/reminder-occurrences/{occurrenceId}/retry:
     post:
       tags: [Admin Reminders]
       operationId: adminRetryReminderOccurrence
+      description: Failed occurrence only, at most three retries, same notification context and dedupe; no active rule/outbox/receipt lease, terminal delivery or archived/ineligible owner. No service request is created.
       parameters:
         - $ref: "#/components/parameters/OccurrenceId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -712,8 +771,12 @@ paths:
     get:
       tags: [Admin Reminders]
       operationId: adminGetReminderWorkerHealth
+      description: Reminder worker runs only; cursor uses completed_at at millisecond precision.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/RoleFlowLimit"
       responses:
-        "200": { $ref: "#/components/responses/AdminObject" }
+        "200": { $ref: "#/components/responses/PagedResult" }
 
   /admin/notifications:
     get:
@@ -721,10 +784,15 @@ paths:
       operationId: adminListNotifications
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
         - name: status
           in: query
-          schema: { type: string }
+          schema: { type: string, enum: [pending, sent, failed, canceled] }
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
+        - name: user_id
+          in: query
+          schema: { type: string, format: uuid }
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/notifications/{notificationId}:
@@ -733,12 +801,15 @@ paths:
       operationId: adminGetNotificationDetail
       parameters:
         - $ref: "#/components/parameters/NotificationId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/RoleFlowLimit"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/notifications/{notificationId}/retry:
     post:
       tags: [Admin Notifications]
       operationId: adminRetryNotification
+      description: Retry only original failed receipts with matching active credentials, no live leases, at most three admin retries and 100 receipts. Sent/invalid/new devices are excluded.
       parameters:
         - $ref: "#/components/parameters/NotificationId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -750,6 +821,7 @@ paths:
     post:
       tags: [Admin Notifications]
       operationId: adminCancelNotification
+      description: Stop delivery only before any sent receipt and without live leases; keep inbox and read state intact.
       parameters:
         - $ref: "#/components/parameters/NotificationId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -761,6 +833,10 @@ paths:
     get:
       tags: [Admin Notifications]
       operationId: adminGetNotificationSummary
+      description: Counts within a maximum 31-day window, default last seven days.
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
 
@@ -770,13 +846,15 @@ paths:
       operationId: adminListOutboxEvents
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
         - name: status
           in: query
-          schema: { type: string }
+          schema: { type: string, enum: [pending, processing, processed, dead_letter, abandoned] }
         - name: topic
           in: query
           schema: { type: string, maxLength: 200 }
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/outbox/dead-letter:
@@ -785,7 +863,9 @@ paths:
       operationId: adminListDeadLetterEvents
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/outbox/{eventId}:
@@ -800,6 +880,7 @@ paths:
     post:
       tags: [Admin Outbox]
       operationId: adminRetryDeadLetterEvent
+      description: Retry supported dead letters with unchanged payload/dedupe/domain identity, no live leases and a three-retry cap. Notification sources use canonical receipt recovery.
       parameters:
         - $ref: "#/components/parameters/EventId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -811,6 +892,7 @@ paths:
     post:
       tags: [Admin Outbox]
       operationId: adminAbandonOutboxEvent
+      description: Only safe historical topics without live leases; critical assignment.recovery.requested and unknown handoffs cannot be abandoned.
       parameters:
         - $ref: "#/components/parameters/EventId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -822,6 +904,10 @@ paths:
     get:
       tags: [Admin Outbox]
       operationId: adminGetOutboxWorkerHealth
+      description: Paginated existing operational worker-run history; no new monitoring stack.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/RoleFlowLimit"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
 
@@ -831,7 +917,7 @@ paths:
       operationId: adminSearchAudit
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
         - name: actor_id
           in: query
           schema: { type: string, format: uuid }
@@ -841,6 +927,11 @@ paths:
         - name: entity_type
           in: query
           schema: { type: string, maxLength: 100 }
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
+        - name: entity_id
+          in: query
+          schema: { type: string, format: uuid }
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/audit/entities/{entityType}/{entityId}:
@@ -857,7 +948,9 @@ paths:
           required: true
           schema: { type: string, format: uuid }
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/audit/actors/{actorId}:
@@ -867,7 +960,9 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ActorId"
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
   /admin/audit/export:
@@ -879,6 +974,26 @@ paths:
         sanitized records, and appends exactly one sanitized export-access audit
         event containing only the requesting admin, filter hash, exported count,
         and timestamp. Exported content is not copied into the access event.
+        Window defaults to seven days and is capped at 31 days; PostgreSQL query
+        timeout is five seconds. Export has no cursor and defaults to 1,000 rows.
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 1000 }
+        - name: actor_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: entity_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: entity_type
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 100, pattern: '^[a-zA-Z0-9_.-]+$' }
+        - name: action
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 200, pattern: '^[a-zA-Z0-9_.-]+$' }
       responses:
         "200":
           description: Sanitized bounded export
@@ -886,20 +1001,24 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items, exported_at]
+                required: [items, exported_at, exported_count, has_more]
                 properties:
                   items:
                     type: array
                     maxItems: 10000
                     items: { $ref: "#/components/schemas/AdminSafeObject" }
                   exported_at: { type: string, format: date-time }
+                  exported_count: { type: integer, minimum: 0, maximum: 10000 }
+                  has_more: { type: boolean }
   /admin/audit/admin-actions:
     get:
       tags: [Admin Audit]
       operationId: adminGetAdminActionHistory
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
 
@@ -907,45 +1026,73 @@ paths:
     get:
       tags: [Admin Dashboard]
       operationId: adminGetOperationalSummary
+      description: Derived current states of records created in the bounded window; dispatch uses round started_at. Read-only, five-second SQL timeout.
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/dashboard/dispatch:
     get:
       tags: [Admin Dashboard]
       operationId: adminGetDispatchMetrics
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/dashboard/assignments:
     get:
       tags: [Admin Dashboard]
       operationId: adminGetAssignmentMetrics
+      description: Current work, future reservations and closed assignment history are distinct groups.
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/dashboard/mechanics:
     get:
       tags: [Admin Dashboard]
       operationId: adminGetMechanicMetrics
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/dashboard/requests:
     get:
       tags: [Admin Dashboard]
       operationId: adminGetRequestBreakdown
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/dashboard/workers:
     get:
       tags: [Admin Dashboard]
       operationId: adminGetWorkerFailureSummary
+      parameters:
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/dashboard/stuck-workflows:
     get:
       tags: [Admin Dashboard]
       operationId: adminGetStuckWorkflows
+      description: One stable finding per target/category; returns named thresholds and safe investigation/read/note action codes, with no automatic financial or state resolution.
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RoleFlowLimit"
+        - $ref: "#/components/parameters/WindowFrom"
+        - $ref: "#/components/parameters/WindowTo"
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [dispatch_overdue, dispatch_attention, assignment_stalled, state_divergence, outbox_dead_letter, reminder_failures, quote_pending, payment_pending, worker_missing_progress]
       responses:
         "200": { $ref: "#/components/responses/PagedResult" }
 
@@ -953,6 +1100,7 @@ paths:
     get:
       tags: [Admin Configuration]
       operationId: adminGetOperationalConfiguration
+      description: Opt-in ADMIN_DISPATCH_CONFIGURATION_ENABLED after schema 046; effective four-key policy, current versions and at most 20 recent version metadata rows. Off returns original defaults. Policy applies to new dispatch episodes; active episodes retain immutable snapshots. Configured radii are rounded to the nearest meter for ranking and persistence.
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
   /admin/configuration/dispatch:
@@ -969,8 +1117,9 @@ paths:
       tags: [Admin Configuration]
       operationId: adminGetProviderBudgetMetadata
       description: |
-        Returns read-only provider budget limits and usage metadata without
-        credentials. Patch J exposes no provider-budget mutation.
+        Returns read-only configuration metadata without credentials. Usage,
+        limit and remaining are null and budget_source is unavailable when no
+        quota source exists. Patch J exposes no provider-budget mutation.
       responses:
         "200": { $ref: "#/components/responses/AdminObject" }
 
@@ -990,6 +1139,20 @@ components:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    RoleFlowLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    WindowFrom:
+      name: from
+      in: query
+      description: Inclusive ISO timestamp; default seven days before to; total window at most 31 days.
+      schema: { type: string, format: date-time }
+    WindowTo:
+      name: to
+      in: query
+      description: Inclusive ISO timestamp; defaults to server time.
+      schema: { type: string, format: date-time }
     IdempotencyKey:
       name: X-Idempotency-Key
       in: header
@@ -1116,6 +1279,9 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
+    ServiceType:
+      type: string
+      enum: [emergency_rescue, mobile_repair, at_home_service, periodic_maintenance, other]
     AppRole:
       type: string
       enum: [rider, mechanic, admin]
@@ -1169,21 +1335,26 @@ components:
         service_radius_km: { type: number, exclusiveMinimum: 0, maximum: 100 }
     MechanicCommand:
       type: object
+      description: Target must satisfy current eligibility. Scheduled visits require estimated_duration_minutes with 30-minute buffers before and after.
       additionalProperties: false
       required: [reason, mechanic_id]
       properties:
         reason: { type: string, minLength: 10, maxLength: 500 }
         mechanic_id: { type: string, format: uuid }
+        estimated_duration_minutes: { type: integer, minimum: 15, maximum: 480 }
     StuckAssignmentCommand:
       type: object
+      description: Reassign requires mechanic_id and scheduled duration where applicable; investigate requires note. No arbitrary status transition.
       additionalProperties: false
       required: [reason, action]
       properties:
         reason: { type: string, minLength: 10, maxLength: 500 }
         action:
           type: string
-          enum: [cancel, reassign]
+          enum: [cancel, reassign, investigate]
         mechanic_id: { type: string, format: uuid }
+        estimated_duration_minutes: { type: integer, minimum: 15, maximum: 480 }
+        note: { type: string, minLength: 1, maxLength: 2000 }
     QuoteDisputeCommand:
       type: object
       additionalProperties: false

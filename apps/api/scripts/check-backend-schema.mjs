@@ -33,7 +33,8 @@ try {
     Object.assign(evidence, { status: "connected", schema_checks: checks,
       migration_count: versions.length, last_migration: versions.at(-1)?.version ?? null,
       source_migrations_recorded: expected.every(version => versions.some(item => item.version === version)),
-      migration_035_recorded: versions.some(item => item.version === REQUIRED_BACKEND_SCHEMA_VERSION) });
+      migration_035_recorded: versions.some(item => item.version === "202606250035"),
+      required_migration_recorded: versions.some(item => item.version === REQUIRED_BACKEND_SCHEMA_VERSION) });
     evidence.release_ready = Object.values(checks).every(value => value === true) && evidence.source_migrations_recorded;
     if (process.argv.includes("--inventory")) evidence.data_repair_dry_run = await inventory(tx, checks.columns);
   });
@@ -67,8 +68,12 @@ async function inventory(tx, hasReservationColumns) {
     mechanic_profiles_without_role: `select p.user_id as id, 'mechanic_profile' as entity_type from mechanic_profiles p
       where not exists (select 1 from user_roles roles where roles.user_id = p.user_id and roles.role = 'mechanic')`,
     scheduled_assignments_needing_review: `select a.id, 'assignment' as entity_type from assignments a
-      join service_requests r on r.id = a.request_id where a.status = 'accepted' and r.scheduled_start_at > now()
+      join service_requests r on r.id = a.request_id where a.status in
+        ('accepted', 'en_route', 'on_site', 'diagnosis', 'quoted', 'awaiting_payment', 'in_progress') and r.scheduled_start_at is not null
       ${hasReservationColumns ? "and (a.scheduled_start_at is null or a.reservation_start_at is null or a.reservation_end_at is null)" : ""}`,
+    overdue_unactivated_appointments: hasReservationColumns ? `select id, 'assignment' as entity_type from assignments
+      where scheduled_start_at < now() and activated_at is null and status in
+        ('accepted', 'en_route', 'on_site', 'diagnosis', 'quoted', 'awaiting_payment', 'in_progress')` : `select id, 'assignment' as entity_type from assignments where false`,
     inactive_assignments_with_payments: `select distinct a.id, 'assignment' as entity_type from assignments a
       join payment_orders p on p.assignment_id = a.id where a.status in ('canceled', 'recovery_canceled')
         and p.status in ('created', 'pending', 'succeeded', 'needs_review')`

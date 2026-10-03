@@ -72,7 +72,7 @@ describeDatabase("mechanic operations completion checklist repository integratio
           "outbox_events",
           "idempotency_records"
         ],
-        { resetAppendOnlyAuditLogs: true }
+        { resetAppendOnlyTables: true }
       );
     } finally {
       await sql.unsafe(

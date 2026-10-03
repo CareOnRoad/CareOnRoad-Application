@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { listQuery } from "@/lib/list-pagination";
 
 import { databaseJsonError, jsonError, type ApiErrorCode } from "@/lib/api-error";
 import { authenticateSupabaseRequest } from "@/server/auth/request-actor";
@@ -22,7 +23,7 @@ export type ServiceRequestRouteDependencies = {
       input: unknown,
       idempotencyKey: string
     ): Promise<ServiceRequestResponse>;
-    listServiceRequests(identity: VerifiedSupabaseIdentity): Promise<{ items: ServiceRequestResponse[] }>;
+    listServiceRequests(identity: VerifiedSupabaseIdentity, input?: unknown): Promise<{ items: ServiceRequestResponse[] }>;
     getServiceRequest(
       identity: VerifiedSupabaseIdentity,
       requestId: string
@@ -54,7 +55,7 @@ export function createServiceRequestRouteHandlers(dependencies: ServiceRequestRo
       try {
         const identity = await dependencies.authenticate(request);
         return NextResponse.json(
-          await dependencies.serviceRequestService.listServiceRequests(identity)
+          await dependencies.serviceRequestService.listServiceRequests(identity, listQuery(request))
         );
       } catch (error) {
         return routeError(error);

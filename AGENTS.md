@@ -28,6 +28,7 @@
 - **Lint web:** `pnpm.cmd run lint:web`
 - **Test API unit/static/route:** `pnpm.cmd test` or `pnpm.cmd run test:unit`
 - **Test PostgreSQL integration:** `pnpm.cmd run test:db`
+- **Test local JWT/PostgreSQL HTTP acceptance (after build):** `pnpm.cmd run test:http`
 - **Test full API suite:** `pnpm.cmd run test:full`
 - **ASR smoke:** `pnpm.cmd run asr:smoke`
 - **Seed hosted/dev mock data:** `pnpm.cmd run seed:mock`
@@ -143,22 +144,35 @@
   checklist bound to approved work, and payment after service. Existing `standard`
   maintenance quotes retain prepayment behavior; mobile/web clients are unchanged.
 - Migrations `202606250001_enable_extensions.sql` through
-<<<<<<< HEAD
-  `202606250034_maintenance_quote_payment_workflow.sql` must be applied and verified on
-  `202606250033_user_profile_extended.sql` must be applied and verified on
-  hosted/dev before enabling the corresponding APIs or seeding mock data.
-- `202606250033_user_profile_extended.sql` adds `phone`, `address`, and
-  `avatar_url` columns to `app_users` so the bootstrap and update profile
-  routes can persist rider/mechanic profile edits end-to-end.
-=======
-  `202606250035_maintenance_reservations_notification_leases.sql` must be applied and verified on
+  `202606250046_dispatch_radius_policy_bounds.sql` must be applied and verified on
   hosted/dev before enabling the corresponding APIs or seeding mock data.
 - Run `pnpm.cmd run preflight:schema` before release. This read-only gate checks
   source migration history and runtime schema objects; readiness also rejects
   missing schema. See `apps/api/SCHEMA-RELEASE-CHECKLIST.md` for test isolation and
   migration verification. Never apply development/test migrations to production
   as part of a local validation batch.
->>>>>>> danh/backend-workflow-fixes
+- Role-flow fix Batches 01–13 and explicitly authorized optional Batch 15 are
+  implemented. Batch 14 adds real local Supabase JWT/Next HTTP/PostgreSQL acceptance,
+  actual process restart recovery and bounded admin-read performance checks.
+  Real provider/device acceptance and production rollout remain pending. See
+  `BACKEND-FIX-BATCHES-REPORT.md` for evidence and limits.
+  Every new request requires coordinates; every scheduled acceptance requires
+  estimated duration and uses a buffered reservation. See
+  `apps/api/SCHEDULED-FULFILLMENT.md` for PATCH, activation and dry-run legacy repair.
+  Assigned mechanics can restore job detail through
+  `GET /api/v1/mechanics/me/jobs/{assignmentId}`; terminal details redact location,
+  plate and media. See `apps/api/MECHANIC-JOB-DETAIL.md`.
+- Batch 07 rejects nonpositive/unsupported standard quote totals before replacing
+  pending quotes and blocks legacy invalid approval. Batch 08 adds strict self
+  profile PATCH and bounded request/assignment lists. Batch 09 adds admin dispatch
+  reads/expire/retry/cancel with at most three new search episodes. See
+  `apps/api/PROFILE-LISTS-ADMIN-DISPATCH.md`.
+- Batches 10–12 add admin manual assignment/reassignment provenance and server
+  rescue distance, immutable quote supervision, guarded notification/outbox
+  recovery and bounded sanitized audit export. Source is `offer`, `admin_manual`
+  or `admin_reassignment`; manual assignments have no accepted candidate.
+  Retry is capped at three, audit windows at 31 days, exports at 10,000 rows.
+  See `apps/api/ADMIN-RECOVERY-OPERATIONS.md`.
 
 ## Hosted Supabase Mock Data
 
@@ -198,14 +212,8 @@
 - `POST /api/chatbot/sessions/[sessionId]/claim`
   - Binds an anonymously credential-owned chatbot session to the authenticated
     active app user; claim requires both credentials and is one-way.
-- `GET /api/v1/auth/me`, `POST /api/v1/auth/profile`, `PATCH /api/v1/auth/profile`, `POST /api/v1/auth/devices`
+- `GET /api/v1/auth/me`, `POST/PATCH /api/v1/auth/profile`, `POST /api/v1/auth/devices`
   - Supabase JWT protected identity/profile/device endpoints.
-  - `POST /auth/profile` bootstraps a new actor with optional `display_name`,
-    `phone`, `address`, `avatar_url`.
-  - `PATCH /auth/profile` updates editable profile fields on the authenticated
-    actor; `phone` is also masked and stored in `phone_masked` for admin search.
-  - `GET /auth/me` returns `id`, `display_name`, optional `phone`, `address`,
-    `avatar_url`, `roles`, `status`.
 - `GET/POST /api/v1/motorcycles`
   - Rider-owned motorcycle list/create. Motorcycle mutations do not require `X-Idempotency-Key`.
 - `GET/PATCH/DELETE /api/v1/motorcycles/[motorcycleId]`
@@ -231,7 +239,9 @@
 - `GET /api/v1/service-requests/[requestId]`
   - Rider-owned service-request read.
 - `POST /api/v1/service-requests/[requestId]/cancel`
-  - Transactional cancellation with row lock and state re-check.
+  - Transactional owning-rider cancellation before travel/quote/payment, including
+    accepted future reservations and unassigned manual escalation. Closes the
+    assignment, request and dispatch together. Unresolved money blocks cancellation.
 - `POST /api/v1/service-requests/[requestId]/media`
   - Adds request media metadata only; raw media is not stored in audit/outbox.
 - `POST /api/v1/service-requests/[requestId]/dispatch`
@@ -281,6 +291,19 @@
   - Admin-only backend service-request list/detail, timeline, media, assignment,
     quotes, cancel, manual-escalate, and internal-note operations. Mutations
     require `X-Idempotency-Key` and reason metadata.
+- `/api/v1/admin/assignments/**`, `/api/v1/admin/diagnoses/**`,
+  `/api/v1/admin/quotes/**`, and request `dispatch/manual-assign`, `quotes/history`,
+  `supervision-actions`, `quote-dispute/resolve`
+  - Guarded manual assignment, pre-quote replacement/cancellation, metadata
+    history/notes and immutable supervision. No arbitrary status or money mutation.
+- `/api/v1/admin/notifications/**`, `/api/v1/admin/outbox/**`, `/api/v1/admin/audit/**`
+  - Redacted delivery operations and bounded queries/export. Live leases block
+    recovery; canceled inbox read state is preserved. Critical domain handoffs
+    cannot be abandoned. Each export appends one sanitized access audit.
+- `POST /api/v1/admin/service-requests/[requestId]/repair-cancellation`
+  - Admin-only targeted legacy repair with reason, assignment_id and idempotency.
+    Defaults to dry_run; execution requires proved canceled history, no active
+    replacement and no quote/agreement/unresolved payment. Never runs automatically.
 - `POST /api/v1/internal/workers/reminders/run`
   - Protected worker route requiring worker secret authority; normal rider/mechanic roles cannot run it.
 - `POST /api/v1/internal/workers/outbox/run`
@@ -484,7 +507,7 @@
 - `src/server/repositories/testing/*`
   - In-memory adapters used by focused service and route tests.
 - `supabase/migrations/202606250001_*` through
-  `202606250032_live_location_tracking.sql`
+  `202606250046_dispatch_radius_policy_bounds.sql`
   - Authoritative versioned backend schema through Patch 9, admin/mechanic/payment
     features, backend roadmap P0 Features 1-8, and P1 assignment recovery.
 
@@ -503,7 +526,8 @@
 - `OPENROUTER_FALLBACK_MODEL`
 - `DATABASE_URL`
 - `TEST_DATABASE_URL`
-- `TEST_DATABASE_CONFIRMED` (only for a separate hosted test project)
+- `TEST_DATABASE_CONFIRMED` (only for a separately confirmed local test instance or hosted test project)
+- `ADMIN_DISPATCH_CONFIGURATION_ENABLED` (optional four-key dispatch policy; default false, requires schema 046)
 - `CHATBOT_PERSISTENCE_MODE`
 - `HEALTH_READINESS_TIMEOUT_MS`
 - `SUPABASE_URL`
@@ -517,11 +541,6 @@
 - `SEED_USER_PASSWORD` (local mock seeding only)
 - `INTERNAL_WORKER_SECRET`
 - `WORKER_API_BASE_URL` (worker CLI API origin)
-- `DEMO_FORCE_MECHANIC_ID` (demo only — must be unset in production; the backend
- throws on startup if this is set with `NODE_ENV=production`. When set, all
- dispatch rounds route their offer to the configured mechanic regardless of
- distance, availability, location freshness, or active workload. Each forced
- round is tagged with `demo_force: true` in `outbox_events` and `audit_log`.)
 - `PUSH_TOKEN_ENCRYPTION_KEY`
 - `FCM_PROJECT_ID`
 - `FCM_CLIENT_EMAIL`
@@ -601,16 +620,14 @@ Never expose `GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
 - Do not put OpenRouter calls or keys in frontend code.
 - Do not send raw audio to OpenRouter.
 - Do not add motorcycle selector, brand dropdown, model dropdown, booking,
-  payment, settlement, inventory, **rider GPS autofill UI beyond what's already
-  wired in `app/rider/(tabs)/rescue.tsx` (1-shot capture + refresh button)**,
-  Maps/live tracking UI, chatbot rewrites, ASR
+  payment, settlement, inventory, Maps/live tracking UI, chatbot rewrites, ASR
   rewrites, or frontend UI unless explicitly requested.
 - Do not implement refunds, settlement, payout, invoice, card storage,
   frontend payment UI, frontend mechanic UI, completion gating, raw
   media storage, or new workflow scope unless explicitly requested.
 - Do not show raw model markdown or long explanations in the UI.
 - Do not remove fallback to make a model look reliable.
-- Do not push, deploy, commit or force-push without permission.
+- Do not push, deploy, or force-push without permission.
 
 ## When Stuck
 

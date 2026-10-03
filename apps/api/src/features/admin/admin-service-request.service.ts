@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { cancelUncommittedAssignment, CancellationConflict } from "@/features/assignments/assignment-cancellation";
+import { assertRequestStatusTransition } from "@/features/service-requests/service-request-state";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import type { ApiErrorCode } from "@/lib/api-error";
@@ -35,6 +38,12 @@ import {
 import { sanitizeAdminReason } from "./admin-redaction";
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const cancellationRepairInput = adminReasonSchema.extend({ assignment_id: z.string().uuid(), dry_run: z.boolean().default(true) }).strict();
+export type CancellationRepairResponse = { request_id: string; assignment_id: string; dry_run: boolean; repairable: boolean; reason_code?: string; status: RequestStatus };
+const reservationRepairInput = cancellationRepairInput.extend({ estimated_duration_minutes: z.number().int().min(15).max(480) }).strict();
+export type ReservationRepairResponse = Omit<CancellationRepairResponse, "status"> & {
+  scheduled_start_at?: string; reservation_start_at?: string; reservation_end_at?: string;
+};
 
 export type AdminServiceRequestSummaryResponse = {
   id: string;
@@ -318,6 +327,94 @@ export class AdminServiceRequestService {
     );
   }
 
+  repairCancellation(identity: VerifiedSupabaseIdentity, requestId: string, input: unknown, idempotencyKey: string): Promise<CancellationRepairResponse> {
+    const id = parseUuid(requestId);
+    const parsed = cancellationRepairInput.safeParse(input);
+    if (!parsed.success) throw invalid("Assignment ID, reason and optional dry_run are required.");
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveAdminActor(identity, repositories.users);
+      const request = await repositories.serviceRequests.findByIdForUpdate(id);
+      if (!request) throw notFound();
+      const scope = "admin.service_request.repair_cancellation";
+      const now = this.now();
+      if (!parsed.data.dry_run) {
+        const replay = await this.prepareCommand(repositories, actor.id, scope, idempotencyKey, { request_id: id, ...parsed.data }, now);
+        if (replay) return replay as CancellationRepairResponse;
+      }
+      const assignment = await repositories.assignments.findByIdForUpdate(parsed.data.assignment_id);
+      const history = assignment ? await repositories.assignments.findCancellationHistory(assignment.id) : undefined;
+      const expectedRequestState = history?.fromStatus === "accepted" ? "assigned" : history?.fromStatus === "en_route" ? "mechanic_en_route" :
+        ["on_site", "diagnosis"].includes(history?.fromStatus ?? "") ? "in_service" : undefined;
+      let reason: string | undefined;
+      if (!assignment || assignment.requestId !== id || assignment.status !== "canceled" || !assignment.canceledAt ||
+        !history || history.createdAt.getTime() !== assignment.canceledAt.getTime() || request.status !== expectedRequestState) reason = "history_insufficient";
+      else if (await repositories.assignments.findActiveByRequestForUpdate(id)) reason = "replacement_active";
+      else if (await repositories.payments.hasUnresolvedForRequest({ requestId: id })) reason = "payment_unresolved";
+      else if (assignment.rescueLaborQuoteId || assignment.maintenanceLaborQuoteId) reason = "agreement_exists";
+      else if (await repositories.quotes.hasAnyByAssignment(assignment.id)) reason = "quote_already_issued";
+      const preview: CancellationRepairResponse = { request_id: id, assignment_id: parsed.data.assignment_id, dry_run: parsed.data.dry_run,
+        repairable: !reason, ...(reason ? { reason_code: reason } : {}), status: request.status };
+      if (parsed.data.dry_run) return preview;
+      if (reason) throw new CancellationConflict(reason);
+      assertRequestStatusTransition(request.status, "canceled");
+      await reconcileOpenDispatchForRequest(repositories.dispatch, id, now);
+      const updated = await repositories.serviceRequests.updateStatus({ id, status: "canceled", canceledReason: parsed.data.reason, updatedAt: now });
+      if (!updated) throw notFound();
+      await repositories.serviceRequests.appendStatusHistory({ id: this.createId(), requestId: id, fromStatus: request.status,
+        toStatus: "canceled", actorId: actor.id, reason: parsed.data.reason, createdAt: now });
+      await this.recordMutation(repositories, { actorId: actor.id, action: "admin.service_request.cancellation_repaired", requestId: id,
+        reason: parsed.data.reason, metadata: { request_id: id, assignment_id: parsed.data.assignment_id, previous_status: request.status, next_status: "canceled" }, now });
+      const response = { ...preview, status: "canceled" as const };
+      await completeCommand(repositories, actor.id, scope, idempotencyKey, response, id, now, 200);
+      return response;
+    });
+  }
+
+  repairReservation(identity: VerifiedSupabaseIdentity, requestId: string, input: unknown, idempotencyKey: string): Promise<ReservationRepairResponse> {
+    const id = parseUuid(requestId);
+    const parsed = reservationRepairInput.safeParse(input);
+    if (!parsed.success) throw invalid("Assignment ID, reason and confirmed estimated_duration_minutes (15–480) are required.");
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveAdminActor(identity, repositories.users);
+      const request = await repositories.serviceRequests.findByIdForUpdate(id);
+      if (!request) throw notFound();
+      const now = this.now();
+      const scope = "admin.service_request.repair_reservation";
+      if (!parsed.data.dry_run) {
+        const replay = await this.prepareCommand(repositories, actor.id, scope, idempotencyKey, { request_id: id, ...parsed.data }, now);
+        if (replay) return replay as ReservationRepairResponse;
+      }
+      const snapshot = await repositories.assignments.findById(parsed.data.assignment_id);
+      const profile = snapshot ? await repositories.mechanics.findProfileByUserIdForUpdate(snapshot.mechanicId) : undefined;
+      const assignment = snapshot ? await repositories.assignments.findByIdForUpdate(snapshot.id) : undefined;
+      const mechanic = assignment ? await repositories.users.findActorById(assignment.mechanicId) : undefined;
+      const start = request.scheduledStartAt ? new Date(request.scheduledStartAt.getTime() - 30 * 60_000) : undefined;
+      const end = request.scheduledStartAt ? new Date(request.scheduledStartAt.getTime() + (parsed.data.estimated_duration_minutes + 30) * 60_000) : undefined;
+      let reason: string | undefined;
+      if (!assignment || assignment.requestId !== id || request.status !== "assigned" || assignment.status !== "accepted" ||
+        !["at_home_service", "other"].includes(request.serviceType) || !start || !end || !request.scheduledStartAt ||
+        request.scheduledStartAt <= now || assignment.scheduledStartAt) reason = "not_legacy_future_booking";
+      else if (assignment.startedAt || assignment.activatedAt || await repositories.assignments.hasTravelHistory(assignment.id)) reason = "travel_already_started";
+      else if (!request.serviceLocation) reason = "location_required";
+      else if (!profile || profile.profileStatus !== "active" || mechanic?.status !== "active" ||
+        !mechanic.roles.includes("mechanic")) reason = "mechanic_ineligible";
+      else if (await repositories.payments.hasUnresolvedForRequest({ requestId: id })) reason = "payment_unresolved";
+      else if (assignment.rescueLaborQuoteId || assignment.maintenanceLaborQuoteId) reason = "agreement_exists";
+      else if (await repositories.quotes.hasAnyByAssignment(assignment.id)) reason = "quote_already_issued";
+      else if (await repositories.assignments.findReservationConflict({ mechanicId: assignment.mechanicId, start, end, excludeId: assignment.id })) reason = "reservation_overlap";
+      const response: ReservationRepairResponse = { request_id: id, assignment_id: parsed.data.assignment_id,
+        dry_run: parsed.data.dry_run, repairable: !reason, ...(reason ? { reason_code: reason } : {}),
+        scheduled_start_at: request.scheduledStartAt?.toISOString(), reservation_start_at: start?.toISOString(), reservation_end_at: end?.toISOString() };
+      if (parsed.data.dry_run) return response;
+      if (reason || !assignment || !start || !end || !request.scheduledStartAt) throw new CancellationConflict(reason ?? "not_legacy_future_booking");
+      await repositories.assignments.setReservation({ id: assignment.id, scheduledStartAt: request.scheduledStartAt, start, end, updatedAt: now });
+      await this.recordMutation(repositories, { actorId: actor.id, action: "admin.service_request.reservation_repaired", requestId: id,
+        reason: parsed.data.reason, metadata: { request_id: id, assignment_id: assignment.id, estimated_duration_minutes: parsed.data.estimated_duration_minutes }, now });
+      await completeCommand(repositories, actor.id, scope, idempotencyKey, response, id, now, 200);
+      return response;
+    });
+  }
+
   addNote(
     identity: VerifiedSupabaseIdentity,
     requestId: string,
@@ -426,7 +523,16 @@ export class AdminServiceRequestService {
           `Service request cannot run ${command} from ${request.status}.`
         );
       }
-      if (await repositories.assignments.findActiveByRequestForUpdate(id)) {
+      const assignment = await repositories.assignments.findActiveByRequestForUpdate(id);
+      if (command === "cancel") {
+        if (await repositories.payments.hasUnresolvedForRequest({ requestId: id })) throw new CancellationConflict("payment_unresolved");
+        if (!assignment && await repositories.quotes.hasOpenByRequest(id)) throw new CancellationConflict("quote_commitment");
+        if (!assignment && ["assigned", "mechanic_en_route", "in_service"].includes(request.status)) throw new CancellationConflict("assignment_missing");
+        if (assignment) await cancelUncommittedAssignment(repositories, assignment, {
+          actorId: actor.id, actorRole: "admin", reason: parsed.data.reason, now, createId: () => this.createId(), allowClosedQuotes: true
+        });
+        assertRequestStatusTransition(request.status, "canceled");
+      } else if (assignment) {
         throw conflict(
           "An active assignment must be resolved through the assignment workflow."
         );

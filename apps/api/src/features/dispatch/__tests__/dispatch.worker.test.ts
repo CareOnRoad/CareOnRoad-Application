@@ -95,6 +95,8 @@ function createUnitOfWork(options: { fourRounds?: boolean } = {}) {
       ]
     : [dispatchRound(1, "active")];
   return new InMemoryUnitOfWork({
+    users: [mechanicA, mechanicB].map((id) => ({ id, status: "active", createdAt: now, updatedAt: now })),
+    userRoles: [mechanicA, mechanicB].map((userId) => ({ userId, role: "mechanic" })),
     serviceRequests: [serviceRequest(requestId)],
     dispatchRounds: rounds,
     dispatchCandidates: [candidate("offer-a", rounds.at(-1)!.id, requestId, mechanicA)],

@@ -127,26 +127,27 @@ Suggested indexes:
 
 Existing table: `assignments`
 
-New enum:
+Source text column with a CHECK constraint (migration 039):
 
 ```text
-assignment_source:
-offer_acceptance | admin_manual | admin_reassignment
+source:
+offer | admin_manual | admin_reassignment
 ```
 
 New/changed fields:
 
 | Field | Type | Rules |
 |---|---|---|
-| `assignment_source` | enum | Not null; existing rows backfilled/defaulted to `offer_acceptance`. |
-| `accepted_candidate_id` | UUID, nullable | Required only for `offer_acceptance`; remains unique when present. |
+| `source` | text | Not null; existing rows backfilled/defaulted to `offer`. |
+| `accepted_candidate_id` | UUID, nullable | Required only for `offer`; remains unique when present. |
 | `assigned_by_admin_id` | UUID, nullable FK app_users | Required for admin sources; null for offer acceptance. |
 | `supersedes_assignment_id` | UUID, nullable FK assignments | Required for `admin_reassignment`; unique to prevent multiple replacements of one assignment. |
+| `dispatch_distance_m` | integer, nullable | Server-calculated snapshot, nonnegative and required for admin sources; authoritative candidate distance for offers. |
 
 Source-dependent constraints:
 
 ```text
-offer_acceptance:
+offer:
   accepted_candidate_id is present
   assigned_by_admin_id is null
   supersedes_assignment_id is null
@@ -165,7 +166,8 @@ admin_reassignment:
 Unchanged invariants:
 
 - One active assignment per request.
-- One active assignment per mechanic.
+- One current active assignment per mechanic; future reservations use the
+  existing buffered exclusion constraint and activation policy.
 - Assignment history is append-only.
 - Offer-accepted assignments still validate candidate request/mechanic identity
   and accepted status.
@@ -184,14 +186,14 @@ Admin reassignment:
 
 - Allowed only before diagnosis begins: prior assignment status
   `accepted | en_route`.
-- Cancels prior assignment and appends history.
+- Changes prior assignment to `recovery_canceled` and appends history.
 - Creates one replacement `accepted` assignment.
 - Resets the request to `assigned` through an explicit admin transition.
 - Keeps all prior assignment records.
 
 Suggested indexes:
 
-- `(assignment_source, created_at desc, id)`
+- `(source, created_at desc, id)`
 - `(assigned_by_admin_id, created_at desc, id)` where non-null.
 - Unique `supersedes_assignment_id` where non-null.
 
@@ -206,7 +208,7 @@ quote_status:
 pending | approved | rejected | superseded | expired | voided
 ```
 
-Migration rule: `voided` is added and committed in migration 018. Migration 019
+Migration rule: `voided` is added and committed in migration 040. Migration 041
 then installs supervision records and transition logic that references it.
 
 New transition:
@@ -234,7 +236,7 @@ pending | sent | failed | canceled
 ```
 
 Migration rule: notification `canceled` and outbox `abandoned` are added and
-committed in migration 020. Migration 021 then adds fields, constraints, indexes,
+committed in migration 042. Migration 043 then adds fields, constraints, indexes,
 and command behavior that reference them.
 
 New fields:
@@ -242,7 +244,9 @@ New fields:
 | Field | Type | Rules |
 |---|---|---|
 | `canceled_at` | timestamp, nullable | Present only for canceled notification. |
-| `canceled_by` | UUID, nullable FK app_users | Active admin that canceled it. |
+| `recovery_admin_id` | UUID, nullable FK app_users | Admin responsible for the latest retry/cancel. |
+| `recovery_reason` / `recovery_at` | text / timestamp | Private reason and command timestamp. |
+| `admin_retry_count` | integer | Capped at 3. |
 
 State transitions:
 
@@ -258,7 +262,11 @@ canceled -> terminal
 
 Rules:
 
-- Cancellation and worker delivery race under a row lock.
+- Commands lock source event → notification → receipt rows and reject active
+  leases. Cancellation requires no sent receipt; inbox read state is independent.
+- Failed original receipts may retry only with a matching active credential; no
+  sent/invalid/canceled receipt or newly registered device is replayed. Commands
+  are bounded to 100 receipts. Receipt `canceled` is terminal.
 - Admin cannot mark sent.
 - Retry clears last error, leaves sent timestamp null, and coordinates related
   outbox state.
@@ -279,7 +287,9 @@ New fields:
 | Field | Type | Rules |
 |---|---|---|
 | `abandoned_at` | timestamp, nullable | Present only for abandoned event. |
-| `abandoned_by` | UUID, nullable FK app_users | Active admin that abandoned it. |
+| `recovery_admin_id` | UUID, nullable FK app_users | Admin responsible for the latest retry/abandon. |
+| `recovery_reason` / `recovery_at` | text / timestamp | Private reason and command timestamp. |
+| `admin_retry_count` | integer | Capped at 3. |
 
 State transitions:
 
@@ -301,7 +311,10 @@ Rules:
 - Retry clears lease, processed, and failure metadata as appropriate, schedules
   one new attempt, and does not recreate the original domain record.
 - Abandon does not delete the event.
-- Claim queries continue to select only eligible pending events.
+- Claim queries select eligible pending or expired-processing leases, excluding
+  abandoned events. Notification source recovery can reopen its processed source
+  only through the canonical failed-notification retry guard. Critical recovery
+  handoffs cannot be abandoned; payload/dedupe/domain identity stays immutable.
 
 ## New Entities
 
@@ -349,38 +362,35 @@ without editing diagnosis or quote content.
 Action types:
 
 ```text
-diagnosis_revision_requested
-quote_revision_requested
-quote_voided
-quote_expired
-quote_dispute_resolved
+request_revision
+void_pending_quote
+expire_quote
+uphold_latest_quote
 ```
 
 | Field | Type | Rules |
 |---|---|---|
 | `id` | UUID | Primary key. |
-| `action_type` | enum | Required. |
+| `action` | text with CHECK | Required; codes above. |
 | `admin_id` | UUID FK app_users | Required. |
 | `request_id` | UUID FK service_requests | Required. |
-| `assignment_id` | UUID FK assignments, nullable | Required when action is assignment-scoped. |
+| `assignment_id` | UUID FK assignments | Required and must match the target quote/diagnosis. |
 | `diagnosis_id` | UUID FK mechanic_diagnoses, nullable | Required for diagnosis revision. |
 | `quote_id` | UUID FK quotes, nullable | Required for quote actions. |
-| `resolution_code` | text, nullable | Allowlisted code for dispute resolution. |
 | `reason` | text | 10-500 characters. |
 | `created_at` | timestamp | Required. |
 
 Constraints:
 
-- Target combinations match action type.
-- Action rows are append-only.
+- Exactly one quote/diagnosis target; diagnosis allows only request_revision.
+- Active admin and request/assignment/target identity checked at insert.
+- Action rows reject update/delete/truncate; RLS and direct client write revocation apply.
 - Full diagnosis/quote narrative is not stored.
 
 Indexes:
 
 - `(request_id, created_at desc, id)`
-- `(assignment_id, created_at desc, id)` where non-null.
-- `(quote_id, created_at desc, id)` where non-null.
-- `(diagnosis_id, created_at desc, id)` where non-null.
+- `(quote_id, created_at desc)`; diagnosis filtering is bounded by request page index.
 
 ### Operational Configuration (Optional Patch J)
 
@@ -399,6 +409,10 @@ Current configuration fields:
 | `updated_by` | UUID FK app_users | Required. |
 | `updated_at` | timestamp | Required. |
 
+Configuration current rows additionally store a private sanitized `reason`;
+GET responses omit it. Active-admin provenance, sequential version increments,
+cross-field budget and exact-key/value checks are enforced by migration 045.
+
 Version fields:
 
 | Field | Type | Rules |
@@ -408,7 +422,7 @@ Version fields:
 | `version` | integer | Unique with key. |
 | `previous_value_json` | JSON, nullable | Sanitized. |
 | `new_value_json` | JSON | Sanitized. |
-| `admin_id` | UUID FK app_users | Required. |
+| `updated_by` | UUID FK app_users | Required; active administrator at mutation time. |
 | `reason` | text | 10-500 characters. |
 | `created_at` | timestamp | Required; append-only. |
 
@@ -418,10 +432,10 @@ Initial allowlist:
 - Dispatch offer expiry.
 - Dispatch maximum rounds.
 - Dispatch total wait.
-- Admin dashboard stuck thresholds.
-- Non-secret feature flags.
-- Provider usage budget limits and metadata.
-- Maintenance mode boolean and safe message code.
+
+Only those four dispatch values are mutable. Dashboard thresholds are constants;
+feature flags and maintenance mode have no mutation endpoint. Provider budget
+metadata is read-only and reports null usage/limit/remaining when unavailable.
 
 Explicitly prohibited:
 
@@ -453,35 +467,32 @@ No new table is created for these models.
 
 ### Dispatch Failure Explanation
 
-Reason categories and counts:
-
-- `no_matching_skill`
-- `stale_mechanic_location`
-- `mechanic_unavailable`
-- `outside_service_radius`
-- `active_job_conflict`
-- `max_round_limit_reached`
-- `request_not_dispatchable`
-- `no_valid_offer_remaining`
+Reason categories use current shared dispatch codes such as `user_inactive`,
+`mechanic_role_missing`, `profile_inactive`, `skill_mismatch`, `unavailable`,
+`location_missing`, `location_stale`, `outside_radius`, `current_work`,
+`reservation_conflict`, `already_contacted`, `search_exhausted` and
+`request_state_not_dispatchable`. Explanation counts describe only the returned
+page, not a global mechanic count. See apps/api/PROFILE-LISTS-ADMIN-DISPATCH.md.
 
 The explanation does not return rejected mechanic coordinates or private history.
 
 ### Admin Audit View
 
-- Audit ID, actor ID/role, action, target type/ID, request ID, admin reason,
-  sanitized metadata, created time.
+- Audit ID, actor ID/role, action, target type/ID, request ID,
+  `has_admin_reason`, allowlisted sanitized metadata, created time. Private
+  reason content is omitted from queries and exports.
 
 ### Stuck Workflow Finding
 
 | Field | Meaning |
 |---|---|
-| `category` | One of six required stuck categories. |
-| `target_type` / `target_id` | Safe identifier. |
-| `age_seconds` | Optional age beyond threshold. |
+| `category` | One of nine implemented stuck categories. |
+| `target_id` | Safe identifier; stable finding `id` is target/category-derived. |
+| `age_seconds` | Age of the detected basis, never negative. |
 | `failure_count` | Optional repeated-failure count. |
-| `reason_code` | Deterministic machine-readable reason. |
-| `allowed_next_actions` | Safe command categories, not executable links. |
-| `detected_at` | Evaluation time. |
+| `active_lease` | Current lease metadata where applicable. |
+| `next_action_codes` | Safe investigation/read/note categories. |
+| `detected_basis_at` | Source timestamp; thresholds are returned separately. |
 
 Required categories:
 
@@ -491,6 +502,12 @@ Required categories:
 - Request/assignment state mismatch.
 - Outbox dead letter.
 - Repeated reminder failure.
+
+Implemented categories also include latest pending quote, stale pending/created/
+needs-review payment, and outbox worker missing progress. Finding IDs are stable
+UUIDs derived from target/category; DTO uses `target_id`, `detected_basis_at`,
+`age_seconds` and `next_action_codes`. Historical reminder failures are preserved,
+but disabled, postponed or successfully processed rules do not appear as stuck.
 
 ## Data Retention and Deletion
 
@@ -506,13 +523,17 @@ Required categories:
 
 1. `202606250015_admin_foundation.sql`
 2. `202606250016_admin_mechanic_management.sql`
-3. `202606250017_admin_dispatch_assignment_operations.sql`
-4. `202606250018_admin_quote_status.sql`
-5. `202606250019_admin_supervision_actions.sql`
-6. `202606250020_admin_delivery_statuses.sql`
-7. `202606250021_admin_delivery_operations.sql`
-8. `202606250022_admin_operation_configs.sql` only if optional Patch J proceeds
+3. Existing backend feature migrations 017–038 (already occupied; retain history)
+4. `202606250039_admin_assignment_provenance.sql`
+5. `202606250040_admin_quote_status.sql` — enum-only
+6. `202606250041_admin_supervision_actions.sql`
+7. `202606250042_admin_delivery_statuses.sql` — enum-only
+8. `202606250043_admin_delivery_operations.sql`
+9. `202606250044_admin_reminder_dashboard.sql` — reminder owner guard and derived dashboard indexes.
+10. `202606250045_admin_dispatch_configuration.sql` — explicitly authorized Patch J current/version rows and immutable per-round policy snapshot.
+11. `202606250046_dispatch_radius_policy_bounds.sql` — dispatch radius CHECK accepts 1,000–100,000 meters. Shared dispatch conversion rounds configured km to the nearest meter for ranking, persistence and read explanations.
 
 Each migration is independently static-tested and included in the all-migrations
-integration suite. None creates a payment-named type, table, route dependency, or
-reserved slot.
+integration suite. Admin additions 039–046 do not create payment state or provider
+objects. Services read existing feature 005 commitments; they cannot advance money.
+H2/I/J are implemented by Batches 13/15. Reminder failure_count preserves historical failures; findings exclude postponed or successfully processed rules. Config current rows carry a sanitized reason; history uses updated_by/created_at and is bounded to latest 20 metadata entries in the read API. Defaults fill absent keys. Dispatch rounds persist the policy used by their episode; legacy rounds without snapshots retain original defaults.

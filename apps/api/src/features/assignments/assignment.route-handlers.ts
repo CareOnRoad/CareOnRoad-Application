@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { listQuery } from "@/lib/list-pagination";
 
 import { databaseJsonError, jsonError, type ApiErrorCode } from "@/lib/api-error";
 import { authenticateSupabaseRequest } from "@/server/auth/request-actor";
@@ -20,7 +21,7 @@ export type AssignmentRouteDependencies = {
     acceptOffer(identity: VerifiedSupabaseIdentity, offerId: string, input?: unknown): Promise<AssignmentResponse>;
   };
   assignmentService: {
-    listAssignments(identity: VerifiedSupabaseIdentity): Promise<{ items: AssignmentResponse[] }>;
+    listAssignments(identity: VerifiedSupabaseIdentity, input?: unknown): Promise<{ items: AssignmentResponse[] }>;
     transitionAssignment(
       identity: VerifiedSupabaseIdentity,
       assignmentId: string,
@@ -57,7 +58,7 @@ export function createAssignmentRouteHandlers(dependencies: AssignmentRouteDepen
     async listAssignments(request: Request) {
       try {
         const identity = await dependencies.authenticate(request);
-        return NextResponse.json(await dependencies.assignmentService.listAssignments(identity));
+        return NextResponse.json(await dependencies.assignmentService.listAssignments(identity, listQuery(request)));
       } catch (error) {
         return routeError(error);
       }

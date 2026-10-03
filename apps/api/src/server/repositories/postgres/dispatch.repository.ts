@@ -12,8 +12,11 @@ import type {
   DispatchRound,
   DispatchRoundStatus
 } from "../contracts/dispatch.repository";
+import type { DispatchEligibility, DispatchEligibilityInput } from "../contracts/dispatch.repository";
+import type { PageCursor } from "@/lib/list-pagination";
 
 type DispatchRoundRow = {
+  policy_snapshot: DispatchRound["policySnapshot"] | null;
   id: string;
   request_id: string;
   round_number: number;
@@ -58,6 +61,77 @@ type CandidateMechanicRow = {
 
 export class PostgresDispatchRepository implements DispatchRepository {
   constructor(private readonly sql: TransactionSql) {}
+
+  async listRoundPage(requestId: string, limit: number, cursor?: PageCursor): Promise<DispatchRound[]> {
+    const rows = await this.sql<DispatchRoundRow[]>`select * from dispatch_rounds where request_id = ${requestId}
+      and (${cursor?.timestamp ?? null}::timestamptz is null or
+        (date_trunc('milliseconds', started_at), id) < (${cursor?.timestamp ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', started_at) desc, id desc limit ${limit + 1}`;
+    return rows.map(mapRound);
+  }
+
+  async listCandidatesByRound(roundId: string, limit: number): Promise<DispatchCandidate[]> {
+    const rows = await this.sql<DispatchCandidateRow[]>`select * from dispatch_candidates where round_id = ${roundId} order by rank, id limit ${limit + 1}`;
+    return rows.map(mapCandidate);
+  }
+
+  async listEligibility(input: DispatchEligibilityInput): Promise<DispatchEligibility[]> {
+    const start = new Date(input.scheduledStartAt ? input.scheduledStartAt.getTime() - 30 * 60_000 : input.now.getTime());
+    const end = new Date((input.scheduledStartAt ?? input.now).getTime() + ((input.scheduledStartAt ? 15 : 120) + 30) * 60_000);
+    const rows = await this.sql<(CandidateMechanicRow & { created_at: Date; reason_codes: string[] })[]>`
+      with profiles as (
+        select p.user_id as mechanic_id, p.is_available, p.profile_status, p.service_radius_km::text,
+          ST_Y(p.latest_location::geometry) as latitude, ST_X(p.latest_location::geometry) as longitude,
+          p.location_updated_at, p.availability_updated_at, p.rating_avg::text, p.rating_count, p.created_at,
+          coalesce((select array_agg(s.service_type::text order by s.service_type) from mechanic_skills s where s.mechanic_id = p.user_id), array[]::text[]) as service_types,
+          round(ST_Distance(p.latest_location, ST_SetSRID(ST_MakePoint(${input.origin?.longitude ?? null}, ${input.origin?.latitude ?? null}), 4326)::geography))::integer as distance_m,
+          ST_Distance(p.latest_location, ST_SetSRID(ST_MakePoint(${input.origin?.longitude ?? null}, ${input.origin?.latitude ?? null}), 4326)::geography) as distance_exact_m,
+          coalesce(u.status = 'active', false) as user_active,
+          exists(select 1 from user_roles r where r.user_id = p.user_id and r.role = 'mechanic') as has_role,
+          exists(select 1 from assignments a where a.mechanic_id = p.user_id
+            and a.status in ('accepted','en_route','on_site','diagnosis','quoted','awaiting_payment','in_progress')
+            and (a.scheduled_start_at is null or a.activated_at is not null)) as current_work,
+          exists(select 1 from assignments a where a.mechanic_id = p.user_id
+            and a.status in ('accepted','en_route','on_site','diagnosis','quoted','awaiting_payment','in_progress')
+            and a.reservation_start_at < ${end} and a.reservation_end_at > ${start}) as reservation_conflict,
+          exists(select 1 from dispatch_candidates c join dispatch_rounds r on r.id = c.round_id
+            where c.mechanic_id = p.user_id and r.request_id = ${input.requestId ?? null}::uuid
+              and r.round_number >= ${input.episodeStartRound ?? 1}
+              and (${input.serviceType !== "emergency_rescue"} or c.status <> 'cancelled')) as already_contacted
+        from mechanic_profiles p left join app_users u on u.id = p.user_id
+        where (${input.targetMechanicId ?? null}::uuid is null or p.user_id = ${input.targetMechanicId ?? null}::uuid)
+          and (${!input.eligibleOnly} or ST_DWithin(p.latest_location,
+            ST_SetSRID(ST_MakePoint(${input.origin?.longitude ?? null}, ${input.origin?.latitude ?? null}), 4326)::geography, ${input.radiusMeters}))
+      ), eligibility as (
+        select *, array_remove(array[
+          case when not user_active then 'user_inactive' end,
+          case when not has_role then 'mechanic_role_missing' end,
+          case when profile_status <> 'active' then 'profile_inactive' end,
+          case when not is_available then 'unavailable' end,
+          case when not (${input.serviceType}::text = any(service_types)) then 'skill_mismatch' end,
+          case when latitude is null then 'location_missing' end,
+          case when location_updated_at is null or location_updated_at < ${new Date(input.now.getTime() - input.maxLocationAgeSeconds * 1000)} then 'location_stale' end,
+          case when distance_exact_m > ${input.radiusMeters} or distance_exact_m > service_radius_km::numeric * 1000 then 'outside_radius' end,
+          case when distance_m is null then 'request_or_mechanic_location_missing' end,
+          case when ${!input.scheduledStartAt} and current_work then 'current_work' end,
+          case when reservation_conflict then 'reservation_conflict' end,
+          case when ${!input.targetMechanicId} and already_contacted then 'already_contacted' end
+        ], null)::text[] as reason_codes from profiles
+      )
+      select * from eligibility
+      where (${!input.eligibleOnly} or cardinality(reason_codes) = 0)
+        and (${input.cursor?.timestamp ?? null}::timestamptz is null or
+          (date_trunc('milliseconds', created_at), mechanic_id) < (${input.cursor?.timestamp ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+      order by ${input.ranked ? this.sql`distance_m asc, rating_avg::numeric desc, availability_updated_at asc, mechanic_id asc` : this.sql`date_trunc('milliseconds', created_at) desc, mechanic_id desc`}
+      limit ${input.limit + 1}
+    `;
+    return rows.map((row) => ({ mechanicId: row.mechanic_id, serviceTypes: row.service_types,
+      isAvailable: row.is_available, profileStatus: row.profile_status, serviceRadiusKm: Number(row.service_radius_km),
+      ...(row.latitude !== null ? { latestLocation: { latitude: row.latitude, longitude: row.longitude } } : {}),
+      locationUpdatedAt: row.location_updated_at ?? undefined, availabilityUpdatedAt: row.availability_updated_at,
+      ratingAvg: Number(row.rating_avg), ratingCount: row.rating_count, distanceMeters: row.distance_m ?? 0,
+      createdAt: row.created_at, reasonCodes: row.reason_codes }));
+  }
 
   async listRoundsByRequest(requestId: string): Promise<DispatchRound[]> {
     const rows = await this.sql<DispatchRoundRow[]>`
@@ -149,12 +223,12 @@ export class PostgresDispatchRepository implements DispatchRepository {
   }): Promise<{ round: DispatchRound; candidates: DispatchCandidate[] }> {
     const roundRows = await this.sql<DispatchRoundRow[]>`
       insert into dispatch_rounds (
-        id, request_id, round_number, radius_m, status, started_at, expires_at
+        id, request_id, round_number, radius_m, status, started_at, expires_at, policy_snapshot
       )
       values (
         ${input.round.id}, ${input.round.requestId}, ${input.round.roundNumber},
         ${input.round.radiusMeters}, ${input.round.status ?? "active"},
-        ${input.round.startedAt}, ${input.round.expiresAt}
+        ${input.round.startedAt}, ${input.round.expiresAt}, ${input.round.policySnapshot ? this.sql.json(input.round.policySnapshot) : null}
       )
       returning *
     `;
@@ -366,6 +440,8 @@ export class PostgresDispatchRepository implements DispatchRepository {
         profile.rating_count,
         round(ST_Distance(profile.latest_location, origin.point))::int as distance_m
       from mechanic_profiles profile
+      join app_users mechanic_user on mechanic_user.id = profile.user_id and mechanic_user.status = 'active'
+      join user_roles mechanic_role on mechanic_role.user_id = profile.user_id and mechanic_role.role = 'mechanic'
       join mechanic_skills skills on skills.mechanic_id = profile.user_id
       cross join origin
       where profile.profile_status = 'active'
@@ -398,6 +474,7 @@ export class PostgresDispatchRepository implements DispatchRepository {
 
 function mapRound(row: DispatchRoundRow): DispatchRound {
   return {
+    policySnapshot: row.policy_snapshot ?? undefined,
     id: row.id,
     requestId: row.request_id,
     roundNumber: row.round_number,

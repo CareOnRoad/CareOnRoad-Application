@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { CancellationConflict } from "@/features/assignments/assignment-cancellation";
 
 import { authenticateSupabaseRequest } from "@/server/auth/request-actor";
 import { getPostgresClient } from "@/server/db/postgres-client";
@@ -77,6 +78,7 @@ export function toAdminPageResponse<T>(page: AdminPage<T>) {
 }
 
 export function adminRouteError(error: unknown): NextResponse {
+  if (error instanceof CancellationConflict) return jsonError(error.status, error.errorCode, error.message, { details: error.details });
   if (error instanceof DatabaseError) {
     return databaseJsonError(error);
   }
@@ -88,7 +90,7 @@ export function adminRouteError(error: unknown): NextResponse {
 
 export class AdminRouteError extends Error {
   constructor(
-    public readonly errorCode: Extract<ApiErrorCode, "INVALID_INPUT" | "CONFLICT">,
+    public readonly errorCode: Extract<ApiErrorCode, "INVALID_INPUT" | "CONFLICT" | "NOT_FOUND">,
     message: string,
     public readonly status: number
   ) {

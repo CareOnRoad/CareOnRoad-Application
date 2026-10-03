@@ -53,6 +53,23 @@ type PaymentEventRow = {
 export class PostgresPaymentRepository implements PaymentRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async hasUnresolvedForRequest(input: { requestId: string; assignmentId?: string; quoteId?: string }): Promise<boolean> {
+    const [row] = await this.sql<{ exists: boolean }[]>`
+      select exists(select 1 from payment_orders where request_id = ${input.requestId}
+        and (${input.assignmentId ?? null}::uuid is null or assignment_id = ${input.assignmentId ?? null})
+        and (${input.quoteId ?? null}::uuid is null or quote_id = ${input.quoteId ?? null}::uuid)
+        and status in ('created', 'pending', 'succeeded', 'needs_review')) as exists
+    `;
+    return Boolean(row?.exists);
+  }
+
+  async findByProviderOrderCode(provider: PaymentProvider, providerOrderCode: number): Promise<PaymentOrder | undefined> {
+    const [row] = await this.sql<PaymentOrderRow[]>`
+      select * from payment_orders where provider = ${provider} and provider_order_code = ${providerOrderCode} limit 1
+    `;
+    return row ? mapOrder(row) : undefined;
+  }
+
   async sumSucceededForAssignment(assignmentId: string): Promise<number> {
     const rows = await this.sql<{ amount: string }[]>`
       select coalesce(sum(amount), 0)::text as amount from payment_orders
@@ -239,9 +256,13 @@ export class PostgresPaymentRepository implements PaymentRepository {
         ${input.eventType}, ${input.amount ?? null}, ${input.currency ?? null},
         ${input.status ?? null}, ${input.signatureValid}, ${input.receivedAt}
       )
+      on conflict (provider, event_dedupe_key) do nothing
       returning *
     `;
-    return mapEvent(rows[0]!);
+    if (rows[0]) return mapEvent(rows[0]);
+    const existing = await this.findEventByDedupeKey(input.provider, input.eventDedupeKey);
+    if (!existing) throw new Error("Payment event deduplication failed.");
+    return existing;
   }
 }
 

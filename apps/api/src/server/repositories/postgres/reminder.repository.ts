@@ -45,6 +45,29 @@ type ReminderOccurrenceRow = {
 export class PostgresReminderRepository implements ReminderRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async listRulesAdmin(input: Parameters<ReminderRepository["listRulesAdmin"]>[0]) {
+    const rows = await this.sql<ReminderRuleRow[]>`select * from reminder_rules
+      where (${input.riderId ?? null}::uuid is null or rider_id = ${input.riderId ?? null}::uuid)
+        and (${input.enabled ?? null}::boolean is null or enabled = ${input.enabled ?? null}::boolean)
+        and (${input.date_from ?? null}::timestamptz is null or created_at >= ${input.date_from ?? null}::timestamptz)
+        and (${input.date_to ?? null}::timestamptz is null or created_at <= ${input.date_to ?? null}::timestamptz)
+        and (${input.cursor?.timestamp ?? null}::timestamptz is null or (date_trunc('milliseconds', created_at), id) < (${input.cursor?.timestamp ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc limit ${input.limit + 1}`;
+    return rows.map(mapRule);
+  }
+
+  async listOccurrencesAdmin(input: Parameters<ReminderRepository["listOccurrencesAdmin"]>[0]) {
+    const rows = await this.sql<ReminderOccurrenceRow[]>`select * from reminder_occurrences
+      where (${input.ruleId ?? null}::uuid is null or rule_id = ${input.ruleId ?? null}::uuid)
+        and (${input.riderId ?? null}::uuid is null or rider_id = ${input.riderId ?? null}::uuid)
+        and (${input.status ?? null}::text is null or status::text = ${input.status ?? null})
+        and (${input.date_from ?? null}::timestamptz is null or created_at >= ${input.date_from ?? null}::timestamptz)
+        and (${input.date_to ?? null}::timestamptz is null or created_at <= ${input.date_to ?? null}::timestamptz)
+        and (${input.cursor?.timestamp ?? null}::timestamptz is null or (date_trunc('milliseconds', created_at), id) < (${input.cursor?.timestamp ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc limit ${input.limit + 1}`;
+    return rows.map(mapOccurrence);
+  }
+
   async createRule(input: CreateReminderRule): Promise<ReminderRule> {
     const rows = await this.sql<ReminderRuleRow[]>`
       insert into reminder_rules (

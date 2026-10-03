@@ -90,10 +90,11 @@ export class DispatchWorker {
       const createId = this.options.createId ?? randomUUID;
       for (const [audience, userId] of [["rider", request.riderId], ["mechanic", assignment.mechanicId]] as const) {
         await persistNotification(repositories, {
-          userId, type: "maintenance.appointment.prepare", title: "Sắp đến lịch bảo dưỡng",
-          body: "Lịch bảo dưỡng đã vào thời gian chuẩn bị. Mở yêu cầu để xem tiến trình.",
+          userId, type: request.serviceType === "periodic_maintenance" ? "maintenance.appointment.prepare" : "appointment.prepare",
+          title: request.serviceType === "periodic_maintenance" ? "Sắp đến lịch bảo dưỡng" : "Sắp đến lịch phục vụ",
+          body: "Lịch hẹn đã vào thời gian chuẩn bị. Mở yêu cầu để xem tiến trình.",
           data: { request_id: request.id, assignment_id: assignment.id, scheduled_start_at: assignment.scheduledStartAt!.toISOString() },
-          dedupeKey: `maintenance.prepare:${assignment.id}:${audience}`, requestId: request.id
+          dedupeKey: `${request.serviceType === "periodic_maintenance" ? "maintenance" : "appointment"}.prepare:${assignment.id}:${audience}`, requestId: request.id
         }, now, createId);
       }
     }); } catch { failed++; }

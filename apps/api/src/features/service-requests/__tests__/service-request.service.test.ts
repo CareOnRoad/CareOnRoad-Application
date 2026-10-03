@@ -15,25 +15,53 @@ const now = new Date("2026-06-25T03:00:00Z");
 const future = "2026-06-26T03:00:00.000Z";
 
 describe("ServiceRequestService", () => {
+  it.each([
+    { service_type: "mobile_repair" },
+    { service_type: "at_home_service", scheduled_start_at: future },
+    { service_type: "other", fulfillment_mode: "immediate_location" },
+    { service_type: "other", fulfillment_mode: "scheduled_visit", scheduled_start_at: future }
+  ])("rejects address-only $service_type/$fulfillment_mode before any mutation", async (scenario) => {
+    const uow = createUnitOfWork(); const service = new ServiceRequestService(uow, { now: () => now });
+    const before = uow.snapshot();
+    await expect(service.createServiceRequest(identity(riderId), { ...scenario, motorcycle_id: motorcycleId,
+      address_text: "Địa chỉ", problem_description: "Cần sửa xe" }, "location-required"))
+      .rejects.toMatchObject({ status: 400, message: expect.stringContaining("location") });
+    expect(uow.snapshot()).toEqual(before);
+  });
+
+  it("allows owner location PATCH before matching including legacy escalation, without scheduling a maintenance worker", async () => {
+    const uow = createUnitOfWork(); const service = new ServiceRequestService(uow, { now: () => now });
+    const created = await service.createServiceRequest(identity(riderId), { motorcycle_id: motorcycleId, service_type: "mobile_repair",
+      location: { latitude: 10.77, longitude: 106.69 }, problem_description: "Cần sửa xe" }, "patch-create");
+    const state = uow.snapshot(); state.serviceRequests[0]!.status = "manual_escalation"; state.serviceRequests[0]!.serviceLocation = undefined;
+    const legacy = new InMemoryUnitOfWork(state); const patch = new ServiceRequestService(legacy, { now: () => now });
+    const updated = await patch.updateAppointment(identity(riderId), created.id, { location: { latitude: 10.78, longitude: 106.7 }, address_text: "Địa chỉ mới" }, "patch-location");
+    expect(updated).toMatchObject({ status: "manual_escalation", location: { latitude: 10.78, longitude: 106.7 } });
+    expect(legacy.snapshot().outboxEvents.some((e) => e.topic === "maintenance.dispatch.requested")).toBe(false);
+    state.assignments.push({ id: requestId, requestId: created.id, mechanicId, acceptedCandidateId: requestId,
+      status: "recovery_canceled", acceptedAt: now, canceledAt: now, createdAt: now, updatedAt: now });
+    await expect(new ServiceRequestService(new InMemoryUnitOfWork(state), { now: () => now }).updateAppointment(identity(riderId),
+      created.id, { location: { latitude: 10.78, longitude: 106.7 } }, "blocked-history")).rejects.toMatchObject({ status: 409 });
+  });
   it("enforces the exact Patch 3 service-type matrix and keeps other non-emergency", async () => {
     const scenarios = [
       {
         service_type: "emergency_rescue",
         location: { latitude: 10.762622, longitude: 106.660172 }
       },
-      { service_type: "mobile_repair", address_text: "1 Nguyen Trai" },
-      { service_type: "at_home_service", address_text: "1 Nguyen Trai", scheduled_start_at: future },
+      { service_type: "mobile_repair", location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai" },
+      { service_type: "at_home_service", location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai", scheduled_start_at: future },
       { service_type: "periodic_maintenance",
           location: { latitude: 10.77, longitude: 106.69 }, scheduled_start_at: future },
       {
         service_type: "other",
         fulfillment_mode: "immediate_location",
-        address_text: "1 Nguyen Trai"
+        location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
       },
       {
         service_type: "other",
         fulfillment_mode: "scheduled_visit",
-        address_text: "1 Nguyen Trai",
+        location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai",
         scheduled_start_at: future
       }
     ] as const;
@@ -79,7 +107,7 @@ describe("ServiceRequestService", () => {
           service_type: "mobile_repair",
           fulfillment_mode: "immediate_location",
           problem_description: "Xe can sua",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "fixed-mode"
       )
@@ -91,7 +119,7 @@ describe("ServiceRequestService", () => {
           motorcycle_id: motorcycleId,
           service_type: "other",
           problem_description: "Khac",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "other-no-mode"
       )
@@ -131,7 +159,7 @@ describe("ServiceRequestService", () => {
         motorcycle_id: motorcycleId,
         service_type: "mobile_repair",
         problem_description: "Private note: bi tat may",
-        address_text: "1 Nguyen Trai",
+        location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai",
         media_metadata: [
           {
             media_type: "image",
@@ -155,7 +183,7 @@ describe("ServiceRequestService", () => {
           motorcycle_id: otherMotorcycleId,
           service_type: "mobile_repair",
           problem_description: "Xe cua nguoi khac",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "other-motorcycle"
       )
@@ -167,7 +195,7 @@ describe("ServiceRequestService", () => {
           motorcycle_id: motorcycleId,
           service_type: "mobile_repair",
           problem_description: "Mechanic khong duoc tao",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "mechanic-create"
       )
@@ -196,7 +224,7 @@ describe("ServiceRequestService", () => {
         motorcycle_id: motorcycleId,
         service_type: "mobile_repair",
         problem_description: "Can huy sau do",
-        address_text: "1 Nguyen Trai"
+        location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
       },
       "cancel-create"
     );
@@ -304,7 +332,7 @@ describe("ServiceRequestService", () => {
           motorcycle_id: motorcycleId,
           service_type: "mobile_repair",
           problem_description: "Rollback",
-          address_text: "1 Nguyen Trai"
+          location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
         },
         "rollback-key"
       )

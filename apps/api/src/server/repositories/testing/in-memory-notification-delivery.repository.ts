@@ -1,3 +1,4 @@
+import { filterPage } from "@/lib/list-pagination";
 import type {
   NotificationDeliveryReceipt,
   NotificationDeliveryRepository
@@ -7,6 +8,18 @@ export class InMemoryNotificationDeliveryRepository
   implements NotificationDeliveryRepository
 {
   constructor(private readonly receipts: NotificationDeliveryReceipt[]) {}
+
+  async listByNotificationIdForUpdate(id: string) { return (await this.listByNotificationId(id)).slice(0, 101); }
+  async listPage(id: string, limit: number, cursor?: import("@/lib/list-pagination").PageCursor) { return filterPage(await this.listByNotificationId(id), { limit, cursor }); }
+  async retryFailed(input: { ids: string[]; now: Date }) {
+    const rows = this.receipts.filter((row) => input.ids.includes(row.id) && ["retryable_failed", "permanent_failed"].includes(row.status) && (!row.leaseExpiresAt || row.leaseExpiresAt <= input.now));
+    for (const row of rows) Object.assign(row, { status: "pending", completedAt: undefined, nextAttemptAt: input.now, leaseToken: undefined, leaseExpiresAt: undefined, lastErrorCode: undefined, updatedAt: input.now });
+    return rows.length;
+  }
+  async cancelPending(input: { notificationId: string; now: Date }) {
+    const rows = this.receipts.filter((row) => row.notificationId === input.notificationId && ["pending", "retryable_failed"].includes(row.status) && (!row.leaseExpiresAt || row.leaseExpiresAt <= input.now));
+    for (const row of rows) Object.assign(row, { status: "canceled", completedAt: input.now, nextAttemptAt: undefined, leaseToken: undefined, leaseExpiresAt: undefined, updatedAt: input.now }); return rows.length;
+  }
 
   async claim(input: Parameters<NotificationDeliveryRepository["claim"]>[0]) {
     const receipt = this.receipts.find((item) => item.id === input.id);
@@ -58,7 +71,7 @@ export class InMemoryNotificationDeliveryRepository
     receipt.updatedAt = input.attemptedAt;
     receipt.providerMessageId = input.providerMessageId;
     receipt.lastErrorCode = input.errorCode;
-    receipt.completedAt = ["sent", "invalid", "permanent_failed"].includes(input.status)
+    receipt.completedAt = ["sent", "invalid", "permanent_failed", "canceled"].includes(input.status)
       ? input.attemptedAt
       : undefined;
     return receipt;

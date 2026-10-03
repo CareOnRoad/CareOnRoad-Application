@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { toPage, type Page } from "@/lib/list-pagination";
 
 import type { ApiErrorCode } from "@/lib/api-error";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
@@ -15,13 +16,16 @@ import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/c
 
 import { assertRequestStatusTransition } from "../service-requests/service-request-state";
 import { assertAssignmentStatusTransition } from "./assignment-state";
-import { assignmentStatusInputSchema } from "./assignment.schemas";
+import { assertNoAssignmentCommitment, CancellationConflict } from "./assignment-cancellation";
+import { assignmentStatusInputSchema, assignmentListSchema } from "./assignment.schemas";
 
 export type AssignmentResponse = {
   id: string;
   request_id: string;
   mechanic_id: string;
-  accepted_candidate_id: string;
+  accepted_candidate_id: string | null;
+  source: "offer" | "admin_manual" | "admin_reassignment";
+  supersedes_assignment_id?: string;
   scheduled_start_at?: string;
   reservation_start_at?: string;
   reservation_end_at?: string;
@@ -50,14 +54,16 @@ export class AssignmentService {
     private readonly options: AssignmentServiceOptions = {}
   ) {}
 
-  listAssignments(identity: VerifiedSupabaseIdentity): Promise<{ items: AssignmentResponse[] }> {
+  listAssignments(identity: VerifiedSupabaseIdentity, input: unknown = {}): Promise<{ items: AssignmentResponse[]; page: Page }> {
+    const parsed = assignmentListSchema.safeParse(input);
+    if (!parsed.success) throw new AssignmentError("INVALID_INPUT", "List query is invalid.", 400);
     return this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
       const assignments = await repositories.assignments.listVisibleToActor({
         id: actor.id,
         roles: actor.roles.filter(isAuditActorRole)
-      });
-      return { items: assignments.map(toAssignmentResponse) };
+      }, parsed.data);
+      return toPage(assignments, parsed.data.limit, toAssignmentResponse);
     });
   }
 
@@ -74,11 +80,11 @@ export class AssignmentService {
     }
 
     return this.unitOfWork.execute(async (repositories) => {
-      const actor = await loadActiveActor(repositories, identity.subject);
-      const actorRole = primaryAuditRole(actor.roles);
+      let actor = await loadActiveActor(repositories, identity.subject);
       const snapshot = await repositories.assignments.findById(assignmentId);
       if (!snapshot) throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
       const request = await repositories.serviceRequests.findByIdForUpdate(snapshot.requestId);
+      if (!request) throw new CancellationConflict("request_missing");
       // Keep the mechanic lock before assignment locks, matching offer acceptance.
       if (parsed.data.status === "en_route" && snapshot.scheduledStartAt) {
         await repositories.mechanics.findProfileByUserIdForUpdate(snapshot.mechanicId);
@@ -87,7 +93,9 @@ export class AssignmentService {
       if (!assignment) {
         throw new AssignmentError("NOT_FOUND", "Assignment not found.", 404);
       }
-      if (!actor.roles.includes("admin") && assignment.mechanicId !== actor.id) {
+      actor = await loadActiveActor(repositories, identity.subject);
+      const actorRole = primaryAuditRole(actor.roles);
+      if (!actor.roles.includes("admin") && (!actor.roles.includes("mechanic") || assignment.mechanicId !== actor.id)) {
         throw new AssignmentError("FORBIDDEN", "Assigned mechanic or admin access is required.", 403);
       }
       if (assignment.status === parsed.data.status) {
@@ -95,6 +103,11 @@ export class AssignmentService {
       }
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;
+      if (parsed.data.status === "canceled") {
+        await assertNoAssignmentCommitment(repositories, assignment);
+        if (!["accepted", "en_route", "on_site", "diagnosis"].includes(assignment.status)) throw new CancellationConflict("assignment_state");
+        await repositories.dispatch.cancelOpenDispatchForRequest({ requestId: assignment.requestId, now });
+      }
       const rescue = request?.serviceType === "emergency_rescue";
       const maintenance = request?.serviceType === "periodic_maintenance" && Boolean(assignment.maintenanceLaborQuoteId);
       if (request?.serviceType === "periodic_maintenance" && parsed.data.status === "en_route") {
@@ -181,11 +194,17 @@ export class AssignmentService {
         throw new AssignmentError("CONFLICT", "Scheduled work must begin with travel in its preparation window.", 409);
       }
       if (parsed.data.status === "en_route" && assignment.scheduledStartAt && !assignment.activatedAt) {
+        if (!request.serviceLocation) throw new AssignmentError("CONFLICT", "location is missing; administrative review is required.", 409);
+        if (now > assignment.scheduledStartAt) {
+          throw new AssignmentError("CONFLICT", "The appointment start has passed; administrative review is required.", 409);
+        }
         if (!assignment.reservationStartAt || now < assignment.reservationStartAt) {
           throw new AssignmentError("CONFLICT", "The appointment preparation window has not started.", 409);
         }
         const mechanic = await repositories.mechanics.findProfileByUserIdForUpdate(assignment.mechanicId);
         if (!mechanic || mechanic.profileStatus !== "active") throw new AssignmentError("CONFLICT", "Mechanic is not active.", 409);
+        const currentMechanic = await loadActiveActor(repositories, assignment.mechanicId);
+        if (!currentMechanic.roles.includes("mechanic")) throw new AssignmentError("CONFLICT", "Mechanic role is no longer active.", 409);
         if (await repositories.assignments.findActiveByMechanicForUpdate(assignment.mechanicId)) {
           throw new AssignmentError("CONFLICT", "Finish the current job before starting this appointment.", 409);
         }
@@ -321,19 +340,21 @@ export async function maybeUpdateRequestForAssignmentStatus(
     return;
   }
   const request = await repositories.serviceRequests.findByIdForUpdate(input.assignment.requestId);
-  if (!request || request.status === requestStatus) {
+  if (!request) throw new CancellationConflict("request_missing");
+  if (request.status === requestStatus) {
     return;
   }
   try {
     assertRequestStatusTransition(request.status, requestStatus);
   } catch {
-    return;
+    throw new CancellationConflict("request_state");
   }
-  await repositories.serviceRequests.updateStatus({
+  const updated = await repositories.serviceRequests.updateStatus({
     id: request.id,
     status: requestStatus,
     updatedAt: input.now
   });
+  if (!updated) throw new CancellationConflict("request_missing");
   await repositories.serviceRequests.appendStatusHistory({
     id: input.createId(),
     requestId: request.id,
@@ -392,7 +413,9 @@ export function toAssignmentResponse(assignment: Assignment): AssignmentResponse
     id: assignment.id,
     request_id: assignment.requestId,
     mechanic_id: assignment.mechanicId,
-    accepted_candidate_id: assignment.acceptedCandidateId,
+    accepted_candidate_id: assignment.acceptedCandidateId ?? null,
+    source: assignment.source ?? "offer",
+    supersedes_assignment_id: assignment.supersedesAssignmentId,
     scheduled_start_at: assignment.scheduledStartAt?.toISOString(),
     reservation_start_at: assignment.reservationStartAt?.toISOString(),
     reservation_end_at: assignment.reservationEndAt?.toISOString(),

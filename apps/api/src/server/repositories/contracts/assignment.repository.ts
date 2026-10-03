@@ -1,5 +1,8 @@
 import type { AuditActorRole } from "./audit.repository";
 import type { RescuePaymentTiming } from "./quote.repository";
+import type { ListFilter, PageCursor } from "@/lib/list-pagination";
+
+export type AssignmentSource = "offer" | "admin_manual" | "admin_reassignment";
 
 export type AssignmentStatus =
   | "accepted"
@@ -27,7 +30,11 @@ export type Assignment = {
   id: string;
   requestId: string;
   mechanicId: string;
-  acceptedCandidateId: string;
+  acceptedCandidateId?: string;
+  source?: AssignmentSource;
+  assignedByAdminId?: string;
+  supersedesAssignmentId?: string;
+  dispatchDistanceMeters?: number;
   scheduledStartAt?: Date;
   reservationStartAt?: Date;
   reservationEndAt?: Date;
@@ -59,7 +66,11 @@ export type CreateAssignment = {
   id: string;
   requestId: string;
   mechanicId: string;
-  acceptedCandidateId: string;
+  acceptedCandidateId?: string;
+  source?: AssignmentSource;
+  assignedByAdminId?: string;
+  supersedesAssignmentId?: string;
+  dispatchDistanceMeters?: number;
   scheduledStartAt?: Date;
   reservationStartAt?: Date;
   reservationEndAt?: Date;
@@ -79,6 +90,10 @@ export type MechanicActiveWorkload = {
 };
 
 export interface AssignmentRepository {
+  listHistory(id: string, limit: number, cursor?: PageCursor): Promise<AssignmentStatusHistory[]>;
+  hasAnyByRequest(requestId: string): Promise<boolean>;
+  hasTravelHistory(id: string): Promise<boolean>;
+  setReservation(input: { id: string; scheduledStartAt: Date; start: Date; end: Date; updatedAt: Date }): Promise<void>;
   activate(input: { id: string; now: Date }): Promise<void>;
   findReservationConflict(input: { mechanicId: string; start: Date; end: Date; excludeId?: string }): Promise<Assignment | undefined>;
   listReservationConflictMechanicIds(input: { mechanicIds: readonly string[]; start: Date; end: Date }): Promise<string[]>;
@@ -88,16 +103,19 @@ export interface AssignmentRepository {
   create(input: CreateAssignment): Promise<Assignment>;
   findById(id: string): Promise<Assignment | undefined>;
   findByIdForUpdate(id: string): Promise<Assignment | undefined>;
+  findCancellationHistory(id: string): Promise<AssignmentStatusHistory | undefined>;
   findByAcceptedCandidate(candidateId: string): Promise<Assignment | undefined>;
   findActiveByRequestForUpdate(requestId: string): Promise<Assignment | undefined>;
   findActiveByMechanicForUpdate(mechanicId: string): Promise<Assignment | undefined>;
+  findUnfinishedByMechanicForUpdate(mechanicId: string): Promise<Assignment | undefined>;
   listActiveWorkloadsByMechanicIds(
     mechanicIds: readonly string[]
   ): Promise<MechanicActiveWorkload[]>;
   listVisibleToActor(actor: {
     id: string;
     roles: AuditActorRole[];
-  }): Promise<Assignment[]>;
+  }, input?: ListFilter): Promise<Assignment[]>;
+  hasVisibleByRequest(actor: { id: string; roles: AuditActorRole[] }, requestId: string): Promise<boolean>;
   updateStatus(input: {
     id: string;
     status: AssignmentStatus;

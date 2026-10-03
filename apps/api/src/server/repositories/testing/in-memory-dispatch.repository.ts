@@ -14,13 +14,64 @@ import type {
   DispatchRoundStatus
 } from "../contracts/dispatch.repository";
 import type { MechanicProfile } from "../contracts/mechanic.repository";
+import type { ApplicationUser, UserRoleRecord } from "../contracts/user.repository";
+import type { Assignment } from "../contracts/assignment.repository";
+import type { DispatchEligibility, DispatchEligibilityInput } from "../contracts/dispatch.repository";
+import type { PageCursor } from "@/lib/list-pagination";
+import { rankDispatchCandidates } from "@/features/dispatch/dispatch-ranking";
 
 export class InMemoryDispatchRepository implements DispatchRepository {
   constructor(
     private readonly rounds: DispatchRound[],
     private readonly candidates: DispatchCandidate[],
-    private readonly mechanicProfiles: MechanicProfile[]
+    private readonly mechanicProfiles: MechanicProfile[],
+    private readonly users: ApplicationUser[] = [],
+    private readonly userRoles: UserRoleRecord[] = [],
+    private readonly assignments: Assignment[] = []
   ) {}
+
+  async listRoundPage(requestId: string, limit: number, cursor?: PageCursor): Promise<DispatchRound[]> {
+    return (await this.listRoundsByRequest(requestId)).filter((row) => !cursor || row.startedAt < cursor.timestamp ||
+      (row.startedAt.getTime() === cursor.timestamp.getTime() && row.id < cursor.id))
+      .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime() || b.id.localeCompare(a.id)).slice(0, limit + 1);
+  }
+
+  async listCandidatesByRound(roundId: string, limit: number): Promise<DispatchCandidate[]> {
+    return this.candidates.filter((row) => row.roundId === roundId).sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id)).slice(0, limit + 1).map(cloneCandidate);
+  }
+
+  async listEligibility(input: DispatchEligibilityInput): Promise<DispatchEligibility[]> {
+    const start = input.scheduledStartAt ? input.scheduledStartAt.getTime() - 30 * 60_000 : input.now.getTime();
+    const end = (input.scheduledStartAt ?? input.now).getTime() + ((input.scheduledStartAt ? 15 : 120) + 30) * 60_000;
+    const rows: DispatchEligibility[] = this.mechanicProfiles.filter((p) => !input.targetMechanicId || p.userId === input.targetMechanicId).map((p) => {
+      const reasonCodes: string[] = [];
+      const add = (condition: boolean, code: string) => { if (condition) reasonCodes.push(code); };
+      const work = this.assignments.filter((a) => a.mechanicId === p.userId && !["completed", "canceled", "recovery_canceled"].includes(a.status));
+      const distance = input.origin && p.latestLocation ? distanceMeters(input.origin, p.latestLocation) : undefined;
+      add(!this.users.some((u) => u.id === p.userId && u.status === "active"), "user_inactive");
+      add(!this.userRoles.some((r) => r.userId === p.userId && r.role === "mechanic"), "mechanic_role_missing");
+      add(p.profileStatus !== "active", "profile_inactive"); add(!p.isAvailable, "unavailable");
+      add(!p.serviceTypes.includes(input.serviceType), "skill_mismatch"); add(!p.latestLocation, "location_missing");
+      add(!isDispatchLocationFresh(p.locationUpdatedAt, input.now, input.maxLocationAgeSeconds), "location_stale");
+      add(distance !== undefined && (distance > input.radiusMeters || distance > p.serviceRadiusKm * 1000), "outside_radius");
+      add(distance === undefined, "request_or_mechanic_location_missing");
+      add(!input.scheduledStartAt && work.some((a) => !a.scheduledStartAt || Boolean(a.activatedAt)), "current_work");
+      add(work.some((a) => Boolean(a.reservationStartAt && a.reservationEndAt && a.reservationStartAt.getTime() < end && a.reservationEndAt.getTime() > start)), "reservation_conflict");
+      add(!input.targetMechanicId && this.candidates.some((c) => c.requestId === input.requestId && c.mechanicId === p.userId &&
+        (input.serviceType !== "emergency_rescue" || c.status !== "cancelled") &&
+        this.rounds.some((r) => r.id === c.roundId && r.roundNumber >= (input.episodeStartRound ?? 1))), "already_contacted");
+      return { mechanicId: p.userId, serviceTypes: p.serviceTypes, isAvailable: p.isAvailable, profileStatus: p.profileStatus,
+        serviceRadiusKm: p.serviceRadiusKm, latestLocation: p.latestLocation, locationUpdatedAt: p.locationUpdatedAt,
+        availabilityUpdatedAt: p.availabilityUpdatedAt, ratingAvg: p.ratingAvg, ratingCount: p.ratingCount,
+        distanceMeters: distance ?? 0, createdAt: p.createdAt, reasonCodes };
+    }).filter((row) => !input.eligibleOnly || row.reasonCodes.length === 0)
+      .filter((row) => !input.cursor || row.createdAt < input.cursor.timestamp || (row.createdAt.getTime() === input.cursor.timestamp.getTime() && row.mechanicId < input.cursor.id));
+    if (input.ranked) {
+      const order = new Map(rankDispatchCandidates(rows, new Map(), rows.length).map((row, index) => [row.mechanicId, index]));
+      rows.sort((a, b) => order.get(a.mechanicId)! - order.get(b.mechanicId)!);
+    } else rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.mechanicId.localeCompare(a.mechanicId));
+    return rows.slice(0, input.limit + 1);
+  }
 
   async listRoundsByRequest(requestId: string): Promise<DispatchRound[]> {
     return this.rounds
@@ -257,6 +308,8 @@ export class InMemoryDispatchRepository implements DispatchRepository {
     maxLocationAgeSeconds: number;
   }): Promise<DispatchCandidateMechanic[]> {
     return this.mechanicProfiles
+      .filter((profile) => this.users.some((user) => user.id === profile.userId && user.status === "active") &&
+        this.userRoles.some((role) => role.userId === profile.userId && role.role === "mechanic"))
       .filter((profile) => profile.profileStatus === "active")
       .filter((profile) => profile.isAvailable)
       .filter((profile) => profile.serviceTypes.includes(input.serviceType))

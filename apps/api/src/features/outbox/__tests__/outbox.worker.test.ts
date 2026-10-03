@@ -9,6 +9,14 @@ const now = new Date("2026-06-30T03:00:00.000Z");
 const notificationId = "22222222-2222-4222-8222-222222222222";
 
 describe("OutboxWorker", () => {
+  it.each(["dispatch.candidate.expired", "admin.service_request.cancellation_repaired"])("acknowledges domain history %s without a provider or recursive event", async (topic) => {
+    const unit = createUnitOfWork({ outboxEvents: [outboxEvent({ topic, aggregateType: "service_request" })] });
+    expect(await new OutboxWorker(unit, { now: () => now }).processBatch()).toMatchObject({ processed: 1, retried: 0, deadLettered: 0 });
+    expect(unit.snapshot().outboxEvents).toHaveLength(1);
+    expect(unit.snapshot().outboxEvents[0]?.status).toBe("processed");
+    expect(unit.snapshot().notifications[0]?.status).toBe("pending");
+    expect(unit.snapshot().auditLogs).toHaveLength(0);
+  });
   it("does not overwrite a completed event after its lease has been reclaimed", async () => {
     const uow = createUnitOfWork();
     let time = now;

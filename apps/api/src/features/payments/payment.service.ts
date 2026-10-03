@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { MAX_PAYMENT_AMOUNT } from "./payment-amount";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { loadActiveActor } from "@/features/assignments/assignment.service";
@@ -194,7 +195,7 @@ export class PaymentService {
       }
       const alreadyPaid = quote.purpose === "rescue_final" || quote.purpose === "maintenance_work" ? await repositories.payments.sumSucceededForAssignment(assignment.id) : 0;
       const amountDue = quote.totalAmount - alreadyPaid;
-      if (amountDue <= 0 || amountDue > 999_999_999_999) throw new PaymentError("CONFLICT", "No supported outstanding amount is payable.", 409);
+      if (amountDue <= 0 || amountDue > MAX_PAYMENT_AMOUNT) throw new PaymentError("CONFLICT", "No supported outstanding amount is payable.", 409);
       const active = await repositories.payments.findActiveByQuoteForUpdate(quote.id);
       if (active?.status === "needs_review") throw new PaymentError("CONFLICT", "Resolve the payment under review before collecting again.", 409);
       if (active) {
@@ -513,14 +514,19 @@ export class PaymentService {
       if (existingEvent) {
         return { received: true, matched: Boolean(existingEvent.paymentOrderId), status: "duplicate" };
       }
-      const order = await repositories.payments.findByProviderOrderCodeForUpdate(
+      const snapshot = await repositories.payments.findByProviderOrderCode(
         "payos",
         event.orderCode
       );
-      if (!order) {
+      if (!snapshot) {
         await repositories.payments.createEvent(toPaymentEvent({ event, now, createId }));
         return { received: true, matched: false, status: "ignored" };
       }
+      const request = await repositories.serviceRequests.findByIdForUpdate(snapshot.requestId);
+      const assignment = await repositories.assignments.findByIdForUpdate(snapshot.assignmentId);
+      const quote = await repositories.quotes.findByIdForUpdate(snapshot.quoteId);
+      const order = await repositories.payments.findByIdForUpdate(snapshot.id);
+      if (!order) throw new PaymentError("NOT_FOUND", "Payment order not found.", 404);
       // Another delivery may have committed while this transaction waited for the order lock.
       if (await repositories.payments.findEventByDedupeKey("payos", event.eventDedupeKey)) {
         return { received: true, matched: true, status: "duplicate" };
@@ -550,9 +556,8 @@ export class PaymentService {
         }
         return { received: true, matched: true, status: "failed" };
       }
-      const request = await repositories.serviceRequests.findById(order.requestId);
-      const assignment = await repositories.assignments.findById(order.assignmentId);
-      const inactiveWorkflow = !request || !assignment || ["canceled", "completed"].includes(request.status) ||
+      const inactiveWorkflow = !request || !assignment || !quote || quote.status !== "approved" || quote.assignmentId !== assignment.id ||
+        ["canceled", "completed"].includes(request.status) ||
         ["canceled", "completed", "recovery_canceled"].includes(assignment.status);
       if (
         inactiveWorkflow ||

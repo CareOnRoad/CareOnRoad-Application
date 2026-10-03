@@ -14,7 +14,7 @@ const dbTestPatterns = [
 const mode = process.argv[2] ?? "unit";
 const passthrough = process.argv.slice(3);
 
-if (!["unit", "db", "full"].includes(mode)) {
+if (!["unit", "db", "full", "http"].includes(mode)) {
   console.error(`Unknown test mode: ${mode}`);
   process.exit(1);
 }
@@ -23,8 +23,8 @@ const exitCode =
   mode === "full"
     ? await runFull(passthrough)
     : await runVitest({
-        db: mode === "db",
-        passthrough
+        db: mode === "db" || mode === "http",
+        passthrough: mode === "http" ? ["src/server/testing/__tests__/http-acceptance.integration.test.ts",...passthrough] : passthrough
       });
 
 process.exit(exitCode);
@@ -50,6 +50,7 @@ function runVitest({ db, passthrough }) {
   ];
   const env = {
     ...process.env,
+    RUN_HTTP_ACCEPTANCE: mode === "http" ? "true" : "false",
     RUN_DB_TESTS: db ? "true" : "false"
   };
 

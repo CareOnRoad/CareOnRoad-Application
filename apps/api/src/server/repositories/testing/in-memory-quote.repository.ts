@@ -6,12 +6,26 @@ import type {
   QuoteStatus
 } from "../contracts/quote.repository";
 import type { QuotePurpose } from "../contracts/quote.repository";
+import { filterPage } from "@/lib/list-pagination";
 
 export class InMemoryQuoteRepository implements QuoteRepository {
+  async hasOpenByAssignment(assignmentId: string): Promise<boolean> {
+    return this.quotes.some((row) => row.assignmentId === assignmentId && ["pending", "approved"].includes(row.status));
+  }
+  async listPageByRequest(requestId: string, limit: number, cursor?: import("@/lib/list-pagination").PageCursor): Promise<Quote[]> {
+    return filterPage(this.quotes.filter((row) => row.requestId === requestId), { limit, cursor });
+  }
+  async hasAnyByAssignment(assignmentId: string): Promise<boolean> {
+    return this.quotes.some((quote) => quote.assignmentId === assignmentId);
+  }
   constructor(
     private readonly quotes: Quote[],
     private readonly quoteLines: QuoteLine[]
   ) {}
+
+  async hasOpenByRequest(requestId: string): Promise<boolean> {
+    return this.quotes.some((q) => q.requestId === requestId && ["pending", "approved"].includes(q.status));
+  }
 
   async create(input: CreateQuote): Promise<Quote> {
     if (
@@ -59,6 +73,11 @@ export class InMemoryQuoteRepository implements QuoteRepository {
 
   async findLatestByRequestForUpdate(requestId: string): Promise<Quote | undefined> {
     return this.findLatestByRequest(requestId);
+  }
+
+  async findLatestByAssignment(assignmentId: string): Promise<Quote | undefined> {
+    const quote = this.quotes.filter((item) => item.assignmentId === assignmentId).sort((a, b) => b.version - a.version)[0];
+    return quote ? this.withLines(quote) : undefined;
   }
 
   async listByRequest(requestId: string): Promise<Quote[]> {

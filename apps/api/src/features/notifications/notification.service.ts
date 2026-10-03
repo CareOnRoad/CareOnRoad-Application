@@ -60,6 +60,7 @@ export class NotificationService {
         status === "sent"
           ? await notifications.markSent(notificationId, now)
           : await notifications.markFailed(notificationId, errorCode ?? "DELIVERY_FAILED");
+      if (notification.status === "canceled") return notification;
       await audit.append({
         id: createId(),
         action: `notification.${status}`,

@@ -1,4 +1,9 @@
 import type { AdminInternalNote } from "./admin-internal-note.repository";
+import type { ListFilter } from "@/lib/list-pagination";
+import type { StuckCategory } from "@/features/admin/admin-operational-policy";
+export type OperationalWindow = { from: Date; to: Date; now: Date };
+export type OperationalSummary = Record<string, Record<string, number>>;
+export type StuckFinding = { id: string; targetId: string; requestId?: string; assignmentId?: string; category: StuckCategory; createdAt: Date; activeLease: boolean; failureCount?: number };
 import type { AssignmentStatus } from "./assignment.repository";
 import type {
   DispatchRoundStatus
@@ -150,6 +155,8 @@ export type AdminQueryPage<T, C> = {
 };
 
 export interface AdminQueryRepository {
+  operationalSummary(input: OperationalWindow): Promise<OperationalSummary>;
+  stuckWorkflows(input: OperationalWindow & ListFilter & { category?: StuckCategory }): Promise<StuckFinding[]>;
   listInternalNotes(input: AdminInternalNoteQuery): Promise<AdminInternalNote[]>;
   listServiceRequests(
     input: AdminServiceRequestQuery

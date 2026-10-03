@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
+import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 import type { Assignment, AssignmentStatus } from "@/server/repositories/contracts/assignment.repository";
-import { InMemoryAssignmentRepository } from "@/server/repositories/testing/in-memory-assignment.repository";
+import { InMemoryDispatchRepository } from "@/server/repositories/testing/in-memory-dispatch.repository";
 import { InMemoryUnitOfWork } from "@/server/repositories/testing/in-memory-unit-of-work";
 
 import {
@@ -18,6 +19,89 @@ const requestId = "33333333-3333-4333-8333-333333333333";
 const now = new Date("2026-06-25T05:00:00Z");
 
 describe("dispatch service", () => {
+  it.each(["rounds", "total_wait"])("commits %s escalation before 409 and never duplicates retry events", async (limit) => {
+    const state = createUnitOfWork().snapshot();
+    state.serviceRequests[0]!.status = "offered";
+    state.dispatchRounds = Array.from({ length: limit === "rounds" ? 4 : 1 }, (_, index) => ({
+      id: uuid(index + 100), requestId, roundNumber: index + 1, radiusMeters: 2000,
+      status: index === (limit === "rounds" ? 3 : 0) ? "active" as const : "expired" as const,
+      startedAt: new Date(now.getTime() - (limit === "total_wait" ? 360000 : (4 - index) * 60000)), expiresAt: now
+    }));
+    const unit = new InMemoryUnitOfWork(state);
+    const service = new DispatchService(unit, { now: () => now });
+    await expect(service.startDispatch(identity(riderId), requestId)).rejects.toMatchObject({ status: 409, errorCode: "CONFLICT" });
+    const committed = unit.snapshot();
+    expect(committed.serviceRequests[0]?.status).toBe("manual_escalation");
+    expect(committed.dispatchRounds.every((round) => round.status === "expired")).toBe(true);
+    expect(committed.requestStatusHistory.filter((row) => row.toStatus === "manual_escalation")).toHaveLength(1);
+    expect(committed.outboxEvents.filter((event) => event.topic === "dispatch.request.manual_escalated")).toHaveLength(1);
+    expect(committed.auditLogs.filter((row) => row.action === "dispatch.request.manual_escalated")).toHaveLength(1);
+    await expect(service.startDispatch(identity(riderId), requestId)).rejects.toMatchObject({ status: 409 });
+    expect(unit.snapshot()).toEqual(committed);
+  });
+
+  it("commits expired decline before 409 and makes subsequent decline read-only", async () => {
+    const unit = createUnitOfWork();
+    let current = now;
+    const service = new DispatchService(unit, { now: () => current });
+    const round = await service.startDispatch(identity(riderId), requestId);
+    const offer = round.candidates[0]!;
+    current = new Date(round.expires_at);
+    await expect(service.declineOffer(identity(offer.mechanic_id), offer.id)).rejects.toMatchObject({ status: 409 });
+    const committed = unit.snapshot();
+    expect(committed.dispatchCandidates.find((item) => item.id === offer.id)?.status).toBe("expired");
+    expect(committed.outboxEvents.filter((event) => event.topic === "dispatch.candidate.expired")).toHaveLength(1);
+    await expect(service.declineOffer(identity(offer.mechanic_id), offer.id)).rejects.toMatchObject({ status: 409 });
+    expect(unit.snapshot()).toEqual(committed);
+  });
+
+  it("expires a round once, rejects early expiry, and opens the next round when the worker has not run", async () => {
+    const unit = createUnitOfWork();
+    let current = now;
+    const service = new DispatchService(unit, { now: () => current });
+    const round = await service.startDispatch(identity(riderId), requestId);
+    const before = unit.snapshot();
+    await expect(service.expireRound(round.id)).rejects.toMatchObject({ status: 409 });
+    expect(unit.snapshot()).toEqual(before);
+    current = new Date(round.expires_at);
+    const next = await service.startDispatch(identity(riderId), requestId);
+    expect(next.round_number).toBe(2);
+    const committed = unit.snapshot();
+    await service.expireRound(round.id);
+    expect(unit.snapshot()).toEqual(committed);
+    expect(committed.dispatchRounds.filter((item) => item.status === "active")).toHaveLength(1);
+    expect(committed.outboxEvents.filter((event) => event.topic === "dispatch.round.expired")).toHaveLength(1);
+  });
+
+  it("keeps a valid worker lease intact during rider retry or direct expiry", async () => {
+    const state = createUnitOfWork().snapshot();
+    state.dispatchRounds = [{ id: uuid(100), requestId, roundNumber: 1, radiusMeters: 2000, status: "active",
+      startedAt: new Date(now.getTime() - 60000), expiresAt: now, leaseOwner: "worker-a", leaseExpiresAt: new Date(now.getTime() + 60000) }];
+    const unit = new InMemoryUnitOfWork(state);
+    const service = new DispatchService(unit, { now: () => now });
+    await expect(service.startDispatch(identity(riderId), requestId)).rejects.toMatchObject({ status: 409 });
+    await expect(service.expireRound(uuid(100))).rejects.toMatchObject({ status: 409 });
+    expect(unit.snapshot()).toEqual(state);
+  });
+
+  it.each(["dispatch.candidate.expired", "dispatch.request.manual_escalated"])("rolls back %s when its required outbox append fails", async (topic) => {
+    const state = createUnitOfWork().snapshot();
+    state.serviceRequests[0]!.status = "offered";
+    state.dispatchRounds = [{ id: uuid(100), requestId, roundNumber: 1, radiusMeters: 2000, status: "expired",
+      startedAt: new Date(now.getTime() - 360000), expiresAt: now }];
+    const mechanicId = state.mechanicProfiles[0]!.userId;
+    state.dispatchCandidates = [{ id: uuid(101), roundId: uuid(100), requestId, mechanicId, rank: 1, status: "offered", offeredAt: now, expiresAt: now, createdAt: now }];
+    const unit = new InMemoryUnitOfWork(state);
+    const wrapper: UnitOfWork = { execute: (work) => unit.execute((repos) => {
+      vi.spyOn(repos.outbox, "append").mockRejectedValue(new Error("outbox unavailable"));
+      return work(repos);
+    }) };
+    const service = new DispatchService(wrapper, { now: () => now });
+    const command = topic === "dispatch.candidate.expired" ? service.declineOffer(identity(mechanicId), uuid(101)) : service.startDispatch(identity(riderId), requestId);
+    await expect(command).rejects.toThrow("outbox unavailable");
+    expect(unit.snapshot()).toEqual(state);
+  });
+
   it("creates 60-second offers, writes audit/outbox atomically, and supports rejection/cancellation", async () => {
     const ids = sequentialIds([
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -28,7 +112,8 @@ describe("dispatch service", () => {
       "ffffffff-ffff-4fff-8fff-ffffffffffff",
       "99999999-9999-4999-8999-999999999999",
       "88888888-8888-4888-8888-888888888888",
-      "77777777-7777-4777-8777-777777777777"
+      "77777777-7777-4777-8777-777777777777",
+      ...Array.from({ length: 20 }, (_, index) => uuid(index + 100))
     ]);
     const unitOfWork = createUnitOfWork();
     const service = new DispatchService(unitOfWork, { now: () => now, createId: ids });
@@ -47,8 +132,9 @@ describe("dispatch service", () => {
     expect(snapshot.serviceRequests.find((request) => request.id === requestId)?.status).toBe(
       "offered"
     );
-    expect(snapshot.outboxEvents).toHaveLength(1);
-    expect(snapshot.auditLogs).toHaveLength(1);
+    expect(snapshot.outboxEvents.filter((event) => event.topic === "dispatch.round.started")).toHaveLength(1);
+    expect(snapshot.auditLogs.filter((log) => log.action === "dispatch.round.started")).toHaveLength(1);
+    expect(snapshot.notifications).toHaveLength(2);
     expect(JSON.stringify(snapshot.auditLogs)).not.toContain("Xe can ho tro");
 
     const mechanicIdentity = identity(round.candidates[0]!.mechanic_id);
@@ -107,15 +193,15 @@ describe("dispatch service", () => {
     });
   });
 
-  it("uses one authoritative workload batch and excludes busy mechanics", async () => {
+  it("uses one eligibility query including workload and excludes busy mechanics", async () => {
     const mechanics = [
       mechanic("00000000-0000-4000-8000-000000000001", 10.762622, 106.660172),
       mechanic("00000000-0000-4000-8000-000000000002", 10.7627, 106.660172),
       mechanic("00000000-0000-4000-8000-000000000003", 10.7628, 106.660172)
     ];
     const workloadSpy = vi.spyOn(
-      InMemoryAssignmentRepository.prototype,
-      "listActiveWorkloadsByMechanicIds"
+      InMemoryDispatchRepository.prototype,
+      "listEligibility"
     );
     const unitOfWork = createUnitOfWork({
       mechanics,
@@ -135,7 +221,7 @@ describe("dispatch service", () => {
       mechanics[2]!.userId
     ]);
     expect(workloadSpy).toHaveBeenCalledTimes(1);
-    expect(workloadSpy).toHaveBeenCalledWith(mechanics.map((item) => item.userId));
+    expect(workloadSpy).toHaveBeenCalledWith(expect.objectContaining({ eligibleOnly: true, requestId }));
     workloadSpy.mockRestore();
   });
 

@@ -31,6 +31,29 @@ export class PostgresNotificationDeliveryRepository
 {
   constructor(private readonly sql: TransactionSql) {}
 
+  async listByNotificationIdForUpdate(id: string) {
+    const rows = await this.sql<ReceiptRow[]>`select * from notification_delivery_receipts where notification_id = ${id} order by id limit 101 for update`;
+    return rows.map(mapReceipt);
+  }
+  async listPage(id: string, limit: number, cursor?: import("@/lib/list-pagination").PageCursor) {
+    const rows = await this.sql<ReceiptRow[]>`select * from notification_delivery_receipts where notification_id = ${id}
+      and (${cursor?.timestamp ?? null}::timestamptz is null or (date_trunc('milliseconds', created_at), id) < (${cursor?.timestamp ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc limit ${limit + 1}`; return rows.map(mapReceipt);
+  }
+  async retryFailed(input: { ids: string[]; now: Date }) {
+    if (!input.ids.length) return 0;
+    const rows = await this.sql`update notification_delivery_receipts set status = 'pending', completed_at = null, next_attempt_at = ${input.now},
+      lease_token = null, lease_expires_at = null, last_error_code = null, updated_at = ${input.now}
+      where id in ${this.sql(input.ids)} and status in ('retryable_failed', 'permanent_failed')
+      and (lease_expires_at is null or lease_expires_at <= ${input.now}) returning id`; return rows.length;
+  }
+  async cancelPending(input: { notificationId: string; now: Date }) {
+    const rows = await this.sql`update notification_delivery_receipts set status = 'canceled', completed_at = ${input.now},
+      lease_token = null, lease_expires_at = null, next_attempt_at = null, updated_at = ${input.now}
+      where notification_id = ${input.notificationId} and status in ('pending', 'retryable_failed')
+      and (lease_expires_at is null or lease_expires_at <= ${input.now}) returning id`; return rows.length;
+  }
+
   async claim(input: Parameters<NotificationDeliveryRepository["claim"]>[0]) {
     const rows = await this.sql<ReceiptRow[]>`
       update notification_delivery_receipts
@@ -38,6 +61,7 @@ export class PostgresNotificationDeliveryRepository
       where id = ${input.id} and status in ('pending', 'retryable_failed')
         and (lease_expires_at is null or lease_expires_at <= ${input.now})
         and (next_attempt_at is null or next_attempt_at <= ${input.now})
+        and exists(select 1 from notifications n where n.id = notification_id and n.status::text <> 'canceled')
       returning *
     `;
     return rows[0] ? mapReceipt(rows[0]) : undefined;
@@ -71,7 +95,7 @@ export class PostgresNotificationDeliveryRepository
   }
 
   async recordOutcome(input: Parameters<NotificationDeliveryRepository["recordOutcome"]>[0]) {
-    const terminal = ["sent", "invalid", "permanent_failed"].includes(input.status);
+    const terminal = ["sent", "invalid", "permanent_failed", "canceled"].includes(input.status);
     const rows = await this.sql<ReceiptRow[]>`
       update notification_delivery_receipts
       set status = ${input.status}::notification_delivery_status,

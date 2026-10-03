@@ -36,6 +36,7 @@ export type CreateMediaUploadIntent = Omit<
 >;
 
 export interface MediaUploadIntentRepository {
+  listFinalizedForJob(input: { requestId: string; assignmentId: string; limit: number }): Promise<MediaUploadIntent[]>;
   create(input: CreateMediaUploadIntent): Promise<MediaUploadIntent>;
   findById(id: string): Promise<MediaUploadIntent | undefined>;
   findByIdForUpdate(id: string): Promise<MediaUploadIntent | undefined>;

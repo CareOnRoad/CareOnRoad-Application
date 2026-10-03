@@ -1,4 +1,7 @@
 import type { JsonObject } from "./idempotency.repository";
+import type { ListFilter } from "@/lib/list-pagination";
+
+export type AuditFilter = ListFilter & { actorId?: string; entityType?: string; entityId?: string; action?: string; adminOnly?: boolean };
 
 export type AuditActorRole = "rider" | "mechanic" | "admin";
 
@@ -20,5 +23,6 @@ export type AppendAuditLog = Omit<AuditLog, "createdAt"> & {
 };
 
 export interface AuditRepository {
+  query(input: AuditFilter): Promise<AuditLog[]>;
   append(log: AppendAuditLog): Promise<AuditLog>;
 }

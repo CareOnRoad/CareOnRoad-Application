@@ -19,11 +19,11 @@ describe("service request creation idempotency", () => {
         service_type: "emergency_rescue",
         location: { latitude: 10.762622, longitude: 106.660172 }
       },
-      { service_type: "mobile_repair", address_text: "1 Nguyen Trai" },
-      { service_type: "at_home_service", address_text: "1 Nguyen Trai", scheduled_start_at: future() },
+      { service_type: "mobile_repair", location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai" },
+      { service_type: "at_home_service", location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai", scheduled_start_at: future() },
       { service_type: "periodic_maintenance",
           location: { latitude: 10.77, longitude: 106.69 }, scheduled_start_at: future() },
-      { service_type: "other", fulfillment_mode: "immediate_location", address_text: "1 Nguyen Trai" }
+      { service_type: "other", fulfillment_mode: "immediate_location", location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai" }
     ] as const;
 
     for (const input of inputs) {
@@ -50,7 +50,7 @@ describe("service request creation idempotency", () => {
       motorcycle_id: motorcycleId,
       service_type: "mobile_repair",
       problem_description: "Xe tat may",
-      address_text: "1 Nguyen Trai"
+      location: { latitude: 10.77, longitude: 106.69 }, address_text: "1 Nguyen Trai"
     };
 
     await service.createServiceRequest(identity(riderId), body, "same-key");

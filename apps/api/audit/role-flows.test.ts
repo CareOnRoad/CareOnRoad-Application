@@ -106,23 +106,25 @@ describe("role workflow audit: expected invariants", () => {
     expect(uow.snapshot().serviceRequests[0]?.status).toBe("manual_escalation");
   });
 
-  it("A05 zero-total standard quote does not strand the approved workflow", async () => {
+  it("A05 zero-total standard quote is rejected before entering approval/payment", async () => {
     const s = setup();
     for (const value of ["en_route", "on_site", "diagnosis"]) await s.status(value);
+    await expect(s.quotes.createQuote(identity(mechanic), requestId, { assignment_id: assignmentId,
+      lines: [{ line_type: "labor", description: "Công", quantity: 1, unit_amount: 100000 }], discount_amount: 100000 }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(s.uow.snapshot().quotes).toEqual([]);
     const quote = await s.quotes.createQuote(identity(mechanic), requestId, { assignment_id: assignmentId,
-      lines: [{ line_type: "labor", description: "Công", quantity: 1, unit_amount: 100000 }], discount_amount: 100000 });
+      lines: [{ line_type: "labor", description: "Công", quantity: 1, unit_amount: 100000 }] });
     await s.quotes.approveQuote(identity(rider), quote.id);
-    await expect(s.payments.createPaymentOrder(identity(rider), { quote_id: quote.id }, "audit-zero-payment"))
-      .rejects.toMatchObject({ status: 409 });
-    await expect(s.status("in_progress")).resolves.toMatchObject({ status: "in_progress" });
+    await expect(s.status("in_progress")).rejects.toMatchObject({ status: 409 });
   });
 
   it("A06 assigned mechanic can restore destination and problem details", async () => {
     const s = setup();
     await expect(new ServiceRequestService(s.uow).getServiceRequest(identity(mechanic), requestId))
       .rejects.toMatchObject({ status: 403 });
-    const jobs = await new MechanicJobListService(s.uow).listJobs(identity(mechanic), {});
-    expect(jobs.items[0]?.request).toMatchObject({ problem_description: "Xe không khởi động",
+    const job = await new MechanicJobListService(new InMemoryUnitOfWork(s.uow.snapshot())).getJob(identity(mechanic), assignmentId);
+    expect(job.request).toMatchObject({ problem_description: "Xe không khởi động",
       location: { latitude: 10.76, longitude: 106.66 }, address_text: "Địa điểm kiểm thử" });
   });
 
@@ -130,13 +132,14 @@ describe("role workflow audit: expected invariants", () => {
     expect(runSafetyGate("Xe đang chạy thì chết máy")).toMatchObject({ is_dangerous: true, can_continue_riding: false });
   });
 
-  it("A08 an address-only request accepted by creation can enter matching", async () => {
+  it("A08 address-only creation is rejected before persistence", async () => {
     const s = setup();
     const bike = await new MotorcycleService(s.uow, { now: () => now }).createMotorcycle(identity(rider), { brand_text: "Honda", model_text: "Wave" });
-    const request = await new ServiceRequestService(s.uow, { now: () => now }).createServiceRequest(identity(rider), {
+    const count = s.uow.snapshot().serviceRequests.length;
+    await expect(new ServiceRequestService(s.uow, { now: () => now }).createServiceRequest(identity(rider), {
       motorcycle_id: bike.id, service_type: "mobile_repair", problem_description: "Xe không khởi động", address_text: "Địa điểm kiểm thử"
-    }, "audit-address-only");
-    await expect(new DispatchService(s.uow, { now: () => now }).startDispatch(identity(rider), request.id)).resolves.toBeDefined();
+    }, "audit-address-only")).rejects.toMatchObject({ status: 400, message: expect.stringContaining("location") });
+    expect(s.uow.snapshot().serviceRequests).toHaveLength(count);
   });
 
   it("A09 at-home appointment cannot start travel a day before its schedule", async () => {
@@ -151,7 +154,7 @@ describe("role workflow audit: expected invariants", () => {
     state.mechanicProfiles = [{ userId: mechanic, profileStatus: "active", isAvailable: true, serviceRadiusKm: 10,
       availabilityUpdatedAt: now, ratingAvg: 0, ratingCount: 0, serviceTypes: ["at_home_service"], createdAt: now, updatedAt: now }];
     const uow = new InMemoryUnitOfWork(state);
-    const assignment = await new AcceptAssignmentService(uow, { now: () => now }).acceptOffer(identity(mechanic), candidateId);
+    const assignment = await new AcceptAssignmentService(uow, { now: () => now }).acceptOffer(identity(mechanic), candidateId, { estimated_duration_minutes: 60 });
     await expect(new AssignmentService(uow, { now: () => now }).transitionAssignment(identity(mechanic), assignment.id, { status: "en_route" }))
       .rejects.toMatchObject({ status: 409 });
   });

@@ -46,11 +46,12 @@ export class PostgresOperationalMonitoringRepository implements OperationalMonit
       ...(r.reason_code ? { reasonCode: r.reason_code } : {}) }));
   }
 
-  async listWorkerRuns(input: OperationalPageInput): Promise<WorkerRunRecord[]> {
+  async listWorkerRuns(input: OperationalPageInput & { workerName?: string }): Promise<WorkerRunRecord[]> {
     const rows = await this.sql<WorkerRunRow[]>`
       select * from worker_run_records
-      where (${input.cursor?.createdAt ?? null}::timestamptz is null or (completed_at, id) < (${input.cursor?.createdAt ?? null}, ${input.cursor?.id ?? null}::uuid))
-      order by completed_at desc, id desc limit ${input.limit}
+      where (${input.cursor?.createdAt ?? null}::timestamptz is null or (date_trunc('milliseconds',completed_at), id) < (${input.cursor?.createdAt ?? null}, ${input.cursor?.id ?? null}::uuid))
+        and (${input.workerName ?? null}::text is null or worker_name = ${input.workerName ?? null})
+      order by date_trunc('milliseconds',completed_at) desc, id desc limit ${input.limit}
     `;
     return rows.map(mapRun);
   }

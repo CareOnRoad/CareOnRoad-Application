@@ -1,3 +1,5 @@
+import type { AdminSupervisionRepository } from "./admin-supervision.repository";
+import type { AdminConfigurationRepository } from "./admin-configuration.repository";
 import type { AssignmentRepository } from "./assignment.repository";
 import type { AdminInternalNoteRepository } from "./admin-internal-note.repository";
 import type { AdminQueryRepository } from "./admin-query.repository";
@@ -26,6 +28,8 @@ import type { ServiceRequestRepository } from "./service-request.repository";
 import type { UserRepository } from "./user.repository";
 
 export type FoundationRepositories = {
+  adminConfiguration: AdminConfigurationRepository;
+  adminSupervision: AdminSupervisionRepository;
   adminQueries: AdminQueryRepository;
   adminInternalNotes: AdminInternalNoteRepository;
   users: UserRepository;

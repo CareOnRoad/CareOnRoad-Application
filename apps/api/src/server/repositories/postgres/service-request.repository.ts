@@ -1,4 +1,5 @@
 import type { TransactionSql } from "postgres";
+import type { ListFilter } from "@/lib/list-pagination";
 
 import type { ServiceType } from "@/features/motorcycles/motorcycle.schemas";
 import { getPostgresErrorCode } from "@/server/db/database-errors";
@@ -31,6 +32,8 @@ type ServiceRequestRow = {
   safety_answers: JsonObject | null;
   maintenance_notes: string | null;
   manual_escalation_reason: string | null;
+  dispatch_episode_start_round: number;
+  dispatch_retry_count: number;
   canceled_reason: string | null;
   reminder_id: string | null;
   reminder_context_id: string | null;
@@ -50,6 +53,15 @@ type RequestStatusHistoryRow = {
 
 export class PostgresServiceRequestRepository implements ServiceRequestRepository {
   constructor(private readonly sql: TransactionSql) {}
+
+  async startDispatchEpisode(input: { id: string; startRound: number; updatedAt: Date }): Promise<ServiceRequest> {
+    const rows = await this.sql<ServiceRequestRow[]>`update service_requests
+      set dispatch_episode_start_round = ${input.startRound}, dispatch_retry_count = dispatch_retry_count + 1,
+        updated_at = ${input.updatedAt}
+      where id = ${input.id} and dispatch_retry_count < 3 returning ${this.selection()}`;
+    if (!rows[0]) throw new Error("DISPATCH_RETRY_LIMIT_REACHED");
+    return mapRequest(rows[0]);
+  }
 
   async updateAppointment(input: Parameters<ServiceRequestRepository["updateAppointment"]>[0]) {
     const rows = await this.sql<ServiceRequestRow[]>`update service_requests
@@ -99,12 +111,18 @@ export class PostgresServiceRequestRepository implements ServiceRequestRepositor
     }
   }
 
-  async listByRider(riderId: string): Promise<ServiceRequest[]> {
+  async listByRider(riderId: string, input: ListFilter = { limit: 20 }): Promise<ServiceRequest[]> {
     const rows = await this.sql<ServiceRequestRow[]>`
       select ${this.selection()}
       from service_requests
       where rider_id = ${riderId}
-      order by created_at desc, id
+        and (${input.status ?? null}::text is null or status::text = ${input.status ?? null})
+        and (${input.date_from ?? null}::timestamptz is null or created_at >= ${input.date_from ?? null}::timestamptz)
+        and (${input.date_to ?? null}::timestamptz is null or created_at <= ${input.date_to ?? null}::timestamptz)
+        and (${input.cursor?.timestamp ?? null}::timestamptz is null or
+          (date_trunc('milliseconds', created_at), id) < (${input.cursor?.timestamp ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc
+      limit ${input.limit + 1}
     `;
     return rows.map(mapRequest);
   }
@@ -192,6 +210,8 @@ export class PostgresServiceRequestRepository implements ServiceRequestRepositor
       safety_answers,
       maintenance_notes,
       manual_escalation_reason,
+      dispatch_episode_start_round,
+      dispatch_retry_count,
       canceled_reason,
       reminder_id,
       reminder_context_id,
@@ -216,6 +236,8 @@ function mapRequest(row: ServiceRequestRow): ServiceRequest {
       ? undefined
       : { latitude: row.latitude, longitude: row.longitude };
   return {
+    dispatchEpisodeStartRound: row.dispatch_episode_start_round,
+    dispatchRetryCount: row.dispatch_retry_count,
     id: row.id,
     requestCode: row.request_code,
     riderId: row.rider_id,

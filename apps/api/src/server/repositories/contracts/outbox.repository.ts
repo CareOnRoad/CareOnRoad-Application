@@ -1,6 +1,6 @@
 import type { JsonObject } from "./idempotency.repository";
 
-export type OutboxStatus = "pending" | "processing" | "processed" | "dead_letter";
+export type OutboxStatus = "pending" | "processing" | "processed" | "dead_letter" | "abandoned";
 
 export type OutboxEvent = {
   id: string;
@@ -17,6 +17,8 @@ export type OutboxEvent = {
   lastErrorCode?: string;
   createdAt: Date;
   processedAt?: Date;
+  adminRetryCount?: number;
+  abandonedAt?: Date;
 };
 
 export type AppendOutboxEvent = Pick<
@@ -38,6 +40,10 @@ export type AppendOutboxEvent = Pick<
   >;
 
 export interface OutboxRepository {
+  findById(id: string): Promise<OutboxEvent | undefined>;
+  findByIdForUpdate(id: string): Promise<OutboxEvent | undefined>;
+  listAdmin(input: import("@/lib/list-pagination").ListFilter & { topic?: string }): Promise<OutboxEvent[]>;
+  recover(input: { id: string; action: "retry" | "abandon"; actorId: string; reason: string; now: Date }): Promise<OutboxEvent | undefined>;
   renewLease(input: { id: string; leaseOwner: string; now: Date; leaseUntil: Date }): Promise<boolean>;
   append(event: AppendOutboxEvent): Promise<OutboxEvent>;
   findByDedupeKey(dedupeKey: string): Promise<OutboxEvent | undefined>;

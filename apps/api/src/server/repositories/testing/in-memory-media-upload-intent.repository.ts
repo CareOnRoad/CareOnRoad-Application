@@ -7,6 +7,13 @@ import type {
 export class InMemoryMediaUploadIntentRepository implements MediaUploadIntentRepository {
   constructor(private readonly intents: MediaUploadIntent[]) {}
 
+  async listFinalizedForJob(input: Parameters<MediaUploadIntentRepository["listFinalizedForJob"]>[0]) {
+    return this.intents.filter((item) => item.requestId === input.requestId && item.status === "finalized" && item.mediaMetadataId &&
+      (item.resourceType === "service_request" || (item.resourceType === "assignment" && item.assignmentId === input.assignmentId)))
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))
+      .slice(0, input.limit).map((item) => structuredClone(item));
+  }
+
   async create(input: CreateMediaUploadIntent) {
     if (this.intents.some((intent) => intent.objectKey === input.objectKey)) {
       throw new Error("duplicate media upload object key");

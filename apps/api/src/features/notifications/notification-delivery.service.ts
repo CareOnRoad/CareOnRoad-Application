@@ -12,10 +12,10 @@ import {
   type NotificationProviderOutcome
 } from "./notification-provider";
 
-const terminalStatuses = new Set(["sent", "invalid", "permanent_failed"]);
+const terminalStatuses = new Set(["sent", "invalid", "permanent_failed", "canceled"]);
 
 export type NotificationDeliveryResult = {
-  status: "sent" | "failed";
+  status: "sent" | "failed" | "canceled";
   errorCode?: string;
 };
 
@@ -31,13 +31,17 @@ export class NotificationDeliveryService {
     const now = this.options.now?.() ?? new Date();
     const createId = this.options.createId ?? randomUUID;
     const prepared = await this.unitOfWork.execute(async (repositories) => {
-      const notification = await repositories.notifications.findById(notificationId);
+      const notification = await repositories.notifications.findByIdForUpdate(notificationId);
       if (!notification) throw new NotificationDeliveryError("NOTIFICATION_NOT_FOUND");
+      if (notification.status === "canceled") return { notification, credentials: [], receipts: [] };
+      const existingReceipts = await repositories.notificationDeliveries.listByNotificationId(notificationId);
       const credentials = await repositories.deviceDeliveryCredentials.listActiveByUserId(
         notification.userId
       );
       const receipts: NotificationDeliveryReceipt[] = [];
       for (const credential of credentials) {
+        // Recovery targets failed receipts of the original delivery, never newly registered devices.
+        if ((notification.adminRetryCount ?? 0) > 0 && !existingReceipts.some((row) => row.credentialId === credential.id && row.credentialVersion === credential.credentialVersion)) continue;
         receipts.push(
           await repositories.notificationDeliveries.createIfAbsent({
             id: createId(),
@@ -70,6 +74,7 @@ export class NotificationDeliveryService {
       }
       return { notification, credentials, receipts };
     });
+    if (prepared.notification.status === "canceled") return { status: "canceled" };
 
     const credentialById = new Map(
       prepared.credentials.map((credential) => [credential.id, credential])

@@ -43,8 +43,8 @@ export class InMemoryOperationalMonitoringRepository implements OperationalMonit
       ...(!x.serviceLocation ? { reasonCode: "missing_location" as const } : {}) })), input, (x) => x.updatedAt);
   }
 
-  async listWorkerRuns(input: OperationalPageInput): Promise<WorkerRunRecord[]> {
-    return page(this.state.workerRuns, input, (x) => x.completedAt).map(cloneRun);
+  async listWorkerRuns(input: OperationalPageInput & { workerName?: string }): Promise<WorkerRunRecord[]> {
+    return page(this.state.workerRuns.filter(row => !input.workerName || row.workerName === input.workerName), input, (x) => x.completedAt).map(cloneRun);
   }
 
   async appendWorkerRun(input: AppendWorkerRun): Promise<WorkerRunRecord> {

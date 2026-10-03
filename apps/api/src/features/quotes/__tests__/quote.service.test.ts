@@ -4,6 +4,7 @@ import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { InMemoryUnitOfWork } from "@/server/repositories/testing/in-memory-unit-of-work";
 
 import { MAX_QUOTE_AMOUNT, QuoteService } from "../quote.service";
+import { MAX_PAYMENT_AMOUNT } from "@/features/payments/payment-amount";
 
 const riderId = "11111111-1111-4111-8111-111111111111";
 const otherRiderId = "22222222-2222-4222-8222-222222222222";
@@ -17,6 +18,29 @@ const diagnosisId = "99999999-9999-4999-8999-999999999999";
 const now = new Date("2026-06-25T09:00:00.000Z");
 
 describe("quote service", () => {
+  it("rejects zero/unsupported standard totals before superseding an existing pending quote", async () => {
+    const uow = createUnitOfWork(); const service = new QuoteService(uow, { now: () => now });
+    await service.createQuote(identity(mechanicId), requestId, validQuote());
+    const before = uow.snapshot();
+    for (const input of [{ ...validQuote(), discount_amount: 50_000 },
+      { ...validQuote(), lines: [{ ...validQuote().lines[0]!, unit_amount: MAX_PAYMENT_AMOUNT + 1 }] }]) {
+      await expect(service.createQuote(identity(mechanicId), requestId, input)).rejects.toMatchObject({ status: 400 });
+      expect(uow.snapshot()).toEqual(before);
+    }
+    await expect(service.createQuote(identity(mechanicId), requestId, { ...validQuote(), lines: [
+      { ...validQuote().lines[0]!, unit_amount: 0 }, { ...validQuote().lines[0]!, unit_amount: MAX_PAYMENT_AMOUNT }
+    ] })).resolves.toMatchObject({ total_amount: MAX_PAYMENT_AMOUNT });
+  });
+
+  it.each([0, MAX_PAYMENT_AMOUNT + 1])("blocks approval of legacy standard total %s without changing history or money", async (amount) => {
+    const base = createUnitOfWork(); const created = await new QuoteService(base).createQuote(identity(mechanicId), requestId, validQuote());
+    const state = base.snapshot(); const quote = state.quotes.find((q) => q.id === created.id)!;
+    quote.totalAmount = amount; quote.subtotalAmount = amount;
+    const legacy = new InMemoryUnitOfWork(state);
+    await expect(new QuoteService(legacy).approveQuote(identity(riderId), created.id)).rejects.toMatchObject({ status: 409 });
+    expect(legacy.snapshot()).toEqual(state);
+    await expect(new QuoteService(legacy).rejectQuote(identity(riderId), created.id)).resolves.toMatchObject({ status: "rejected" });
+  });
   it("calculates totals, creates immutable versions, and supersedes only the prior pending quote", async () => {
     const unitOfWork = createUnitOfWork();
     const service = new QuoteService(unitOfWork, { now: () => now });

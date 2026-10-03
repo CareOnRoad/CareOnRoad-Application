@@ -68,6 +68,8 @@ export type CreatePaymentOrder = Omit<
 export type CreatePaymentEvent = PaymentEvent;
 
 export interface PaymentRepository {
+  hasUnresolvedForRequest(input: { requestId: string; assignmentId?: string; quoteId?: string }): Promise<boolean>;
+  findByProviderOrderCode(provider: PaymentProvider, providerOrderCode: number): Promise<PaymentOrder | undefined>;
   sumSucceededForAssignment(assignmentId: string): Promise<number>;
   allocateProviderOrderCode(): Promise<number>;
   create(input: CreatePaymentOrder): Promise<PaymentOrder>;

@@ -1,3 +1,4 @@
+import { filterPage } from "@/lib/list-pagination";
 import type {
   AppendOutboxEvent,
   OutboxEvent,
@@ -6,6 +7,18 @@ import type {
 
 export class InMemoryOutboxRepository implements OutboxRepository {
   constructor(private readonly events: OutboxEvent[]) {}
+
+  async findById(id: string) { return this.events.find((row) => row.id === id); }
+  async findByIdForUpdate(id: string) { return this.findById(id); }
+  async listAdmin(input: Parameters<OutboxRepository["listAdmin"]>[0]) { return filterPage(this.events.filter((row) => !input.topic || row.topic === input.topic), input); }
+  async recover(input: Parameters<OutboxRepository["recover"]>[0]) {
+    const row = await this.findById(input.id); const retry = input.action === "retry";
+    if (!row || (row.leaseExpiresAt && row.leaseExpiresAt > input.now) ||
+      (retry ? !["dead_letter", "processed"].includes(row.status) || (row.adminRetryCount ?? 0) >= 3 : !["pending", "dead_letter", "processing"].includes(row.status))) return undefined;
+    Object.assign(row, { status: retry ? "pending" : "abandoned", attemptCount: retry ? 0 : row.attemptCount, nextAttemptAt: input.now,
+      leaseOwner: undefined, leaseExpiresAt: undefined, processedAt: undefined, lastErrorCode: undefined,
+      adminRetryCount: (row.adminRetryCount ?? 0) + (retry ? 1 : 0), abandonedAt: retry ? undefined : input.now }); return row;
+  }
 
   async renewLease(input: Parameters<OutboxRepository["renewLease"]>[0]) {
     const event = this.events.find((item) => item.id === input.id && item.status === "processing" &&

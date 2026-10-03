@@ -23,6 +23,7 @@
     "test": "pnpm --filter @careonroad/api test",
     "test:unit": "pnpm --filter @careonroad/api test:unit",
     "test:db": "pnpm --filter @careonroad/api test:db",
+    "test:http": "pnpm --filter @careonroad/api test:http",
     "test:full": "pnpm --filter @careonroad/api test:full",
     "test:audit": "pnpm --filter @careonroad/api test:audit",
     "preflight:schema": "pnpm --filter @careonroad/api preflight:schema",

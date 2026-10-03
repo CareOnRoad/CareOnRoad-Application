@@ -1,4 +1,6 @@
 import type { TransactionSql } from "postgres";
+import type { OperationalSummary, OperationalWindow, StuckFinding } from "../contracts/admin-query.repository";
+import { ASSIGNMENT_STALE_MINUTES, APPOINTMENT_GRACE_MINUTES, REMINDER_FAILURE_THRESHOLD, WORKER_STALE_MINUTES, COMMITMENT_STALE_MINUTES } from "@/features/admin/admin-operational-policy";
 
 import type { AdminInternalNote } from "../contracts/admin-internal-note.repository";
 import type {
@@ -115,6 +117,47 @@ type AdminMediaSummaryRow = {
 
 export class PostgresAdminQueryRepository implements AdminQueryRepository {
   constructor(private readonly sql: TransactionSql) {}
+
+  async operationalSummary(input: OperationalWindow): Promise<OperationalSummary> {
+    const sources = [
+      ["users", "app_users", "status::text"], ["mechanics", "mechanic_profiles", "profile_status::text"], ["availability", "mechanic_profiles", "is_available::text"],
+      ["requests", "service_requests", "status::text"], ["assignments", "assignments", "status::text"],
+      ["assignment_slots", "assignments", "case when status::text in ('completed','canceled','recovery_canceled') then 'closed' when scheduled_start_at is not null and activated_at is null then 'future_reservation' else 'current' end"],
+      ["dispatch_rounds", "dispatch_rounds", "status::text", "started_at"], ["dispatch_candidates", "dispatch_candidates", "status::text"],
+      ["quotes", "quotes", "status::text"], ["payments", "payment_orders", "status::text"], ["notifications", "notifications", "status::text"],
+      ["outbox", "outbox_events", "status::text"], ["reminders", "reminder_rules", "enabled::text"], ["occurrences", "reminder_occurrences", "status::text"],
+      ["workers", "worker_run_records", "worker_name || ':' || status::text"]
+    ];
+    // Table/column expressions are a fixed server allowlist; filters are parameters.
+    const groups = sources.map(([name, table, bucket, time]) => `'${name}', (select coalesce(jsonb_object_agg(bucket, amount), '{}'::jsonb) from (select ${bucket} as bucket, count(*)::int as amount from ${table} where ${time ?? "created_at"} between $1 and $2 group by 1) counts)`).join(",");
+    await this.sql`set local statement_timeout = '5s'`;
+    const [row] = await this.sql.unsafe<{ groups: OperationalSummary }[]>(`select jsonb_build_object(${groups}) as groups`, [input.from, input.to]);
+    return row!.groups;
+  }
+
+  async stuckWorkflows(input: Parameters<AdminQueryRepository["stuckWorkflows"]>[0]): Promise<StuckFinding[]> {
+    const stale = Object.entries(ASSIGNMENT_STALE_MINUTES).map(([status, minutes]) => `when '${status}' then ${minutes}`).join(" ");
+    const query = `with raw as (
+      select 'dispatch_overdue'::text category, r.id target_id, r.request_id, null::uuid assignment_id, r.expires_at basis_at, coalesce(r.lease_expires_at > $3,false) active_lease, null::int failure_count from dispatch_rounds r where r.status='active' and r.expires_at <= $3
+      union all select 'dispatch_attention', r.id,r.id,null,r.updated_at,false,null from service_requests r where r.status='manual_escalation' or (r.status='offered' and not exists(select 1 from dispatch_candidates c join dispatch_rounds d on d.id=c.round_id where c.request_id=r.id and c.status='offered' and c.expires_at>$3 and d.status='active'))
+      union all select 'assignment_stalled', a.id,a.request_id,a.id,case when a.scheduled_start_at is not null and a.activated_at is null then a.scheduled_start_at else a.updated_at end,false,null from assignments a where a.status::text not in ('completed','canceled','recovery_canceled') and ((a.scheduled_start_at is not null and a.activated_at is null and a.scheduled_start_at <= $3::timestamptz - interval '${APPOINTMENT_GRACE_MINUTES} minutes') or ((a.scheduled_start_at is null or a.activated_at is not null) and a.updated_at <= $3::timestamptz - (case a.status::text ${stale} else 180 end) * interval '1 minute'))
+      union all select 'state_divergence',a.id,a.request_id,a.id,a.updated_at,false,null from assignments a join service_requests r on r.id=a.request_id where a.status::text not in ('completed','canceled','recovery_canceled') and r.status::text <> case a.status::text when 'accepted' then 'assigned' when 'en_route' then 'mechanic_en_route' when 'quoted' then 'awaiting_quote_approval' when 'awaiting_payment' then 'awaiting_payment' else 'in_service' end
+      union all select 'outbox_dead_letter',e.id,null,null,e.created_at,coalesce(e.lease_expires_at>$3,false),null from outbox_events e where e.status='dead_letter'
+      union all select 'reminder_failures',r.id,null,null,r.updated_at,coalesce(r.lease_expires_at>$3,false),r.failure_count from reminder_rules r where r.enabled and r.failure_count>=${REMINDER_FAILURE_THRESHOLD} and coalesce(r.snoozed_until,r.next_due_at)<=$3 and (r.last_completed_at is null or r.last_completed_at<r.updated_at)
+      union all select 'quote_pending',q.id,q.request_id,q.assignment_id,q.created_at,false,null from quotes q where q.status='pending' and (q.expires_at<=$3 or q.created_at<=$3::timestamptz-interval '${COMMITMENT_STALE_MINUTES} minutes') and not exists(select 1 from quotes latest where latest.request_id=q.request_id and latest.version>q.version)
+      union all select 'payment_pending',p.id,p.request_id,p.assignment_id,p.updated_at,false,null from payment_orders p where p.status::text in ('pending','created','needs_review') and p.updated_at <= $3::timestamptz-interval '${COMMITMENT_STALE_MINUTES} minutes'
+      union all select 'worker_missing_progress',e.id,null,null,e.created_at,coalesce(e.lease_expires_at>$3,false),null from outbox_events e where e.status='pending' and e.next_attempt_at<=$3 and e.created_at <= $3::timestamptz-interval '${WORKER_STALE_MINUTES} minutes' and not exists(select 1 from worker_run_records w where w.worker_name='outbox' and w.status='succeeded' and w.completed_at > $3::timestamptz-interval '${WORKER_STALE_MINUTES} minutes')
+    ), hashed as (select *,md5(category || ':' || target_id::text) hash from raw), findings as (
+      select (substr(hash,1,12)||'3'||substr(hash,14,3)||'8'||substr(hash,18,15))::uuid id,* from hashed)
+    select id,target_id,request_id,assignment_id,category,basis_at,active_lease,failure_count from findings
+      where basis_at between $1 and $2 and ($4::text is null or category=$4)
+        and ($5::timestamptz is null or (date_trunc('milliseconds',basis_at),id)<($5::timestamptz,$6::uuid))
+      order by date_trunc('milliseconds',basis_at) desc,id desc limit $7`;
+    await this.sql`set local statement_timeout = '5s'`;
+    type Row = { id: string; target_id: string; request_id: string | null; assignment_id: string | null; category: StuckFinding["category"]; basis_at: Date; active_lease: boolean; failure_count: number | null };
+    const rows = await this.sql.unsafe<Row[]>(query, [input.from, input.to, input.now, input.category ?? null, input.cursor?.timestamp ?? null, input.cursor?.id ?? null, input.limit + 1]);
+    return rows.map(row => ({ id: row.id, targetId: row.target_id, requestId: row.request_id ?? undefined, assignmentId: row.assignment_id ?? undefined, category: row.category, createdAt: row.basis_at, activeLease: row.active_lease, failureCount: row.failure_count ?? undefined }));
+  }
 
   async listInternalNotes(input: AdminInternalNoteQuery): Promise<AdminInternalNote[]> {
     let rows: AdminInternalNoteRow[];

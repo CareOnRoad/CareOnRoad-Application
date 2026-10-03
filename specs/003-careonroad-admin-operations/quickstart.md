@@ -1,5 +1,11 @@
 # Quickstart Validation: CareOnRoad Admin Operations
 
+Current local status: Patches A–I and explicitly authorized J are implemented.
+Source/local schema requires 046. Batch 14 exercises real local Supabase JWT,
+Next HTTP and PostgreSQL with a simulated payOS provider. Real provider/device
+acceptance and production rollout remain pending. See the root
+BACKEND-FIX-BATCHES-REPORT.md for final run results and limits.
+
 ## Purpose
 
 Validate feature 003 after each patch without requiring frontend work or real
@@ -16,8 +22,8 @@ References:
 ## Prerequisites
 
 - Node.js and project dependencies are installed.
-- Existing migrations `202606250001` through `202606250014` are applied.
-- New migrations are applied only through the patch being validated.
+- Existing migrations `202606250001` through `202606250046` are applied on the
+  independently confirmed local Docker test instance.
 - `TEST_DATABASE_URL` points to an isolated test database when PostgreSQL
   integration tests are run.
 - Supabase JWT test fixtures include:
@@ -35,10 +41,12 @@ worker secrets, seeded passwords, or access tokens.
 ## Baseline Commands
 
 ```powershell
-npm.cmd run typecheck
-npm.cmd run lint
-npm.cmd test
-npm.cmd run build
+pnpm.cmd run typecheck
+pnpm.cmd run lint
+pnpm.cmd test
+pnpm.cmd run test:db
+pnpm.cmd run build
+pnpm.cmd run test:http
 ```
 
 Expected:
@@ -46,11 +54,16 @@ Expected:
 - Existing chatbot, ASR, rider, mechanic, assignment, quote, reminder, worker,
   and persistence tests remain green.
 - No new frontend route or UI component is produced.
-- No payment artifact is present.
+- Existing feature 005 payments remain available; these admin patches do not
+  add payment routes/providers or advance ledger state. Commitment reads block
+  unsafe cancellation/reassignment/supervision.
 
 ## Migration Validation
 
-For linked test/development Supabase only:
+Use the separate Docker test workdir from apps/api/SCHEMA-RELEASE-CHECKLIST.md.
+The linked hosted project in this task is production and must not be used.
+The following alternative commands apply only to a separately confirmed linked
+test/development Supabase project:
 
 ```powershell
 npx.cmd supabase migration list
@@ -59,10 +72,10 @@ npx.cmd supabase db push --dry-run
 
 Before applying:
 
-- Confirm the next migration starts after `202606250014`.
-- Confirm enum-only migrations 018 and 020 are committed before migrations 019
-  and 021 use the new enum values in triggers, constraints, indexes, or data.
-- Confirm no migration name contains payment.
+- Confirm source history is contiguous through 046; admin additions are 039–046.
+- Confirm enum-only migrations 040 and 042 commit before command usage from 041
+  and 043. Dependent DDL uses text comparison to remain safe in test lifecycle.
+- Confirm these admin additions do not create payment state or provider objects.
 - Confirm all changes are additive or safely loosen existing assignment
   provenance constraints.
 - Confirm new admin-only tables have RLS enabled and no direct anonymous or
@@ -258,8 +271,8 @@ For every bounded admin list and detail operation:
 
 Before considering feature 003 ready:
 
-- Search migrations, routes, services, repositories, and contracts for payment
-  additions; expected result is none.
+- Verify admin patches add no payment routes/providers/ledger advancement;
+  existing feature 005 commitment reads must still block unsafe intervention.
 - Confirm no frontend files changed for admin workflows.
 - Confirm no Maps, tracking, inventory, odometer, chatbot, ASR, provider-order,
   safety-gate, fallback, post-validation, rate-limit, or logger rewrite exists.
@@ -267,3 +280,40 @@ Before considering feature 003 ready:
 - Confirm all list operations are bounded.
 - Confirm no direct rating setter, hard delete, force-status, audit mutation, or
   raw secret/private payload response is exposed.
+
+## Role-flow Batches 09–12 status
+
+Dispatch reads/expiry/retry/cancel, manual assignment provenance, assignment
+intervention, immutable supervision, delivery recovery and audit export are
+implemented through Patch H1. Tests use the shared services and real PostgreSQL
+with provider stubs/test authenticators. Final gate: 712 unit, 118 SQL, 14 audit,
+typecheck/lint/build and schema preflight 043 PASS.
+
+Validate scheduled manual duration/reservation buffer and server rescue distance;
+closed quote history may be canceled only by canonical admin before work/money.
+Quote revision closes the latest pending version; approved labor is unchanged and
+expiry requires an explicit passed timestamp. Delivery retry caps at three and
+100 original receipts per command, preserves inbox read state and blocks active
+leases/critical abandonment. Audit export caps at 10,000 rows/31 days/5s and
+appends one sanitized access record. See apps/api/ADMIN-RECOVERY-OPERATIONS.md.
+
+Patch H2/I and optional J are implemented in Batches 13/15. Reminder recovery
+preserves failure history and original notification context; dashboard exposes
+nine categories including the original six; configuration is off by default and
+pins policy per dispatch episode. See apps/api/ADMIN-REMINDER-DASHBOARD-CONFIGURATION.md.
+
+`test:http` uses the named Docker Auth container and an isolated DB schema. It
+creates temporary Auth accounts, verifies real ES256 JWT against local JWKS,
+runs the built Next server, and checks workflow changes through role APIs.
+Standard/rescue/maintenance money transitions use signed simulated payOS HTTP
+responses and webhooks; no paid/completed SQL fixtures replace those steps.
+Actual process restarts cover accepted job restoration, initialized payment
+reconciliation and leased outbox recovery. Retry/expiry clocks are advanced only
+for temporary test rows; operational failure injection is documented separately.
+
+The performance scenario seeds the minimum dataset above and measures every
+contracted admin GET, including bounds and secret scans. Native SQL tests cover
+all nine stuck categories, races, RLS and append-only history. These are local
+acceptance results. Verified real payOS transactions, Android/iOS FCM receipt,
+enabled ETA/live tracking and hosted smoke tests require separate environments
+and remain pending; do not use the linked production project for local validation.

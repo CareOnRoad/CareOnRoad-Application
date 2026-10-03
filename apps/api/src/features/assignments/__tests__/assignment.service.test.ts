@@ -19,6 +19,31 @@ const otherOfferId = "99999999-9999-4999-8999-999999999999";
 const now = new Date("2026-06-25T05:00:00Z");
 
 describe("assignment service", () => {
+  it("requires the current mechanic role even for the assignment owner", async () => {
+    const seed = createUnitOfWork();
+    const accepted = await new AcceptAssignmentService(seed, { now: () => now }).acceptOffer(identity(mechanicId), offerId);
+    const state = seed.snapshot();
+    state.userRoles = state.userRoles.filter((role) => role.userId !== mechanicId);
+    state.userRoles.push({ userId: mechanicId, role: "rider" });
+    const unit = new InMemoryUnitOfWork(state);
+    await expect(new AssignmentService(unit).transitionAssignment(identity(mechanicId), accepted.id, { status: "en_route" }))
+      .rejects.toMatchObject({ status: 403 });
+    expect(unit.snapshot().assignmentStatusHistory).toEqual(state.assignmentStatusHistory);
+  });
+
+  it("unions rider and mechanic ownership without duplicating assignments", async () => {
+    const seed = createUnitOfWork();
+    const accepted = await new AcceptAssignmentService(seed, { now: () => now }).acceptOffer(identity(mechanicId), offerId);
+    const state = seed.snapshot();
+    state.userRoles.push({ userId: riderId, role: "mechanic" });
+    const list = (value: typeof state) => new AssignmentService(new InMemoryUnitOfWork(value)).listAssignments(identity(riderId));
+    expect((await list(state)).items.map((item) => item.id)).toEqual([accepted.id]);
+    state.assignments[0]!.mechanicId = riderId;
+    expect((await list(state)).items.map((item) => item.id)).toEqual([accepted.id]);
+    state.userRoles = state.userRoles.filter((role) => role.userId !== riderId);
+    expect((await list(state)).items).toEqual([]);
+  });
+
   it("accepts the first valid offer atomically and cancels competing offers", async () => {
     const unitOfWork = createUnitOfWork();
     const service = new AcceptAssignmentService(unitOfWork, {

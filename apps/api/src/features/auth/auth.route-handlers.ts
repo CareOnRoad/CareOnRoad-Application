@@ -24,6 +24,7 @@ import type {
 export type AuthRouteDependencies = {
   authenticate(request: Request): Promise<VerifiedSupabaseIdentity>;
   authService: {
+    updateProfile?(identity: VerifiedSupabaseIdentity, input: unknown): Promise<RequestActor>;
     getCurrentActor(identity: VerifiedSupabaseIdentity): Promise<RequestActor>;
     bootstrapProfile(
       identity: VerifiedSupabaseIdentity,

@@ -1,4 +1,5 @@
 import type { TransactionSql } from "postgres";
+import type { ListFilter, PageCursor } from "@/lib/list-pagination";
 
 import type {
   Assignment,
@@ -17,7 +18,11 @@ type AssignmentRow = {
   id: string;
   request_id: string;
   mechanic_id: string;
-  accepted_candidate_id: string;
+  accepted_candidate_id: string | null;
+  source: Assignment["source"];
+  assigned_by_admin_id: string | null;
+  supersedes_assignment_id: string | null;
+  dispatch_distance_m: number | null;
   scheduled_start_at: Date | null;
   reservation_start_at: Date | null;
   reservation_end_at: Date | null;
@@ -53,6 +58,29 @@ type MechanicActiveWorkloadRow = {
 export class PostgresAssignmentRepository implements AssignmentRepository {
   constructor(private readonly sql: TransactionSql) {}
 
+  async listHistory(id: string, limit: number, cursor?: PageCursor): Promise<AssignmentStatusHistory[]> {
+    const rows = await this.sql<AssignmentStatusHistoryRow[]>`select * from assignment_status_history where assignment_id = ${id}
+      and (${cursor?.timestamp ?? null}::timestamptz is null or (date_trunc('milliseconds', created_at), id) < (${cursor?.timestamp ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', created_at) desc, id desc limit ${limit + 1}`;
+    return rows.map(mapHistory);
+  }
+
+  async hasAnyByRequest(requestId: string) {
+    const rows = await this.sql`select exists(select 1 from assignments where request_id = ${requestId}) as found`;
+    return Boolean(rows[0].found);
+  }
+
+  async hasTravelHistory(id: string) {
+    const rows = await this.sql`select exists(select 1 from assignment_status_history where assignment_id = ${id}
+      and to_status in ('en_route', 'on_site', 'diagnosis', 'quoted', 'awaiting_payment', 'in_progress', 'completed')) as found`;
+    return Boolean(rows[0].found);
+  }
+
+  async setReservation(input: Parameters<AssignmentRepository["setReservation"]>[0]) {
+    await this.sql`update assignments set scheduled_start_at = ${input.scheduledStartAt}, reservation_start_at = ${input.start},
+      reservation_end_at = ${input.end}, updated_at = ${input.updatedAt} where id = ${input.id}`;
+  }
+
   async activate(input: { id: string; now: Date }) {
     await this.sql`update assignments set activated_at = coalesce(activated_at, ${input.now}) where id = ${input.id}`;
   }
@@ -69,9 +97,10 @@ export class PostgresAssignmentRepository implements AssignmentRepository {
 
   async listScheduledForPreparation(input: { now: Date; limit: number }) {
     const rows = await this.sql<AssignmentRow[]>`select a.* from assignments a
-      where a.scheduled_start_at is not null and a.reservation_start_at <= ${input.now}
+      where a.scheduled_start_at >= ${input.now} and a.reservation_start_at <= ${input.now}
         and a.activated_at is null and a.status in ${this.sql([...ACTIVE_ASSIGNMENT_STATUSES])}
-        and not exists (select 1 from notifications n where n.dedupe_key = 'maintenance.prepare:' || a.id::text || ':rider')
+        and not exists (select 1 from notifications n where n.dedupe_key in
+          ('maintenance.prepare:' || a.id::text || ':rider', 'appointment.prepare:' || a.id::text || ':rider'))
       order by a.scheduled_start_at, a.id limit ${input.limit}`;
     return rows.map(mapAssignment);
   }
@@ -107,13 +136,15 @@ export class PostgresAssignmentRepository implements AssignmentRepository {
     const rows = await this.sql<AssignmentRow[]>`
       insert into assignments (
         id, request_id, mechanic_id, accepted_candidate_id, status,
-        accepted_at, created_at, updated_at, scheduled_start_at, reservation_start_at, reservation_end_at
+        accepted_at, created_at, updated_at, scheduled_start_at, reservation_start_at, reservation_end_at,
+        source, assigned_by_admin_id, supersedes_assignment_id, dispatch_distance_m
       )
       values (
         ${input.id}, ${input.requestId}, ${input.mechanicId},
-        ${input.acceptedCandidateId}, ${input.status ?? "accepted"},
+        ${input.acceptedCandidateId ?? null}, ${input.status ?? "accepted"},
         ${input.acceptedAt}, ${input.createdAt}, ${input.updatedAt}, ${input.scheduledStartAt ?? null},
-        ${input.reservationStartAt ?? null}, ${input.reservationEndAt ?? null}
+        ${input.reservationStartAt ?? null}, ${input.reservationEndAt ?? null},
+        ${input.source ?? "offer"}, ${input.assignedByAdminId ?? null}, ${input.supersedesAssignmentId ?? null}, ${input.dispatchDistanceMeters ?? null}
       )
       returning *
     `;
@@ -128,6 +159,12 @@ export class PostgresAssignmentRepository implements AssignmentRepository {
       limit 1
     `;
     return rows[0] ? mapAssignment(rows[0]) : undefined;
+  }
+
+  async findCancellationHistory(id: string): Promise<AssignmentStatusHistory | undefined> {
+    const rows = await this.sql<AssignmentStatusHistoryRow[]>`select * from assignment_status_history
+      where assignment_id = ${id} and to_status = 'canceled' order by created_at desc, id desc limit 1`;
+    return rows[0] ? mapHistory(rows[0]) : undefined;
   }
 
   async findByIdForUpdate(id: string): Promise<Assignment | undefined> {
@@ -198,35 +235,45 @@ export class PostgresAssignmentRepository implements AssignmentRepository {
     }));
   }
 
+  async findUnfinishedByMechanicForUpdate(mechanicId: string): Promise<Assignment | undefined> {
+    const rows = await this.sql<AssignmentRow[]>`
+      select * from assignments
+      where mechanic_id = ${mechanicId} and status in ${this.sql([...ACTIVE_ASSIGNMENT_STATUSES])}
+      order by id for update limit 1
+    `;
+    return rows[0] ? mapAssignment(rows[0]) : undefined;
+  }
+
   async listVisibleToActor(actor: {
     id: string;
     roles: AuditActorRole[];
-  }): Promise<Assignment[]> {
-    if (actor.roles.includes("admin")) {
-      const rows = await this.sql<AssignmentRow[]>`
-        select *
-        from assignments
-        order by created_at desc, id
-      `;
-      return rows.map(mapAssignment);
-    }
-    if (actor.roles.includes("mechanic")) {
-      const rows = await this.sql<AssignmentRow[]>`
-        select *
-        from assignments
-        where mechanic_id = ${actor.id}
-        order by created_at desc, id
-      `;
-      return rows.map(mapAssignment);
-    }
+  }, input: ListFilter = { limit: 20 }): Promise<Assignment[]> {
     const rows = await this.sql<AssignmentRow[]>`
       select assignment.*
       from assignments assignment
       join service_requests request on request.id = assignment.request_id
-      where request.rider_id = ${actor.id}
-      order by assignment.created_at desc, assignment.id
+      where (${actor.roles.includes("admin")}
+        or (${actor.roles.includes("mechanic")} and assignment.mechanic_id = ${actor.id})
+        or (${actor.roles.includes("rider")} and request.rider_id = ${actor.id}))
+        and (${input.status ?? null}::text is null or assignment.status::text = ${input.status ?? null})
+        and (${input.date_from ?? null}::timestamptz is null or assignment.created_at >= ${input.date_from ?? null}::timestamptz)
+        and (${input.date_to ?? null}::timestamptz is null or assignment.created_at <= ${input.date_to ?? null}::timestamptz)
+        and (${input.cursor?.timestamp ?? null}::timestamptz is null or
+          (date_trunc('milliseconds', assignment.created_at), assignment.id) < (${input.cursor?.timestamp ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+      order by date_trunc('milliseconds', assignment.created_at) desc, assignment.id desc
+      limit ${input.limit + 1}
     `;
     return rows.map(mapAssignment);
+  }
+
+  async hasVisibleByRequest(actor: { id: string; roles: AuditActorRole[] }, requestId: string): Promise<boolean> {
+    const rows = await this.sql<{ found: boolean }[]>`select exists (
+      select 1 from assignments assignment join service_requests request on request.id = assignment.request_id
+      where request.id = ${requestId} and (${actor.roles.includes("admin")}
+        or (${actor.roles.includes("mechanic")} and assignment.mechanic_id = ${actor.id})
+        or (${actor.roles.includes("rider")} and request.rider_id = ${actor.id}))
+    ) as found`;
+    return rows[0]!.found;
   }
 
   async updateStatus(input: {
@@ -273,7 +320,11 @@ function mapAssignment(row: AssignmentRow): Assignment {
     id: row.id,
     requestId: row.request_id,
     mechanicId: row.mechanic_id,
-    acceptedCandidateId: row.accepted_candidate_id,
+    acceptedCandidateId: row.accepted_candidate_id ?? undefined,
+    source: row.source,
+    assignedByAdminId: row.assigned_by_admin_id ?? undefined,
+    supersedesAssignmentId: row.supersedes_assignment_id ?? undefined,
+    dispatchDistanceMeters: row.dispatch_distance_m ?? undefined,
     scheduledStartAt: row.scheduled_start_at ?? undefined,
     reservationStartAt: row.reservation_start_at ?? undefined,
     reservationEndAt: row.reservation_end_at ?? undefined,

@@ -1,5 +1,9 @@
 import { InMemorySessionStore } from "@/features/chatbot/session.store";
 
+import type { SupervisionAction } from "../contracts/admin-supervision.repository";
+import { InMemoryAdminSupervisionRepository } from "./in-memory-admin-supervision.repository";
+import { InMemoryAdminConfigurationRepository } from "./in-memory-admin-configuration.repository";
+import type { DispatchConfigurationRow, DispatchConfigurationVersion } from "../contracts/admin-configuration.repository";
 import type { Assignment, AssignmentStatusHistory } from "../contracts/assignment.repository";
 import type { AdminInternalNote } from "../contracts/admin-internal-note.repository";
 import type { AuditLog } from "../contracts/audit.repository";
@@ -64,6 +68,9 @@ import { InMemoryServiceRequestRepository } from "./in-memory-service-request.re
 import { InMemoryUserRepository } from "./in-memory-user.repository";
 
 export type InMemoryFoundationState = {
+  adminConfigurationRows: DispatchConfigurationRow[];
+  adminConfigurationVersions: DispatchConfigurationVersion[];
+  adminSupervisionActions: SupervisionAction[];
   adminInternalNotes: AdminInternalNote[];
   users: ApplicationUser[];
   userRoles: UserRoleRecord[];
@@ -107,6 +114,9 @@ export class InMemoryUnitOfWork implements UnitOfWork {
 
   constructor(initialState: Partial<InMemoryFoundationState> = {}) {
     this.state = cloneState({
+      adminConfigurationRows: initialState.adminConfigurationRows ?? [],
+      adminConfigurationVersions: initialState.adminConfigurationVersions ?? [],
+      adminSupervisionActions: initialState.adminSupervisionActions ?? [],
       adminInternalNotes: initialState.adminInternalNotes ?? [],
       users: initialState.users ?? [],
       userRoles: initialState.userRoles ?? [],
@@ -156,6 +166,8 @@ export class InMemoryUnitOfWork implements UnitOfWork {
     try {
       const draft = cloneState(this.state);
       const repositories: FoundationRepositories = {
+        adminConfiguration: new InMemoryAdminConfigurationRepository(draft.adminConfigurationRows,draft.adminConfigurationVersions),
+        adminSupervision: new InMemoryAdminSupervisionRepository(draft.adminSupervisionActions),
         adminQueries: new InMemoryAdminQueryRepository({
           notes: draft.adminInternalNotes,
           requests: draft.serviceRequests,
@@ -164,7 +176,9 @@ export class InMemoryUnitOfWork implements UnitOfWork {
           rounds: draft.dispatchRounds,
           candidates: draft.dispatchCandidates,
           assignments: draft.assignments,
-          quotes: draft.quotes
+          quotes: draft.quotes, users: draft.users, mechanicProfiles: draft.mechanicProfiles, notifications: draft.notifications,
+          outboxEvents: draft.outboxEvents, reminderRules: draft.reminderRules, reminderOccurrences: draft.reminderOccurrences,
+          paymentOrders: draft.paymentOrders, workerRuns: draft.workerRuns
         }),
         adminInternalNotes: new InMemoryAdminInternalNoteRepository(
           draft.adminInternalNotes
@@ -211,7 +225,10 @@ export class InMemoryUnitOfWork implements UnitOfWork {
         dispatch: new InMemoryDispatchRepository(
           draft.dispatchRounds,
           draft.dispatchCandidates,
-          draft.mechanicProfiles
+          draft.mechanicProfiles,
+          draft.users,
+          draft.userRoles,
+          draft.assignments
         ),
         deviceDeliveryCredentials: new InMemoryDeviceDeliveryCredentialRepository(
           draft.deviceDeliveryCredentials

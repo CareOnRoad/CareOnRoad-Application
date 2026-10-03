@@ -19,7 +19,7 @@ import { ReminderWorker } from "@/server/workers/reminder.worker";
 import { PostgresUnitOfWork } from "../postgres-unit-of-work";
 
 const describeDatabase = hasPostgresTestDatabase() ? describe : describe.skip;
-const migrationFiles = legacyCompatibleMigrationFiles();
+const migrationFiles = sourceMigrationFiles();
 
 describeDatabase("reminder repositories integration", () => {
   let context: IsolatedPostgresTestContext;
@@ -69,7 +69,7 @@ describeDatabase("reminder repositories integration", () => {
         "outbox_events",
         "idempotency_records"
       ],
-      { resetAppendOnlyAuditLogs: true }
+      { resetAppendOnlyTables: true }
     );
     await seedRider(riderId);
     await seedRider(otherRiderId);
@@ -106,6 +106,8 @@ describeDatabase("reminder repositories integration", () => {
     ];
     const results = await Promise.all(workers.map((worker) => worker.processDueReminders()));
     expect(results.reduce((sum, result) => sum + result.generated, 0)).toBe(1);
+    expect(results.reduce((sum, result) => sum + result.queued, 0)).toBe(1);
+    expect(results.reduce((sum, result) => sum + result.sent, 0)).toBe(0);
 
     const [occurrences, outboxRows, auditRows] = await Promise.all([
       sql`select * from reminder_occurrences where rule_id = ${rule.id}`,
@@ -113,9 +115,11 @@ describeDatabase("reminder repositories integration", () => {
       sql`select action, metadata from audit_logs order by created_at, id`
     ]);
     expect(occurrences).toHaveLength(1);
-    expect(occurrences[0]).toMatchObject({ status: "sent" });
-    expect(outboxRows.length).toBeGreaterThanOrEqual(3);
-    expect(auditRows.length).toBeGreaterThanOrEqual(3);
+    expect(occurrences[0]).toMatchObject({ status: "queued" });
+    const notifications = await sql`select id, status from notifications where id = ${occurrences[0].notification_id}`;
+    expect(notifications).toEqual([{ id: occurrences[0].notification_id, status: "pending" }]);
+    expect(outboxRows.map((row) => row.topic).sort()).toEqual(["notification.created", "reminder.rule.created"]);
+    expect(auditRows.map((row) => row.action).sort()).toEqual(["notification.created", "reminder.rule.created"]);
     expect(JSON.stringify({ outboxRows, auditRows })).not.toContain("Private reminder title");
   }, 30_000);
 
@@ -129,6 +133,7 @@ describeDatabase("reminder repositories integration", () => {
     const input = {
       motorcycle_id: motorcycleId,
       service_type: "periodic_maintenance",
+      location: { latitude: 10.762622, longitude: 106.660172 },
       problem_description: "Bao duong tu reminder",
       reminder_id: ruleId,
       reminder_context_id: occurrenceId
@@ -256,11 +261,9 @@ async function applyMigrations(sql: Pick<Sql, "unsafe">): Promise<void> {
   }
 }
 
-function legacyCompatibleMigrationFiles(): string[] {
+function sourceMigrationFiles(): string[] {
   return readdirSync(resolve(process.cwd(), "..", "..", "supabase", "migrations"))
-    .filter(
-      (name) => name.endsWith(".sql") && name.localeCompare("202606250014") < 0
-    )
+    .filter((name) => name.endsWith(".sql"))
     .sort();
 }
 

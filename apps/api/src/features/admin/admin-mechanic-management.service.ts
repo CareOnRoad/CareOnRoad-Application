@@ -16,6 +16,7 @@ import type {
   MechanicWorkState
 } from "@/server/repositories/contracts/mechanic.repository";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import type { UserRepository } from "@/server/repositories/contracts/user.repository";
 
 import { loadActiveAdminActor } from "./admin.authorization";
 import {
@@ -262,6 +263,7 @@ export class AdminMechanicManagementService {
       if (!(await repositories.mechanics.findProfileByUserIdForUpdate(id))) {
         throw notFound();
       }
+      await requireMechanicRole(repositories.users, id);
       const updated = await repositories.mechanics.updateSettings({
         userId: id,
         serviceTypes: serviceTypeSet,
@@ -318,6 +320,7 @@ export class AdminMechanicManagementService {
       if (!(await repositories.mechanics.findProfileByUserIdForUpdate(id))) {
         throw notFound();
       }
+      await requireMechanicRole(repositories.users, id);
       const updated = await repositories.mechanics.updateSettings({
         userId: id,
         serviceRadiusKm: parsed.data.service_radius_km,
@@ -369,6 +372,7 @@ export class AdminMechanicManagementService {
       const target =
         await repositories.mechanics.findProfileByUserIdForUpdate(id);
       if (!target) throw notFound();
+      await requireMechanicRole(repositories.users, id);
       if (!target.isAvailable) throw conflict("Mechanic is already unavailable.");
       const updated = await repositories.mechanics.updateAvailability(id, false, now);
       if (!updated) throw notFound();
@@ -429,14 +433,16 @@ export class AdminMechanicManagementService {
           `Mechanic cannot transition from ${target.profileStatus} to ${policy.next}.`
         );
       }
+      await requireMechanicRole(repositories.users, id);
       if (
         policy.guardActiveAssignment &&
-        (await repositories.assignments.findActiveByMechanicForUpdate(id))
+        (await repositories.assignments.findUnfinishedByMechanicForUpdate(id))
       ) {
         throw conflict(
           "Mechanic status cannot change while an active assignment exists."
         );
       }
+      if (policy.next !== "active") await repositories.mechanics.updateAvailability(id, false, now);
       const updated = await repositories.mechanics.updateProfileStatus(
         id,
         policy.next,
@@ -771,4 +777,9 @@ function notFound() {
 
 function conflict(message: string) {
   return new AdminMechanicManagementError("CONFLICT", message, 409);
+}
+
+async function requireMechanicRole(users: UserRepository, id: string): Promise<void> {
+  const user = await users.findActorById(id);
+  if (!user?.roles.includes("mechanic")) throw conflict("The user no longer has the mechanic role.");
 }

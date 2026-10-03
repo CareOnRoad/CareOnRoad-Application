@@ -45,10 +45,10 @@ describeDatabase("media upload repository integration", () => {
     await sql`
       insert into service_requests (
         id, request_code, rider_id, motorcycle_id, service_type,
-        problem_description, address_text, status, priority
+        service_location, problem_description, address_text, status, priority
       ) values (
         ${requestId}, 'COR-MOB-20260823-1', ${riderId}, ${motorcycleId},
-        'mobile_repair', 'Khong no may', '1 Nguyen Trai', 'submitted', 'normal'
+        'mobile_repair', ST_SetSRID(ST_MakePoint(106.69, 10.77), 4326)::geography, 'Khong no may', '1 Nguyen Trai', 'submitted', 'normal'
       )
     `;
   }, 120_000);

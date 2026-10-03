@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-05
 
-**Status**: Draft
+**Status**: Implemented locally through Patches A–I and explicitly authorized J; real provider/device acceptance and production rollout pending.
 
 **Input**: User description: "Add backend-only, command-based admin operations for users, mechanics, service requests, dispatch, assignments, diagnosis and quotes, reminders, notifications, outbox, audit queries, operational dashboards, and optional runtime configuration without changing existing rider, mechanic, chatbot, ASR, frontend, or payment behavior."
 
@@ -696,7 +696,8 @@ The only mutable configuration keys in Patch J are:
 - **PRES-005**: Payment is owned by feature 005, not this admin operations
   feature. This feature MUST NOT add payment routes, payment providers, payment
   repositories, payment migrations, settlement, refunds, or payment state
-  advancement.
+  advancement. Existing feature 005 commitment queries are reused to block
+  unsafe admin intervention; they do not authorize money/provider mutation.
 - **PRES-006**: The feature MUST NOT add inventory commerce, odometer reminders,
   live tracking UI, Maps integration, or chatbot/ASR rewrites.
 - **PRES-007**: Admin operations MUST not cause AI output to book service,

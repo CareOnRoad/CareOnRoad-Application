@@ -553,7 +553,7 @@ function toAssignmentCompletionChecklistResponse(
   };
 }
 
-function toChecklistResponseShape(
+export function toChecklistResponseShape(
   checklist: AssignmentCompletionChecklist["safetyChecklist"]
 ): AssignmentCompletionChecklistInput["safety_checklist"] {
   return {

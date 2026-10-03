@@ -5,7 +5,8 @@ export const notificationDeliveryStatuses = [
   "sent",
   "invalid",
   "permanent_failed",
-  "retryable_failed"
+  "retryable_failed",
+  "canceled"
 ] as const;
 export type NotificationDeliveryStatus = (typeof notificationDeliveryStatuses)[number];
 
@@ -29,6 +30,10 @@ export type NotificationDeliveryReceipt = {
 };
 
 export interface NotificationDeliveryRepository {
+  listByNotificationIdForUpdate(id: string): Promise<NotificationDeliveryReceipt[]>;
+  listPage(id: string, limit: number, cursor?: import("@/lib/list-pagination").PageCursor): Promise<NotificationDeliveryReceipt[]>;
+  retryFailed(input: { ids: string[]; now: Date }): Promise<number>;
+  cancelPending(input: { notificationId: string; now: Date }): Promise<number>;
   claim(input: { id: string; token: string; now: Date; leaseUntil: Date }): Promise<NotificationDeliveryReceipt | undefined>;
   createIfAbsent(input: {
     id: string;
