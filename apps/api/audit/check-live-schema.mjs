@@ -1,20 +1,15 @@
 // Read-only schema verification. Never prints environment values or database errors.
 /* global console, process */
-import { fileURLToPath, URL } from "node:url";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import postgres from "postgres";
 import { loadEnv } from "vite";
+import { checkBackendSchema } from "../src/server/db/backend-schema.mjs";
+import { databaseIdentity as identity } from "../src/server/db/database-environment.mjs";
 
 const api = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.resolve(api, "../..");
 const env = { ...loadEnv("test", root, ""), ...loadEnv("test", api, ""), ...process.env };
-const identity = (value) => {
-  let url;
-  try { url = new URL(value); } catch { return undefined; }
-  const project = /^db\.([^.]+)\.supabase\.co$/.exec(url.hostname)?.[1] ??
-    (url.hostname.endsWith(".pooler.supabase.com") ? decodeURIComponent(url.username).split(".").slice(1).join(".") : undefined);
-  return `${project ? `supabase:${project}` : url.hostname}:${url.pathname}`;
-};
 const evidence = { checked_at: new Date().toISOString(), read_only: true,
   separate_test_database: Boolean(env.TEST_DATABASE_URL && env.DATABASE_URL &&
     identity(env.TEST_DATABASE_URL) && identity(env.DATABASE_URL) &&
@@ -24,11 +19,14 @@ try {
   if (!identity(env.DATABASE_URL)) throw new Error("Invalid database configuration.");
   sql = postgres(env.DATABASE_URL, { max: 1, prepare: false, connect_timeout: 5, idle_timeout: 5 });
   Object.assign(evidence, await sql.begin("read only", async (tx) => {
+    const checks = await checkBackendSchema(tx);
     const versions = await tx`select version from supabase_migrations.schema_migrations order by version`;
     const columns = await tx`select table_name,column_name from information_schema.columns
       where table_schema='public' and table_name in ('assignments','notification_delivery_receipts')`;
     const has = (table, column) => columns.some(item => item.table_name === table && item.column_name === column);
-    return { status: "connected", migration_count: versions.length, last_migration: versions.at(-1)?.version ?? null,
+    return { status: "connected", schema_checks: checks,
+      release_ready: Object.values(checks).every(value => value === true) && versions.some(item => item.version === "202606250035"),
+      migration_count: versions.length, last_migration: versions.at(-1)?.version ?? null,
       migration_035_recorded: versions.some(item => item.version === "202606250035"),
       assignment_reservation_columns: ["scheduled_start_at", "reservation_start_at", "reservation_end_at", "activated_at"]
         .every(column => has("assignments", column)),
@@ -53,4 +51,4 @@ try {
   await sql?.end({ timeout: 1 });
 }
 console.log(JSON.stringify(evidence, null, 2));
-if (evidence.status !== "connected" || !evidence.assignment_reservation_columns || !evidence.notification_lease_columns) process.exitCode = 1;
+if (!evidence.release_ready) process.exitCode = 1;

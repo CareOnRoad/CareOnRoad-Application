@@ -31,4 +31,5 @@ supabase/.temp/
 /tests/workflows/reports/
 /tests/workflows/LATEST.md
 /apps/api/audit/schema-evidence.json
+/apps/api/audit/batch-00/
 /.tmp/push-validation-*/

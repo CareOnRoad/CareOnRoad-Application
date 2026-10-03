@@ -23,6 +23,20 @@ const quoteId = "77777777-7777-4777-8777-777777777777";
 const now = new Date("2026-07-08T03:00:00.000Z");
 
 describe("payment service", () => {
+  it("holds signed non-VND receipts for review without crediting or labeling them VND", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "currency-review-order");
+    provider.nextWebhook = { kind: "valid", eventDedupeKey: "currency-mismatch", success: true,
+      orderCode: order.provider_order_code, amount: order.amount, currency: "USD", status: "00" };
+    expect(await service.handlePayosWebhook({})).toMatchObject({ status: "needs_review" });
+    const snapshot = unitOfWork.snapshot();
+    expect(snapshot.paymentOrders[0]?.status).toBe("needs_review");
+    expect(snapshot.paymentEvents[0]).toMatchObject({ eventType: "payment_currency_mismatch", signatureValid: true });
+    expect(snapshot.paymentEvents[0]?.currency).toBeUndefined();
+    expect(snapshot.assignments[0]?.status).toBe("awaiting_payment");
+  });
   it("holds a verified payment for a canceled job for investigation", async () => {
     const provider = new FakeProvider();
     const state = createUnitOfWork().snapshot();

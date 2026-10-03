@@ -76,6 +76,16 @@ export class PostgresAssignmentRepository implements AssignmentRepository {
     return rows.map(mapAssignment);
   }
 
+  async listReservationConflictMechanicIds(input: Parameters<AssignmentRepository["listReservationConflictMechanicIds"]>[0]) {
+    const mechanicIds = [...new Set(input.mechanicIds)];
+    if (!mechanicIds.length) return [];
+    const rows = await this.sql<{ mechanic_id: string }[]>`select distinct mechanic_id from assignments
+      where mechanic_id in ${this.sql(mechanicIds)} and status in ${this.sql([...ACTIVE_ASSIGNMENT_STATUSES])}
+        and coalesce(reservation_start_at, accepted_at) < ${input.end}
+        and (reservation_end_at is null or reservation_end_at > ${input.start})`;
+    return rows.map((row) => row.mechanic_id);
+  }
+
   async setMaintenanceAgreement(input: { id: string; laborQuoteId: string; updatedAt: Date }): Promise<Assignment | undefined> {
     const rows = await this.sql<AssignmentRow[]>`
       update assignments set maintenance_labor_quote_id = ${input.laborQuoteId}, updated_at = ${input.updatedAt}

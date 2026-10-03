@@ -36,6 +36,7 @@ export function buildExtraCases(c) {
       scheduled_start_at:new Date(now()+60_000).toISOString(),location:{latitude:11.12345,longitude:107.12345}},404);
   });
   for(const mode of ['missing skill','outside radius','stale location','unavailable','suspended']) add(`Dispatch excludes mechanic: ${mode}`,'Ineligible mechanic receives no live maintenance offer; other eligible mechanic unaffected',async()=>{
+    const baseline=await offered();a.ok(baseline.offers.mechanic&&baseline.offers.mechanic2,'Both mechanics must be eligible before changing one condition');await cancel(baseline.request);
     await c.refreshMechanics();const req=await c.book();
     try {
       if(mode==='missing skill')await http('PATCH','/api/v1/mechanics/me/profile','mechanic',{service_types:['emergency_rescue']});
@@ -83,10 +84,22 @@ export function buildExtraCases(c) {
   });
   add('480 minute maximum and adjacent buffered boundary','480 accepted; exactly adjacent reservation allowed; one minute overlap excluded',async()=>{
     const first=await offered({scheduled:now()+3*60*60_000});const assignment=await http('POST',`/api/v1/dispatch/offers/${first.offers.mechanic.id}/accept`,'mechanic',{estimated_duration_minutes:480},201);
-    a.equal(Date.parse(assignment.reservation_end_at),Date.parse(first.request.scheduled_start_at)+510*60_000);
-    const adjacent=await offered({scheduled:Date.parse(first.request.scheduled_start_at)+540*60_000});a.ok(adjacent.offers.mechanic,'Exactly adjacent intervals must be allowed');
-    const overlap=await offered({scheduled:Date.parse(first.request.scheduled_start_at)+539*60_000});a.ok(!overlap.offers.mechanic,'One-minute overlap must be excluded');
-    await cancel(adjacent.request);await cancel(overlap.request);await recover({...first,assignment});
+    let adjacent,overlap;
+    try{
+      a.equal(Date.parse(assignment.reservation_end_at),Date.parse(first.request.scheduled_start_at)+510*60_000);
+      adjacent=await offered({scheduled:Date.parse(first.request.scheduled_start_at)+540*60_000});a.ok(adjacent.offers.mechanic,'Exactly adjacent intervals must be allowed');
+      adjacent.assignment=await http('POST',`/api/v1/dispatch/offers/${adjacent.offers.mechanic.id}/accept`,'mechanic',{estimated_duration_minutes:15},201);
+      a.equal(Date.parse(adjacent.assignment.reservation_start_at),Date.parse(assignment.reservation_end_at));
+      overlap=await offered({scheduled:Date.parse(first.request.scheduled_start_at)+539*60_000});
+      if(overlap.offers.mechanic){
+        await http('POST',`/api/v1/dispatch/offers/${overlap.offers.mechanic.id}/accept`,'mechanic',{estimated_duration_minutes:15},409);
+        const [row]=await c.sql()`select count(*)::int n from assignments where request_id=${overlap.request.id}`;a.equal(row.n,0,'Overlapping acceptance cannot commit');
+      }
+      a.ok(!overlap.offers.mechanic,'One-minute overlap must be excluded from offers');
+    }finally{
+      if(adjacent?.assignment)await recover(adjacent);else if(adjacent)await cancel(adjacent.request);
+      if(overlap)await cancel(overlap.request);await recover({...first,assignment});
+    }
   });
   add('Appointment preparation notification once for both parties','Dispatch worker emits owner and assigned mechanic preparation notices once at -30 minute boundary',async()=>{
     const flow=await c.assigned({scheduled:now()+60*60_000});shift(30*60_000);await worker('dispatch/run');
@@ -113,6 +126,21 @@ export function buildExtraCases(c) {
     await c.webhook(value,{amount:1});a.equal((await http('GET',`/api/v1/payments/orders/${value.id}`)).status,'needs_review');
     const input={action:'close_unpaid',reason:'Provider canceled and confirms no money received'};await mutation('POST',`/api/v1/admin/payments/orders/${value.id}/resolve`,'admin',input,200);
     a.equal((await c.summary(flow)).paid_amount,0);await paid(flow,await c.order(flow.work));
+  });
+  add('Official payOS full webhook shape and local timestamp','Canonical provider fields/Vietnamese desc/counterparty fields are signed and accepted; exact money credited once',async()=>{
+    const flow=await c.ready();const value=await c.order(flow.work);const remote=c.providerOrder(value);remote.status='PAID';remote.amountPaid=remote.amount;remote.amountRemaining=0;
+    const transactionDateTime=new Date(now()+7*60*60_000).toISOString().slice(0,19).replace('T',' ');
+    await c.webhook(value,{transactionDateTime,desc:'Thành công',counterAccountBankId:'',counterAccountBankName:'',counterAccountName:'',counterAccountNumber:'',virtualAccountName:'',virtualAccountNumber:''});
+    a.equal((await c.summary(flow)).paid_amount,18000);a.equal((await c.summary(flow)).remaining_amount,0);await c.transition(flow,'completed');
+  });
+  add('Valid diagnosis and cumulative additions of every line type','Approved labor + parts + added part/labor/other =27000; stale approved quote cannot be charged',async()=>{
+    const flow=await c.assigned();flow.labor=await c.atSite(flow);
+    const diagnosis=await http('POST',`/api/v1/assignments/${flow.assignment.id}/diagnoses`,'mechanic',{diagnosis_text:'Chẩn đoán bảo dưỡng dùng để kiểm chứng quote binding'},201);
+    const original=await c.quote(flow,'maintenance_work',c.parts,{diagnosis_id:diagnosis.id});await c.decide(original);await c.transition(flow,'in_progress');
+    flow.work=await c.quote(flow,'maintenance_work',[{...c.parts[0],quantity:1},{...c.laborLines[0],unit_amount:4000},{...c.laborLines[1],unit_amount:2000}],{basis_quote_id:original.id});
+    a.equal(flow.work.total_amount,27000);await c.decide(flow.work);const sum=await c.summary(flow);a.equal(sum.labor_amount,14000);a.equal(sum.parts_amount,9000);a.equal(sum.other_amount,4000);
+    await mutation('POST',`/api/v1/assignments/${flow.assignment.id}/completion-checklist`,'mechanic',c.checklist,201);await c.transition(flow,'awaiting_payment');
+    await c.order(original,409);const value=await c.order(flow.work);a.equal(value.amount,27000);await paid(flow,value);
   });
   return tests;
 }

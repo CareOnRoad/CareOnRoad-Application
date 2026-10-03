@@ -36,7 +36,9 @@ metadata, and completion checklist metadata.
   work and additions separately, then collects payment after a completion checklist.
   Full verified payment is required before closing the job. Existing `standard`
   maintenance quotes retain their previous payment behavior. See
-  [the maintenance API workflow](MAINTENANCE-WORKFLOW.md); apply migrations through 034.
+  [the maintenance API workflow](MAINTENANCE-WORKFLOW.md). Current API runtime
+  requires verified migrations through 035; follow the
+  [schema release/test checklist](SCHEMA-RELEASE-CHECKLIST.md).
 
 ## Local Setup
 

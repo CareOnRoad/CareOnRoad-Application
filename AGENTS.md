@@ -143,12 +143,22 @@
   checklist bound to approved work, and payment after service. Existing `standard`
   maintenance quotes retain prepayment behavior; mobile/web clients are unchanged.
 - Migrations `202606250001_enable_extensions.sql` through
+<<<<<<< HEAD
   `202606250034_maintenance_quote_payment_workflow.sql` must be applied and verified on
   `202606250033_user_profile_extended.sql` must be applied and verified on
   hosted/dev before enabling the corresponding APIs or seeding mock data.
 - `202606250033_user_profile_extended.sql` adds `phone`, `address`, and
   `avatar_url` columns to `app_users` so the bootstrap and update profile
   routes can persist rider/mechanic profile edits end-to-end.
+=======
+  `202606250035_maintenance_reservations_notification_leases.sql` must be applied and verified on
+  hosted/dev before enabling the corresponding APIs or seeding mock data.
+- Run `pnpm.cmd run preflight:schema` before release. This read-only gate checks
+  source migration history and runtime schema objects; readiness also rejects
+  missing schema. See `apps/api/SCHEMA-RELEASE-CHECKLIST.md` for test isolation and
+  migration verification. Never apply development/test migrations to production
+  as part of a local validation batch.
+>>>>>>> danh/backend-workflow-fixes
 
 ## Hosted Supabase Mock Data
 

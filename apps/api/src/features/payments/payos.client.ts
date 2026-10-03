@@ -20,12 +20,12 @@ export class PayosConfigurationError extends Error {
 }
 
 export class PayosProviderError extends Error {
-  readonly status = 409;
-  readonly errorCode = "CONFLICT" as const;
+  readonly errorCode: "CONFLICT" | "INTERNAL_ERROR";
 
-  constructor(message = "payOS payment provider rejected the request.") {
+  constructor(message = "payOS payment provider rejected the request.", public readonly status: 409 | 503 = 409) {
     super(message);
     this.name = "PayosProviderError";
+    this.errorCode = status === 503 ? "INTERNAL_ERROR" : "CONFLICT";
   }
 }
 
@@ -115,7 +115,8 @@ export class PayosClient implements PaymentProviderClient {
     const orderCode = Number(data.orderCode);
     const amount = Number(data.amount);
     const currency = data.currency;
-    if (!Number.isSafeInteger(orderCode) || !Number.isSafeInteger(amount) || currency !== "VND") {
+    if (!Number.isSafeInteger(orderCode) || !Number.isSafeInteger(amount) || amount <= 0 ||
+      typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency)) {
       return { kind: "invalid", reason: "invalid_payload" };
     }
     const providerReference =
@@ -144,21 +145,29 @@ export class PayosClient implements PaymentProviderClient {
     path: string,
     input: { method: "GET" | "POST"; body?: Record<string, unknown> }
   ): Promise<{ code: string; desc: string; data?: unknown }> {
-    const response = await this.fetcher(`${this.baseUrl}${path}`, {
-      method: input.method,
-      headers: {
-        "content-type": "application/json",
-        "x-client-id": this.clientId,
-        "x-api-key": this.apiKey
-      },
-      ...(input.body ? { body: JSON.stringify(input.body) } : {}),
-      signal: AbortSignal.timeout(10_000)
-    });
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.baseUrl}${path}`, {
+        method: input.method,
+        headers: {
+          "content-type": "application/json",
+          "x-client-id": this.clientId,
+          "x-api-key": this.apiKey
+        },
+        ...(input.body ? { body: JSON.stringify(input.body) } : {}),
+        signal: AbortSignal.timeout(10_000)
+      });
+    } catch {
+      throw new PayosProviderError("payOS is temporarily unavailable.", 503);
+    }
     const body = (await response.json().catch(() => ({}))) as {
       code?: string;
       desc?: string;
       data?: unknown;
     };
+    if (response.status === 429 || response.status >= 500) {
+      throw new PayosProviderError("payOS is temporarily unavailable.", 503);
+    }
     if (!response.ok || body.code !== "00") {
       throw new PayosProviderError("payOS request failed.");
     }

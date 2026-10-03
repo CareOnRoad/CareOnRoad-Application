@@ -96,6 +96,17 @@ describeDatabase("service request repositories integration", () => {
     );
   }, 120_000);
 
+  it("replays concurrent creation with one key and persists one logical request", async () => {
+    const service = new ServiceRequestService(new PostgresUnitOfWork(sql), { now: () => new Date("2026-06-25T07:00:00Z") });
+    const input = validInput({ service_type: "mobile_repair", address_text: "1 Nguyen Trai" });
+    const requests = await Promise.all(Array.from({ length: 4 }, () => service.createServiceRequest(riderIdentity, input, "same-key-race")));
+    expect(new Set(requests.map((request) => request.id)).size).toBe(1);
+    const [count] = await sql<{ count: number }[]>`select count(*)::integer as count from service_requests where rider_id = ${riderId}`;
+    expect(count?.count).toBe(1);
+    await expect(service.createServiceRequest(riderIdentity, { ...input, address_text: "2 Nguyen Trai" }, "same-key-race"))
+      .rejects.toMatchObject({ status: 409, errorCode: "CONFLICT" });
+  }, 120_000);
+
   it("persists valid Patch 3 matrix cases, media metadata, idempotency, ownership, and conflicts", async () => {
     const service = new ServiceRequestService(new PostgresUnitOfWork(sql), {
       now: () => new Date("2026-06-25T07:00:00Z")

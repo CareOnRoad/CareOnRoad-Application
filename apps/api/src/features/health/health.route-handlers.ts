@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getPostgresClient } from "@/server/db/postgres-client";
+import { assertBackendSchema } from "@/server/db/backend-schema.mjs";
 
 import { evaluateHealthConfiguration, readHealthTimeoutMs } from "./health-config";
 import { HealthService, type ReadinessSnapshot } from "./health.service";
@@ -35,7 +36,7 @@ export function createDefaultHealthRouteHandlers() {
     service: new HealthService({
       probes: [{ name: "database", run: async () => {
         const sql = getPostgresClient();
-        await sql`select 1`;
+        await assertBackendSchema(sql);
       } }],
       configurationChecks: evaluateHealthConfiguration(),
       timeoutMs: readHealthTimeoutMs()

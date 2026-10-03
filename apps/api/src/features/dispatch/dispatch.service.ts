@@ -508,8 +508,16 @@ async function createDispatchRound(
       { activeWorkloadCount: workload.activeAssignmentCount }
     ])
   );
+  const scheduled = input.request.serviceType === "periodic_maintenance" ? input.request.scheduledStartAt : undefined;
+  // The mechanic chooses duration at acceptance. Exclude a scheduled invitation
+  // only if even the minimum 15-minute visit cannot fit its travel buffers.
+  const reservationStart = new Date(scheduled ? scheduled.getTime() - 30 * 60_000 : input.now.getTime());
+  const reservationEnd = new Date((scheduled ?? input.now).getTime() + ((scheduled ? 15 : 120) + 30) * 60_000);
+  const conflicts = new Set(await repositories.assignments.listReservationConflictMechanicIds({
+    mechanicIds: newMechanics.map((mechanic) => mechanic.mechanicId), start: reservationStart, end: reservationEnd
+  }));
   const ranked = rankDispatchCandidates(
-    newMechanics,
+    newMechanics.filter((mechanic) => !conflicts.has(mechanic.mechanicId)),
     input.request.serviceType === "periodic_maintenance" && input.request.scheduledStartAt &&
       input.request.scheduledStartAt.getTime() > input.now.getTime() + 30 * 60_000 ? new Map() : workloads,
     DISPATCH_CANDIDATE_BATCH_SIZE

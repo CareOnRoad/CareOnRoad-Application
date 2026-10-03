@@ -24,6 +24,9 @@
     "test:unit": "pnpm --filter @careonroad/api test:unit",
     "test:db": "pnpm --filter @careonroad/api test:db",
     "test:full": "pnpm --filter @careonroad/api test:full",
+    "test:audit": "pnpm --filter @careonroad/api test:audit",
+    "preflight:schema": "pnpm --filter @careonroad/api preflight:schema",
+    "preflight:test-db": "pnpm --filter @careonroad/api preflight:test-db",
     "asr:smoke": "pnpm --filter @careonroad/api asr:smoke",
     "seed:mock": "pnpm --filter @careonroad/api seed:mock",
     "seed:mock:verify": "pnpm --filter @careonroad/api seed:mock:verify"

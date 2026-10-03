@@ -8,6 +8,21 @@ import {
 } from "../postgres-test-context";
 
 describe("postgres test context", () => {
+  it("rejects malformed encoded URLs with a controlled configuration error", () => {
+    expect(() => requirePostgresTestDatabaseUrl({ NODE_ENV: "test", RUN_DB_TESTS: "true",
+      TEST_DATABASE_URL: "postgres://postgres.bad%ZZ:test@aws.pooler.supabase.com/postgres" })).toThrow("valid postgres://");
+  });
+  it("blocks localhost aliases and URL-encoded names for the same application database", () => {
+    expect(() => requirePostgresTestDatabaseUrl({ NODE_ENV: "test", RUN_DB_TESTS: "true",
+      DATABASE_URL: "postgres://postgres:app@localhost/careonroad_test",
+      TEST_DATABASE_URL: "postgres://postgres:test@127.0.0.1:5432/careonroad_%74est" })).toThrow("separate database");
+  });
+  it("distinguishes separately hosted local database instances by port", () => {
+    const environment = { NODE_ENV: "test", RUN_DB_TESTS: "true",
+      DATABASE_URL: "postgres://postgres:app@localhost:5432/careonroad_test",
+      TEST_DATABASE_URL: "postgres://postgres:test@localhost:5433/careonroad_test" };
+    expect(requirePostgresTestDatabaseUrl(environment)).toBe(environment.TEST_DATABASE_URL);
+  });
   it("blocks a shared app database even with explicit test confirmation", async () => {
     await expect(createIsolatedPostgresTestContext({ NODE_ENV: "test", RUN_DB_TESTS: "true", TEST_DATABASE_CONFIRMED: "true",
       DATABASE_URL: "postgres://postgres:app@localhost/careonroad_test",
