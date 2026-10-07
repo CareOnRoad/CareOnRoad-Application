@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { componentTaxonomy } from "../component-taxonomy";
+import { knowledgeVersion } from "../knowledge-sources";
 import { buildCompactDiagnosisPrompt } from "../prompts";
 import { retrieveKnowledge } from "../retrieval";
 import { runSafetyGate } from "../safety-gate";
@@ -60,6 +61,29 @@ describe("buildCompactDiagnosisPrompt", () => {
     expect(text).not.toContain("audio_file");
     expect(text).not.toContain("do-not-send");
     expect(text).not.toContain("[1,2,3]");
+  });
+
+  it("passes compact provenance, scope and questions without downloading source documents", () => {
+    const prompt = buildPrompt("nhớt trắng sữa");
+    const payload = JSON.parse(prompt.messages[1].content);
+    expect(payload.knowledge_version).toBe(knowledgeVersion);
+    expect(payload.retrieved_local_knowledge[0]).toMatchObject({
+      review_status: "source_checked", vehicle_scope: "petrol_motorcycles", price_status: "unverified"
+    });
+    expect(payload.retrieved_local_knowledge[0].source_refs[0].source_id).toBe("yamaha-flood");
+    expect(payload.retrieved_local_knowledge[0].followup_questions.length).toBeLessThanOrEqual(2);
+    expect(prompt.messages[0].content).toContain("Do not invent costs");
+    expect(prompt.messages[1].content).not.toContain("https://");
+  });
+
+  it("passes the model/market limits and prohibits invented FI codes or specifications", () => {
+    const prompt = buildPrompt("Suzuki Raider FI bản Philippines đèn FI");
+    const payload = JSON.parse(prompt.messages[1].content);
+    expect(payload.retrieved_local_knowledge[0].applicability).toMatchObject({
+      brand: "suzuki", market: "PH", model_years: null
+    });
+    expect(prompt.messages[0].content).toContain("do not supply exact specifications");
+    expect(prompt.messages[0].content).toContain("do not guess a component or decode FI/MIL blink counts");
   });
 });
 

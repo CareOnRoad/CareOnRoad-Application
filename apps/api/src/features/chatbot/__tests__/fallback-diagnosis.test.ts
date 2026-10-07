@@ -56,4 +56,19 @@ describe("createFallbackDiagnosis", () => {
 
     expect(diagnosis.transcribed_text).toBe("Xe khó đề");
   });
+
+  it("asks symptom-specific questions and avoids unverified repair prices", () => {
+    const diagnosis = createFallbackDiagnosis("nhớt trắng sữa");
+    expect(diagnosis.top_hypotheses[0]?.component_code).toBe("ENGINE_OIL");
+    expect(diagnosis.can_continue_riding).toBe(false);
+    expect(diagnosis.followup_questions[0]).toContain("ngập nước");
+    expect(diagnosis.estimated_total).toMatchObject({ min: 0, max: 0 });
+    expect(diagnosis.short_answer).toContain("Chưa có ước tính");
+  });
+
+  it("asks neutrally instead of diagnosing pending charging knowledge", () => {
+    const diagnosis = createFallbackDiagnosis("sạc không vào");
+    expect(diagnosis.top_hypotheses[0]?.component_code).toBe("UNKNOWN");
+    expect(diagnosis.followup_questions[0]).toContain("mẫu xe");
+  });
 });
