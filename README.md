@@ -85,6 +85,7 @@ explicitly with `pnpm.cmd run test:db` or `pnpm.cmd run test:full`.
 
 ## Backend assets and documentation
 
+- Docker image, Compose và hướng dẫn chạy backend/API: [apps/api/DOCKER.md](apps/api/DOCKER.md)
 - Backend details and environment variables: `apps/api/README.md`
 - Local Vietnamese ASR models: `apps/api/models`
 - Database migrations: `supabase/migrations`

@@ -1,6 +1,7 @@
 import type { DiagnosisResult, RecommendedActionType, RiskLevel } from "./diagnosis.schema";
 import { diagnosisSchema } from "./diagnosis.schema";
 import type { KnowledgeEntry } from "./knowledge-base";
+import { knowledgeReviewedAt } from "./knowledge-sources";
 import { retrieveKnowledge } from "./retrieval";
 import { runSafetyGate } from "./safety-gate";
 
@@ -21,7 +22,7 @@ export function createFallbackDiagnosis(
     cause: entry.cause,
     symptoms: entry.symptoms,
     consequences: entry.consequences,
-    confidence: retrieved.length > 0 ? Math.max(0.45, 0.68 - index * 0.12) : 0.25,
+    confidence: entry.component_code === "UNKNOWN" ? 0.25 : Math.max(0.45, 0.68 - index * 0.12),
     estimated_cost_min: entry.estimated_cost_min,
     estimated_cost_max: entry.estimated_cost_max
   }));
@@ -37,7 +38,7 @@ export function createFallbackDiagnosis(
 
   const diagnosis: DiagnosisResult = {
     short_answer: buildShortAnswer(safety.is_dangerous, retrieved.length > 0),
-    overall_confidence: retrieved.length > 0 ? 0.62 : 0.25,
+    overall_confidence: entries[0].component_code === "UNKNOWN" ? 0.25 : 0.62,
     risk_level: riskLevel,
     can_continue_riding: canContinueRiding,
     top_hypotheses: hypotheses,
@@ -53,7 +54,7 @@ export function createFallbackDiagnosis(
         label: entry.recommended_action_label
       }))
     ),
-    followup_questions: retrieved.length > 0 ? [] : ["Xe có khó đề, hao xăng hoặc đèn yếu không?"],
+    followup_questions: entries[0].followup_questions.slice(0, 2),
     ...(options.transcribedText ? { transcribed_text: options.transcribedText } : {}),
     fallback_used: true
   };
@@ -64,6 +65,12 @@ export function createFallbackDiagnosis(
 function unknownEntry(): KnowledgeEntry {
   return {
     entry_id: "unknown",
+    review_status: "internal_policy",
+    reviewed_at: knowledgeReviewedAt,
+    source_refs: [],
+    vehicle_scope: "all_motorcycles",
+    price_status: "unverified",
+    followup_questions: ["Bạn dùng mẫu xe nào và triệu chứng xảy ra khi nào?"],
     symptom_keywords: [],
     normalized_keywords: [],
     component_code: "UNKNOWN",
@@ -115,12 +122,12 @@ function buildActions(
 
 function buildShortAnswer(isDangerous: boolean, hasKnowledge: boolean): string {
   if (isDangerous) {
-    return "Dừng xe ngay và không tiếp tục chạy. Giá chỉ là ước tính, cần thợ kiểm tra.";
+    return "Dừng xe ngay và không tiếp tục chạy. Chưa có ước tính chi phí, cần thợ kiểm tra.";
   }
 
   if (!hasKnowledge) {
-    return "Chưa đủ dữ liệu để xác định lỗi. Giá chỉ là ước tính, cần mô tả thêm.";
+    return "Chưa đủ dữ liệu để xác định lỗi. Chưa có ước tính chi phí, cần mô tả thêm.";
   }
 
-  return "Có thể liên quan đến bộ phận phổ biến bên dưới. Giá chỉ là ước tính, chưa phải báo giá cuối cùng.";
+  return "Các khả năng bên dưới cần được kiểm tra trực tiếp. Chưa có ước tính chi phí sửa chữa.";
 }

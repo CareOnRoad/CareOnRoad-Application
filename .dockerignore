@@ -1,0 +1,17 @@
+# Only send the API and workspace manifests to the builder.
+*
+!Dockerfile
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/api/
+!apps/api/**
+
+# Local dependencies, build output and secrets must never enter an image.
+**/node_modules
+**/.next
+**/.env*
+**/*.log
+**/*.tsbuildinfo
+apps/api/audit

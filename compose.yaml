@@ -1,0 +1,16 @@
+services:
+  api:
+    image: careonroad-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ${API_ENV_FILE:-./apps/api/.env.local}
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "${API_PORT:-3000}:3000"
+    init: true
+    restart: unless-stopped

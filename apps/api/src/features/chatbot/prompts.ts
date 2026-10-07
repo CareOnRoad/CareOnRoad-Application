@@ -1,4 +1,5 @@
 import { componentTaxonomy } from "./component-taxonomy";
+import { knowledgeVersion } from "./knowledge-sources";
 import type { RetrievedKnowledgeEntry } from "./retrieval";
 import type { SafetyGateResult } from "./safety-gate";
 
@@ -43,6 +44,12 @@ export function buildCompactDiagnosisPrompt(input: CompactDiagnosisPromptInput):
           "If the symptom is only vague running noise, use UNKNOWN unless retrieved local knowledge strongly identifies a component.",
           "Do not guess BATTERY or SPARK_PLUG from noise-only symptoms.",
           "Price is estimate only, not a final mechanic quote.",
+          "No verified repair prices are available. Do not invent costs or quote prices in answer, issue or actions.",
+          "Source-checked knowledge is advisory, not proof that a component is broken.",
+          "Respect vehicle_scope. Ask for vehicle type/model when applicability is unclear; do not apply scooter CVT knowledge to geared or electric motorcycles.",
+          "Respect applicability.brand, models and market. Do not transfer model-specific or PH manual claims to another model/market. Null model_years means the year is unverified: do not supply exact specifications, service intervals or fault-code mappings.",
+          "When local knowledge requests variant confirmation, use UNKNOWN and the supplied questions; do not guess a component or decode FI/MIL blink counts. A warning lamp at key-on alone does not establish a fault; clarify whether it stays on with the engine running.",
+          "Prefer the supplied followup_questions to distinguish causes; do not give disassembly or hazardous DIY instructions.",
           "Treat dangerous symptoms conservatively.",
           "Backend safety rules can override model output.",
           "Do not diagnose beyond the provided symptom text, safety signals, taxonomy, and retrieved local knowledge.",
@@ -68,8 +75,16 @@ export function buildCompactDiagnosisPrompt(input: CompactDiagnosisPromptInput):
             },
             safety_answers: sanitizedSafetyAnswers,
             component_taxonomy: componentTaxonomy,
+            knowledge_version: knowledgeVersion,
             retrieved_local_knowledge: input.retrievedKnowledge.map((entry) => ({
               entry_id: entry.entry_id,
+              review_status: entry.review_status,
+              reviewed_at: entry.reviewed_at,
+              source_refs: entry.source_refs,
+              vehicle_scope: entry.vehicle_scope,
+              applicability: entry.applicability,
+              followup_questions: entry.followup_questions,
+              price_status: entry.price_status,
               component_code: entry.component_code,
               cause: entry.cause,
               symptoms: entry.symptoms,

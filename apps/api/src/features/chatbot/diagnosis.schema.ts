@@ -56,6 +56,13 @@ export const diagnosisSchema = z
     recommended_next_actions: z.array(recommendedActionSchema).max(2),
     followup_questions: z.array(z.string().trim().min(1)).max(2),
     transcribed_text: z.string().trim().min(1).optional(),
+    // Optional for stored diagnoses created before the curated corpus existed.
+    knowledge_provenance: z.object({
+      version: z.string().min(1).max(40),
+      reviewed_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      entry_ids: z.array(z.string().min(1).max(100)).max(2),
+      source_ids: z.array(z.string().min(1).max(100)).max(4)
+    }).strict().optional(),
     fallback_used: z.boolean()
   })
   .strict();

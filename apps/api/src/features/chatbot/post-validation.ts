@@ -33,6 +33,8 @@ export function postValidateDiagnosis(
 
   const raw = modelOutput as Record<string, unknown>;
   const primaryKnowledge = options.retrievedKnowledge?.[0];
+  const needsClarification = primaryKnowledge?.review_status === "internal_policy"
+    && primaryKnowledge.component_code === "UNKNOWN";
   if (!hasDiagnosticSubstance(raw, primaryKnowledge)) {
     return { success: false, reason: "UNREPAIRABLE_OUTPUT" };
   }
@@ -45,17 +47,21 @@ export function postValidateDiagnosis(
     primaryKnowledge
   );
   const topHypotheses = repairHypotheses(raw.top_hypotheses, raw, primaryKnowledge);
-  const estimatedTotal = repairEstimatedTotal(raw.estimated_total, topHypotheses, primaryKnowledge);
   const overallConfidence = repairOverallConfidence(raw.overall_confidence, topHypotheses, primaryKnowledge);
   const repaired = {
     short_answer: repairShortAnswer(repairShortAnswerSeed(raw, primaryKnowledge)),
-    overall_confidence: overallConfidence,
+    overall_confidence: needsClarification ? Math.min(overallConfidence, 0.35) : overallConfidence,
     risk_level: riskLevel,
     can_continue_riding: canContinueRiding,
     top_hypotheses: topHypotheses,
-    estimated_total: estimatedTotal,
-    recommended_next_actions: repairActions(raw.recommended_next_actions, raw, riskLevel, safety, primaryKnowledge),
-    followup_questions: repairFollowupQuestions(firstDefined(raw.followup_questions, raw.questions)),
+    // The curated corpus has no verified repair prices. Ignore provider numbers.
+    estimated_total: { currency: "VND", min: 0, max: 0 },
+    recommended_next_actions: needsClarification
+      ? repairActions(undefined, {}, riskLevel, safety, primaryKnowledge)
+      : repairActions(raw.recommended_next_actions, raw, riskLevel, safety, primaryKnowledge),
+    followup_questions: needsClarification
+      ? primaryKnowledge.followup_questions.slice(0, 2)
+      : repairFollowupQuestions(firstDefined(raw.followup_questions, raw.questions), primaryKnowledge),
     ...(options.transcribedText ? { transcribed_text: options.transcribedText } : {}),
     fallback_used: Boolean(raw.fallback_used)
   };
@@ -78,6 +84,20 @@ function repairHypotheses(
   raw: Record<string, unknown>,
   primaryKnowledge?: RetrievedKnowledgeEntry
 ): DiagnosisResult["top_hypotheses"] {
+  // A request to identify the vehicle cannot be turned into a technical diagnosis.
+  if (primaryKnowledge?.review_status === "internal_policy" && primaryKnowledge.component_code === "UNKNOWN") {
+    return [{
+      rank: 1,
+      component_code: "UNKNOWN",
+      cause: primaryKnowledge.cause,
+      symptoms: primaryKnowledge.symptoms,
+      consequences: primaryKnowledge.consequences,
+      confidence: 0.25,
+      estimated_cost_min: 0,
+      estimated_cost_max: 0
+    }];
+  }
+
   if (!Array.isArray(value)) {
     const shortIssue = firstMeaningfulString(raw.likely_issue, raw.issue).trim() || primaryKnowledge?.cause || "";
     if (!shortIssue) {
@@ -86,9 +106,6 @@ function repairHypotheses(
 
     const componentCode = primaryKnowledge?.component_code ?? firstString(raw.likely_component_code, raw.part);
     const validComponentCode = isComponentCode(componentCode);
-    const estimatedCost = primaryKnowledge
-      ? { min: primaryKnowledge.estimated_cost_min, max: primaryKnowledge.estimated_cost_max }
-      : { min: 0, max: 0 };
 
     return [
       {
@@ -98,8 +115,8 @@ function repairHypotheses(
         symptoms: asMeaningfulString(raw.symptoms, primaryKnowledge?.symptoms ?? shortIssue),
         consequences: asMeaningfulString(raw.consequences, primaryKnowledge?.consequences ?? "Can kiem tra them"),
         confidence: clampNumber(raw.overall_confidence) || 0.45,
-        estimated_cost_min: estimatedCost.min,
-        estimated_cost_max: estimatedCost.max
+        estimated_cost_min: 0,
+        estimated_cost_max: 0
       }
     ];
   }
@@ -110,10 +127,6 @@ function repairHypotheses(
     .map((item, index) => {
       const componentCode = index === 0 && primaryKnowledge ? primaryKnowledge.component_code : asString(item.component_code);
       const validComponentCode = isComponentCode(componentCode);
-      const estimatedCost =
-        index === 0 && primaryKnowledge
-          ? { min: primaryKnowledge.estimated_cost_min, max: primaryKnowledge.estimated_cost_max }
-          : repairRange(item.estimated_cost_min, item.estimated_cost_max);
       const confidence = clampNumber(item.confidence);
 
       return {
@@ -123,51 +136,12 @@ function repairHypotheses(
         symptoms: asMeaningfulString(item.symptoms, primaryKnowledge?.symptoms ?? "Trieu chung chua ro"),
         consequences: asMeaningfulString(item.consequences, primaryKnowledge?.consequences ?? "Can kiem tra them"),
         confidence: validComponentCode ? confidence : Math.min(confidence, 0.35),
-        estimated_cost_min: estimatedCost.min,
-        estimated_cost_max: estimatedCost.max
+        estimated_cost_min: 0,
+        estimated_cost_max: 0
       };
     });
 
   return repaired;
-}
-
-function repairEstimatedTotal(
-  value: unknown,
-  hypotheses: DiagnosisResult["top_hypotheses"],
-  primaryKnowledge?: RetrievedKnowledgeEntry
-): DiagnosisResult["estimated_total"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    if (primaryKnowledge) {
-      return {
-        currency: "VND",
-        min: primaryKnowledge.estimated_cost_min,
-        max: primaryKnowledge.estimated_cost_max
-      };
-    }
-
-    if (hypotheses.length > 0) {
-      return {
-        currency: "VND",
-        min: Math.min(...hypotheses.map((hypothesis) => hypothesis.estimated_cost_min)),
-        max: Math.max(...hypotheses.map((hypothesis) => hypothesis.estimated_cost_max))
-      };
-    }
-
-    return {
-      currency: "VND",
-      min: 0,
-      max: 0
-    };
-  }
-
-  const raw = value as Record<string, unknown>;
-  const range = repairRange(raw.min, raw.max);
-
-  return {
-    currency: "VND",
-    min: range.min,
-    max: range.max
-  };
 }
 
 function repairActions(
@@ -216,27 +190,25 @@ function repairActions(
     .map(([type, label]) => ({ type, label }));
 }
 
-function repairFollowupQuestions(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
+function repairFollowupQuestions(value: unknown, primaryKnowledge?: RetrievedKnowledgeEntry): string[] {
+  const questions = (Array.isArray(value) ? value : [])
     .map((item) => asString(item).trim())
     .filter(Boolean)
     .slice(0, 2);
+
+  return questions.length > 0 ? questions : primaryKnowledge?.followup_questions.slice(0, 2) ?? [];
 }
 
 function repairShortAnswer(value: string): string {
   const sentences = splitSentences(value).slice(0, 3);
   const compact = sentences.length > 0 ? sentences.join(" ") : "Can kiem tra them.";
 
-  if (hasEstimateWording(compact)) {
+  if (normalizeVietnameseText(compact).includes("chua co uoc tinh chi phi")) {
     return compact;
   }
 
   const withRoom = splitSentences(compact).slice(0, 2);
-  return [...withRoom, "Gia chi la uoc tinh."].join(" ");
+  return [...withRoom, "Chua co uoc tinh chi phi; can tho kiem tra."].join(" ");
 }
 
 function applySafetyOverride(value: Record<string, unknown>, safety: SafetyGateResult): Record<string, unknown> {
@@ -250,7 +222,7 @@ function applySafetyOverride(value: Record<string, unknown>, safety: SafetyGateR
 
   return {
     ...value,
-    short_answer: "Dung xe ngay va goi ho tro. Gia chi la uoc tinh.",
+    short_answer: "Dung xe ngay va goi ho tro. Chua co uoc tinh chi phi; can tho kiem tra.",
     risk_level: safety.risk_level ?? "high",
     can_continue_riding: false,
     recommended_next_actions: [
@@ -260,16 +232,6 @@ function applySafetyOverride(value: Record<string, unknown>, safety: SafetyGateR
       },
       ...withoutEmergency
     ].slice(0, 2)
-  };
-}
-
-function repairRange(minValue: unknown, maxValue: unknown): { min: number; max: number } {
-  const first = Math.max(0, asFiniteNumber(minValue));
-  const second = Math.max(0, asFiniteNumber(maxValue));
-
-  return {
-    min: Math.min(first, second),
-    max: Math.max(first, second)
   };
 }
 
@@ -469,13 +431,4 @@ function splitSentences(value: string): string[] {
     .map((sentence) => sentence.trim())
     .filter(Boolean)
     .map((sentence) => (/[.!?]$/.test(sentence) ? sentence : `${sentence}.`));
-}
-
-function hasEstimateWording(value: string): boolean {
-  const normalized = normalizeVietnameseText(value);
-  return (
-    normalized.includes("uoc tinh") ||
-    normalized.includes("tham khao") ||
-    normalized.includes("chua phai bao gia cuoi cung")
-  );
 }

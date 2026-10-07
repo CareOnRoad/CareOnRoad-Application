@@ -10,6 +10,7 @@ import type { AiDiagnosisJsonProvider } from "./ai-provider.types";
 import type { DiagnosisResult } from "./diagnosis.schema";
 import { diagnosisSchema } from "./diagnosis.schema";
 import { createFallbackDiagnosis } from "./fallback-diagnosis";
+import { knowledgeReviewedAt, knowledgeVersion } from "./knowledge-sources";
 import { messageRequestSchema } from "./message.schema";
 import { normalizeVietnameseText } from "./normalize-vi";
 import { postValidateDiagnosis } from "./post-validation";
@@ -159,6 +160,17 @@ export class DiagnosisService {
       });
     }
 
+    // Provenance comes only from backend retrieval, never from provider JSON.
+    diagnosis = {
+      ...diagnosis,
+      knowledge_provenance: {
+        version: knowledgeVersion,
+        reviewed_at: knowledgeReviewedAt,
+        entry_ids: retrievedKnowledge.map((entry) => entry.entry_id),
+        source_ids: [...new Set(retrievedKnowledge.flatMap((entry) => entry.source_refs.map((ref) => ref.source_id)))]
+      }
+    };
+
     const storedMessage = await this.sessionRepository.appendMessage(
       request.sessionId,
       {
@@ -190,7 +202,9 @@ export class DiagnosisService {
       input_mode: inputMode,
       latency_ms: this.now() - startedAt,
       fallback_used: diagnosis.fallback_used,
-      risk_level: diagnosis.risk_level
+      risk_level: diagnosis.risk_level,
+      knowledge_version: knowledgeVersion,
+      knowledge_entry_ids: diagnosis.knowledge_provenance?.entry_ids
     });
 
     return {

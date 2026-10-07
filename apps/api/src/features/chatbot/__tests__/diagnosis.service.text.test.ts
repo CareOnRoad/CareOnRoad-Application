@@ -4,10 +4,71 @@ import type { LogEvent } from "@/lib/server-logger";
 
 import { DiagnosisService } from "../diagnosis.service";
 import type { DiagnosisResult } from "../diagnosis.schema";
+import { knowledgeReviewedAt, knowledgeVersion } from "../knowledge-sources";
 import type { OpenRouterResult } from "../openrouter.client";
 import { InMemorySessionStore } from "../session.store";
 
 describe("DiagnosisService text orchestration", () => {
+  it.each([false, true])("persists the PH manual source only for an applicable Raider FI, fallback %s", async (fallback) => {
+    const { service, store } = setup({ openRouterResult: fallback
+      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+      : { success: true, json: modelDiagnosis(), apiHttpStatus: "200" } });
+    const session = store.createSession();
+    const result = await service.diagnose({ sessionId: session.session_id,
+      input: { input_mode: "text", content_text: "Suzuki Raider FI bản Philippines đèn báo FI" } });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diagnosis.knowledge_provenance).toEqual({
+      version: knowledgeVersion, reviewed_at: knowledgeReviewedAt,
+      entry_ids: ["suzuki-ph-raider-fi-mil-warning"], source_ids: ["suzuki-ph-raider-fi-manual"]
+    });
+    expect(result.diagnosis.top_hypotheses[0]?.component_code).toBe("FUEL_SYSTEM");
+    expect(store.getLatestDiagnosis(session.session_id)?.knowledge_provenance).toEqual(result.diagnosis.knowledge_provenance);
+  });
+
+  it.each([false, true])("asks for the Raider variant instead of adopting a provider's component guess, fallback %s", async (fallback) => {
+    const { service, store } = setup({ openRouterResult: fallback
+      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+      : { success: true, json: {
+          ...modelDiagnosis(),
+          recommended_next_actions: [{ type: "book_mobile_repair", label: "Thay binh ac quy" }],
+          followup_questions: ["Thay binh moi chua?"]
+        }, apiHttpStatus: "200" } });
+    const session = store.createSession();
+    const result = await service.diagnose({ sessionId: session.session_id,
+      input: { input_mode: "text", content_text: "Suzuki Raider FI đèn FI" } });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diagnosis.top_hypotheses).toHaveLength(1);
+    expect(result.diagnosis.top_hypotheses[0]).toMatchObject({ component_code: "UNKNOWN" });
+    expect(result.diagnosis.top_hypotheses[0]?.cause).toContain("xác nhận phiên bản Raider");
+    expect(result.diagnosis.overall_confidence).toBeLessThanOrEqual(0.35);
+    expect(result.diagnosis.followup_questions.join(" ")).toContain("Philippines");
+    expect(result.diagnosis.recommended_next_actions).toEqual([
+      { type: "ask_followup", label: "Xác nhận đời xe, FI hay bình xăng con và thị trường xe" }
+    ]);
+    expect(result.diagnosis.knowledge_provenance?.source_ids).toEqual([]);
+  });
+
+  it.each([false, true])("stores backend knowledge provenance when provider fallback is %s", async (fallback) => {
+    const { service, store } = setup({ openRouterResult: fallback
+      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+      : { success: true, json: {
+          ...modelDiagnosis(),
+          knowledge_provenance: { version: "provider-invented", reviewed_at: "2000-01-01", entry_ids: [], source_ids: [] }
+        }, apiHttpStatus: "200" } });
+    const session = store.createSession();
+    const result = await service.diagnose({ sessionId: session.session_id,
+      input: { input_mode: "text", content_text: "nhớt trắng sữa" } });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diagnosis.knowledge_provenance).toEqual({
+      version: knowledgeVersion, reviewed_at: knowledgeReviewedAt,
+      entry_ids: ["oil-contaminated-after-flood"], source_ids: ["yamaha-flood", "yamaha-oil-check"]
+    });
+    expect(store.getLatestDiagnosis(session.session_id)?.knowledge_provenance).toEqual(result.diagnosis.knowledge_provenance);
+  });
+
   it.each([false, true])("keeps shutdown safety override when provider fallback is %s", async (fallback) => {
     const { service, store } = setup({ openRouterResult: fallback
       ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
