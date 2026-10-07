@@ -52,16 +52,21 @@ export function CancelAppointmentModal({
         onPress={onClose}
         accessibilityLabel="Đóng hộp thoại"
         accessibilityRole="button"
-        className="absolute inset-0"
-      />
+      >
+        <View className="absolute inset-0" />
+      </Pressable>
       <View className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card shadow-2xl">
         <Pressable
           onPress={onClose}
           accessibilityLabel="Đóng hộp thoại"
           accessibilityRole="button"
-          className="absolute right-3 top-3 z-10 size-9 items-center justify-center rounded-full bg-secondary active:scale-95"
+          style={({ pressed }) => [
+            { transform: [{ scale: pressed ? 0.95 : 1 }] },
+          ]}
         >
-          <X size={16} color="#16202f" />
+          <View className="absolute right-3 top-3 z-10 size-9 items-center justify-center rounded-full bg-secondary">
+            <X size={16} color="#16202f" />
+          </View>
         </Pressable>
 
         <ScrollView
@@ -193,11 +198,16 @@ function ReasonOption({
       accessibilityRole="radio"
       accessibilityState={{ selected }}
       onPress={onPress}
-      className={cn(
-        'flex-row items-center gap-2 rounded-xl border px-3 py-2.5 active:scale-[0.98]',
-        selected ? 'border-primary bg-primary/5' : 'border-border bg-background',
-      )}
+      style={({ pressed }) => [
+        { transform: [{ scale: pressed ? 0.98 : 1 }] },
+      ]}
     >
+      <View
+        className={cn(
+          'flex-row items-center gap-2 rounded-xl border px-3 py-2.5',
+          selected ? 'border-primary bg-primary/5' : 'border-border bg-background',
+        )}
+      >
       <View
         className={cn(
           'size-4 shrink-0 items-center justify-center rounded-full border',
@@ -214,6 +224,7 @@ function ReasonOption({
       >
         {label}
       </Text>
+      </View>
     </Pressable>
   );
 }

@@ -81,7 +81,7 @@ export default function MechanicPerformanceScreen() {
           {filterOptions.map((opt) => (
             <Pressable
               key={opt.id}
-              accessibilityRole="tab"
+              accessibilityRole="button"
               accessibilityState={{ selected: filter === opt.id }}
               accessibilityLabel={`Lọc ${opt.label}`}
               onPress={() => handleFilterChange(opt.id)}

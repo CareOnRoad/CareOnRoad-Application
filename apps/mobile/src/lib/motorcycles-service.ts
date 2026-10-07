@@ -6,8 +6,12 @@ import type { Vehicle } from '@/lib/types';
  *
  * Backend schema (snake_case) → UI Vehicle (camelCase + derived fields).
  *
- * Backend chưa lưu mileage / nextMaintenance / image → giữ giá trị default
- * an toàn khi map sang UI để không phá các trang đang dùng Vehicle type.
+ * Backend giờ trả maintenance dates (`last_maintenance_at`, `next_maintenance_at`)
+ * derive từ `service_requests` (completed + upcoming) và `reminder_rules`.
+ * Map thẳng vào UI Vehicle.lastMaintenance / nextMaintenance.
+ *
+ * Backend vẫn không lưu mileage / image → giữ giá trị default an toàn khi map
+ * sang UI để không phá các trang đang dùng Vehicle type.
  */
 
 export interface MotorcycleResponse {
@@ -18,6 +22,8 @@ export interface MotorcycleResponse {
   license_plate?: string;
   year?: number;
   notes?: string;
+  last_maintenance_at?: string;
+  next_maintenance_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -38,7 +44,7 @@ const VEHICLE_IMAGE_DEFAULT =
  */
 export function toVehicle(record: MotorcycleResponse): Vehicle {
   const id = record.id;
-  const brand = record.brand_text || 'Motorcycle';
+  const brand = record.brand_text || 'Xe máy';
   const model = record.model_text || 'Xe';
   return {
     id,
@@ -48,10 +54,8 @@ export function toVehicle(record: MotorcycleResponse): Vehicle {
     mileage: 0,
     color: '—',
     year: record.year ?? new Date().getFullYear(),
-    lastMaintenance: record.created_at.slice(0, 10),
-    nextMaintenance: new Date(Date.now() + 1000 * 60 * 60 * 24 * 120)
-      .toISOString()
-      .slice(0, 10),
+    lastMaintenance: record.last_maintenance_at?.slice(0, 10) ?? '',
+    nextMaintenance: record.next_maintenance_at?.slice(0, 10) ?? '',
     image: VEHICLE_IMAGE_DEFAULT,
   };
 }
@@ -68,8 +72,8 @@ export function fromVehicleInput(input: {
   notes?: string;
 }): MotorcycleInput {
   return {
-    brand_text: input.brand.trim() || 'Motorcycle',
-    model_text: input.model.trim() || 'Vehicle',
+    brand_text: input.brand.trim() || 'Xe máy',
+    model_text: input.model.trim() || 'Xe',
     ...(input.plate ? { license_plate: input.plate.trim() } : {}),
     ...(input.year ? { year: input.year } : {}),
     ...(input.notes ? { notes: input.notes } : {}),

@@ -125,8 +125,8 @@ export default function RegisterScreen() {
                 role="mechanic"
                 active={role === 'mechanic'}
                 icon={Wrench}
-                title="Mechanic"
-                subtitle="Thợ sửa xe"
+                title="Thợ sửa xe"
+                subtitle="Mechanic"
                 onPress={() => setRole('mechanic')}
               />
             </View>
@@ -138,12 +138,12 @@ export default function RegisterScreen() {
                 tone="info"
                 title={
                   role === 'mechanic'
-                    ? 'Đăng ký tài khoản Mechanic'
+                    ? 'Đăng ký tài khoản Thợ sửa xe'
                     : 'Đăng ký tài khoản Rider'
                 }
                 description={
                   role === 'mechanic'
-                    ? 'Tài khoản Mechanic sẽ được tạo với trạng thái "pending" và chờ admin phê duyệt trước khi có thể nhận đơn cứu hộ.'
+                    ? 'Tài khoản Thợ sửa xe sẽ được tạo với trạng thái "chờ duyệt" và cần admin phê duyệt trước khi có thể nhận đơn cứu hộ.'
                     : 'Sau khi đăng ký, bạn có thể dùng chatbot AI để được tư vấn sự cố xe và gửi yêu cầu cứu hộ ngay.'
                 }
               />
@@ -270,7 +270,7 @@ export default function RegisterScreen() {
                 <ActivityIndicator color="#ffffff" />
               ) : (
                 <Text className="text-base font-semibold text-white">
-                  Tạo tài khoản {role === 'rider' ? 'Rider' : 'Mechanic'}
+                  Tạo tài khoản {role === 'rider' ? 'Rider' : 'Thợ sửa xe'}
                 </Text>
               )}
             </Pressable>

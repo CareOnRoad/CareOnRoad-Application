@@ -311,7 +311,7 @@ export default function LoginScreen() {
                   icon={Bike}
                   iconBg="bg-primary/20"
                   iconColor="#1974f7"
-                  title="Rider Demo"
+                  title="Tài khoản Rider mẫu"
                   email="rider1@gmail.com"
                   onPress={fillDemoRider}
                 />
@@ -319,7 +319,7 @@ export default function LoginScreen() {
                   icon={Wrench}
                   iconBg="bg-mint/20"
                   iconColor="#a9ffad"
-                  title="Mechanic Demo"
+                  title="Tài khoản Thợ sửa xe mẫu"
                   email="mechanic1@gmail.com"
                   onPress={fillDemoMechanic}
                 />
@@ -408,7 +408,7 @@ function DemoAccount({
 
 const bypassTone = {
   rider: { bg: 'bg-primary', fg: '#ffffff', iconBg: 'bg-white/15', Icon: Bike, label: 'Rider' },
-  mechanic: { bg: 'bg-green', fg: '#ffffff', iconBg: 'bg-white/15', Icon: Wrench, label: 'Mechanic' },
+  mechanic: { bg: 'bg-green', fg: '#ffffff', iconBg: 'bg-white/15', Icon: Wrench, label: 'Thợ sửa xe' },
 } as const;
 
 function BypassButton({

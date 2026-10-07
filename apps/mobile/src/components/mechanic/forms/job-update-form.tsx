@@ -223,7 +223,7 @@ export function JobUpdateForm({
                   value={newPart}
                   onChangeText={setNewPart}
                   onSubmitEditing={addPart}
-                  placeholder="e.g. Má phanh trước"
+                  placeholder="VD: Má phanh trước"
                   className="flex-1"
                   returnKeyType="done"
                 />

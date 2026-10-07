@@ -133,20 +133,28 @@ export function DateTimePickerField({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel ?? placeholder}
-        accessibilityState={{ disabled: false }}
         onPress={open}
-        className={cn(BUTTON_CLASS, error ? BORDER_ERROR : BORDER_NORMAL)}
+        hitSlop={8}
+        // Style phải nằm TRỰC TIẾP trên Pressable để hitbox khớp với vùng
+        // nhìn thấy. Nếu chỉ để style ở child <View>, với New Architecture
+        // (Fabric) trên Android, Pressable có thể nhận bounds = 0×0 và
+        // nuốt onPress — đó chính là bug "bấm vào không hiện modal".
+        style={({ pressed }) => [
+          { transform: [{ scale: pressed ? 0.99 : 1 }] },
+        ]}
       >
-        <View className="flex-row items-center gap-2.5">
-          <Icon size={18} color="#64748b" />
-          <Text
-            className={cn(
-              'text-sm',
-              displayValue ? 'text-foreground' : 'text-muted-foreground',
-            )}
-          >
-            {displayValue || placeholder || 'Chọn...'}
-          </Text>
+        <View className={cn(BUTTON_CLASS, error ? BORDER_ERROR : BORDER_NORMAL)}>
+          <View className="flex-row items-center gap-2.5">
+            <Icon size={18} color="#64748b" />
+            <Text
+              className={cn(
+                'text-sm',
+                displayValue ? 'text-foreground' : 'text-muted-foreground',
+              )}
+            >
+              {displayValue || placeholder || 'Chọn...'}
+            </Text>
+          </View>
         </View>
       </Pressable>
 
@@ -189,9 +197,13 @@ export function DateTimePickerField({
                   accessibilityRole="button"
                   accessibilityLabel="Đóng"
                   onPress={() => setIosModalOpen(false)}
-                  className="rounded-full bg-secondary p-1.5 active:scale-95"
+                  style={({ pressed }) => [
+                    { transform: [{ scale: pressed ? 0.95 : 1 }] },
+                  ]}
                 >
-                  <X size={18} color="#16202f" />
+                  <View className="rounded-full bg-secondary p-1.5">
+                    <X size={18} color="#16202f" />
+                  </View>
                 </Pressable>
               </View>
               <DateTimePicker
@@ -298,9 +310,13 @@ export function MiniMonthCalendar({
           onPress={() =>
             setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))
           }
-          className="rounded-lg bg-secondary px-3 py-1 active:scale-95"
+          style={({ pressed }) => [
+            { transform: [{ scale: pressed ? 0.95 : 1 }] },
+          ]}
         >
-          <Text className="text-xs font-semibold text-foreground">‹</Text>
+          <View className="rounded-lg bg-secondary px-3 py-1">
+            <Text className="text-xs font-semibold text-foreground">‹</Text>
+          </View>
         </Pressable>
         <Text className="text-sm font-bold text-foreground capitalize">
           {monthLabel}
@@ -311,9 +327,13 @@ export function MiniMonthCalendar({
           onPress={() =>
             setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))
           }
-          className="rounded-lg bg-secondary px-3 py-1 active:scale-95"
+          style={({ pressed }) => [
+            { transform: [{ scale: pressed ? 0.95 : 1 }] },
+          ]}
         >
-          <Text className="text-xs font-semibold text-foreground">›</Text>
+          <View className="rounded-lg bg-secondary px-3 py-1">
+            <Text className="text-xs font-semibold text-foreground">›</Text>
+          </View>
         </Pressable>
       </View>
       <View className="mb-1 flex-row">
@@ -343,24 +363,27 @@ export function MiniMonthCalendar({
                 accessibilityState={{ disabled: isPast, selected: !!isSelected }}
                 disabled={isPast}
                 onPress={() => onChange(d)}
-                className={cn(
-                  'h-10 w-[14.28%] items-center justify-center rounded-md',
-                  isSelected
-                    ? 'bg-primary'
-                    : isToday
-                      ? 'bg-secondary'
-                      : 'bg-transparent active:bg-secondary',
-                  isPast && 'opacity-30',
-                )}
               >
-                <Text
+                <View
                   className={cn(
-                    'text-xs font-semibold',
-                    isSelected ? 'text-primary-foreground' : 'text-foreground',
+                    'h-10 w-[14.28%] items-center justify-center rounded-md',
+                    isSelected
+                      ? 'bg-primary'
+                      : isToday
+                        ? 'bg-secondary'
+                        : 'bg-transparent',
+                    isPast && 'opacity-30',
                   )}
                 >
-                  {d.getDate()}
-                </Text>
+                  <Text
+                    className={cn(
+                      'text-xs font-semibold',
+                      isSelected ? 'text-primary-foreground' : 'text-foreground',
+                    )}
+                  >
+                    {d.getDate()}
+                  </Text>
+                </View>
               </Pressable>
             );
           })}

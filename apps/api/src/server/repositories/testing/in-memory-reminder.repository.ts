@@ -23,6 +23,24 @@ export class InMemoryReminderRepository implements ReminderRepository {
     return filterPage(this.occurrences.filter(row => (!input.riderId || row.riderId === input.riderId) && (!input.ruleId || row.ruleId === input.ruleId)), input).map(cloneOccurrence);
   }
 
+  async listUpcomingByMotorcycles(input: { motorcycleIds: string[]; now: Date }): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    for (const motorcycleId of input.motorcycleIds) {
+      let earliest: Date | undefined;
+      for (const rule of this.rules) {
+        if (rule.motorcycleId !== motorcycleId) continue;
+        if (!rule.enabled) continue;
+        const dueAt = rule.snoozedUntil ?? rule.nextDueAt;
+        if (dueAt.getTime() <= input.now.getTime()) continue;
+        if (!earliest || dueAt.getTime() < earliest.getTime()) {
+          earliest = dueAt;
+        }
+      }
+      if (earliest) result.set(motorcycleId, earliest);
+    }
+    return result;
+  }
+
   async createRule(input: CreateReminderRule): Promise<ReminderRule> {
     const rule: ReminderRule = {
       ...input,

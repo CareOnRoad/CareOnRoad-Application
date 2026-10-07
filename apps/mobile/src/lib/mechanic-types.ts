@@ -2,12 +2,13 @@ export type MechanicJobStatus =
   | 'pending'
   | 'in_progress'
   | 'awaiting_parts'
-  | 'completed';
+  | 'completed'
+  | 'canceled';
 
 /**
  * Filter chip cho jobs screen - mirror BE `mechanicJobStatuses` enum.
  *
- * UI status (`MechanicJobStatus`) gộp 8 BE states vào 4 giá trị cho card display.
+ * UI status (`MechanicJobStatus`) gộp 8 BE states vào 5 giá trị cho card display.
  * `MechanicJobFilter` cho phép filter chi tiết theo BE state raw.
  */
 export type MechanicJobFilter =
@@ -38,14 +39,54 @@ export const MECHANIC_JOB_FILTERS: readonly {
   { id: 'canceled', label: 'Đã huỷ' },
 ];
 
+/**
+ * Tone hiển thị cho UI MechanicJobStatus.
+ * - pending: amber (warning, chờ)
+ * - in_progress: blue (active)
+ * - awaiting_parts: red (blocked)
+ * - completed: green (success)
+ * - canceled: neutral (đã kết thúc nhưng không thành công)
+ */
+export type MechanicJobTone =
+  | 'amber'
+  | 'blue'
+  | 'red'
+  | 'green'
+  | 'neutral';
+
+export const JOB_STATUS_LABELS: Record<MechanicJobStatus, string> = {
+  pending: 'Chờ xử lý',
+  in_progress: 'Đang xử lý',
+  awaiting_parts: 'Chờ phụ tùng',
+  completed: 'Hoàn tất',
+  canceled: 'Đã huỷ',
+};
+
+export const JOB_STATUS_TONE: Record<MechanicJobStatus, MechanicJobTone> = {
+  pending: 'amber',
+  in_progress: 'blue',
+  awaiting_parts: 'red',
+  completed: 'green',
+  canceled: 'neutral',
+};
+
+/** Map tone → hex color (dùng cho badge text). */
+export const JOB_STATUS_TONE_COLOR: Record<MechanicJobTone, string> = {
+  amber: '#d97706',
+  blue: '#1974f7',
+  red: '#ed3f3a',
+  green: '#145413',
+  neutral: '#64748b',
+};
+
 export type MechanicJobType =
-  | 'Oil Change'
-  | 'Brake Inspection'
-  | 'Tire Inspection'
-  | 'General Maintenance'
-  | 'Emergency Repair'
-  | 'Battery Replacement'
-  | 'Engine Repair';
+  | 'Thay nhớt'
+  | 'Kiểm tra phanh'
+  | 'Kiểm tra lốp'
+  | 'Bảo dưỡng tổng quát'
+  | 'Sửa chữa khẩn cấp'
+  | 'Thay ắc quy'
+  | 'Sửa chữa động cơ';
 
 export type MechanicShiftStatus = 'working' | 'off' | 'available';
 

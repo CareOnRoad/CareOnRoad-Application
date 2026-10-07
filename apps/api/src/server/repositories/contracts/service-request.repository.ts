@@ -78,4 +78,12 @@ export interface ServiceRequestRepository {
   }): Promise<ServiceRequest | undefined>;
   appendStatusHistory(input: CreateRequestStatusHistory): Promise<RequestStatusHistory>;
   listStatusHistory(requestId: string): Promise<RequestStatusHistory[]>;
+  listCompletedLastUpdatedByMotorcycles(input: {
+    motorcycleIds: string[];
+  }): Promise<Map<string, Date>>;
+  listUpcomingMaintenanceByMotorcycles(input: {
+    motorcycleIds: string[];
+    activeStatuses: readonly RequestStatus[];
+    now: Date;
+  }): Promise<Map<string, Date>>;
 }

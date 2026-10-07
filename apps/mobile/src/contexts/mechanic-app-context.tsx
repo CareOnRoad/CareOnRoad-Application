@@ -14,20 +14,24 @@ import {
   getMechanicPerformance,
   getMyMechanicProfile,
   updateMyAvailability,
+  updateMyLocation,
   type MechanicDashboardResponse,
   type MechanicPerformanceResponse,
   type MechanicProfileResponse,
 } from '@/lib/mechanics-service';
 import {
   createDiagnosis,
-  ingestLiveLocation,
+  getJobDetail as fetchJobDetail,
   listAssignments,
+  listDiagnoses as fetchDiagnosisHistory,
   submitEta,
   submitCompletionChecklist,
   transitionAssignment,
   type AssignmentResponse,
   type DiagnosisRecord,
+  type MechanicJobDetailResponse,
 } from '@/lib/mechanic-jobs-service';
+import { ingestLiveLocation } from '@/lib/assignments-service';
 import {
   calculateSubtotal,
   submitQuote,
@@ -37,8 +41,13 @@ import {
 import type { Quote } from '@/lib/quotes-service';
 import {
   watchCurrentPosition,
+  startAutoTracking,
+  startAvailabilityHeartbeat,
   type LocationWatchHandle,
+  type AutoTrackingHandle,
+  type AvailabilityHeartbeatHandle,
   LocationCaptureError,
+  isLocationPermissionGranted,
 } from '@/lib/location-service';
 import type {
   MechanicJob,
@@ -62,6 +71,15 @@ interface MechanicState {
   getAssignmentStatus: (jobId: string) => string | undefined;
   /** Lấy serviceType (raw) của job — dùng cho suggest purpose quote. */
   getJobServiceType: (jobId: string) => string | undefined;
+  /**
+   * Chi tiết job đầy đủ từ `GET /api/v1/mechanics/me/jobs/{id}`:
+   * problem description, motorcycle, latest quote, completion checklist.
+   * `null` nếu chưa load hoặc load fail (403/404).
+   */
+  jobDetail: (jobId: string) => MechanicJobDetailResponse | null;
+  jobDetailLoading: boolean;
+  /** Fetch (hoặc refetch) chi tiết 1 job. Safe no-op nếu BE chưa configured. */
+  loadJobDetail: (jobId: string) => Promise<MechanicJobDetailResponse | null>;
   /** Cập nhật status qua BE (atomic). Cập nhật optimistic local. */
   updateJobStatus: (id: string, status: MechanicJobStatus, notes?: string) => Promise<void>;
   /** Hoàn tất job: submit checklist + chuyển status completed. */
@@ -93,15 +111,28 @@ interface MechanicState {
   ) => Promise<DiagnosisRecord | null>;
   /** Lấy diagnosis mới nhất (cached, không reload). */
   getLatestDiagnosisForJob: (jobId: string) => DiagnosisRecord | null;
+  /** Lấy lịch sử tất cả diagnosis versions cho job (latest first). */
+  getDiagnosisHistoryForJob: (jobId: string) => DiagnosisRecord[];
+  /** Lazy load + cache lịch sử diagnosis từ BE. Best-effort. */
+  loadDiagnosisHistory: (jobId: string) => Promise<DiagnosisRecord[]>;
   /** Lấy quote pending mới nhất (cached, không reload). */
   getLatestPendingQuote: (jobId: string) => Quote | null;
-  // ---- Live location sharing (1.2) ----
+  // ---- Live location sharing (1.2 + auto parity) ----
   /** assignmentId hiện đang chia sẻ vị trí, hoặc null nếu không. */
   sharingAssignmentId: string | null;
   /** Lỗi live sharing lần cuối (tiếng Việt), null nếu không. */
   sharingError: string | null;
-  /** Bật/tắt chia sẻ vị trí cho 1 assignment. Idempotent - gọi lại sẽ tắt. */
+  /**
+   * Permission foreground location đã được user cấp hay chưa.
+   * - `true`: đã grant; auto-tracking có thể chạy.
+   * - `false`: chưa grant / bị deny; auto-tracking bị skip và UI nên
+   *   hiển thị nút "Mở cài đặt vị trí".
+   */
+  locationPermissionGranted: boolean;
+  /** Bật/tắt thủ công chia sẻ vị trí cho 1 assignment. Idempotent. */
   toggleLiveSharing: (assignmentId: string) => Promise<void>;
+  /** Bật chia sẻ vị trí (no-op nếu đã chạy cho assignment đó). */
+  startLiveSharing: (assignmentId: string) => Promise<void>;
   /** Dừng chia sẻ vị trí (nếu đang chia sẻ). */
   stopLiveSharing: () => void;
 
@@ -111,9 +142,27 @@ interface MechanicState {
   performanceLoading: boolean;
   /** Reload performance với optional date filters (ISO datetime có offset). */
   reloadPerformance: (filters?: { date_from?: string; date_to?: string }) => Promise<void>;
+  /**
+   * Auto-tracking preference (persisted in-memory cho phiên hiện tại).
+   * Khi `true` (default), provider tự động start ingest cho assignment
+   * mới vào travel state. Khi `false`, user phải bấm toggle thủ công.
+   */
+  autoTrackingEnabled: boolean;
+  setAutoTrackingEnabled: (enabled: boolean) => void;
 }
 
 const MechanicContext = createContext<MechanicState | null>(null);
+
+// =========================================================
+// Status helpers
+// =========================================================
+
+/**
+ * Danh sách assignment status mà BE whitelist cho live-location ingest.
+ * Phải khớp `TRACKING_STATUSES` trong
+ * `apps/api/src/features/live-tracking/live-tracking.service.ts`.
+ */
+const LIVE_TRACKING_STATUSES = new Set<string>(['accepted', 'en_route']);
 
 // =========================================================
 // Mapping helpers: BE → UI
@@ -121,7 +170,17 @@ const MechanicContext = createContext<MechanicState | null>(null);
 
 /**
  * Map BE assignment + request → UI MechanicJob.
- * BE không lưu customer/vehicle info cụ thể trên assignment → dùng từ request.
+ *
+ * Nguồn dữ liệu: `GET /api/v1/assignments` trả
+ * `AssignmentResponse & { request?: {...} }`. Field `request` là optional
+ * và **không** chứa rider identity — xem `mechanic-job-list.service.ts`
+ * → `getJob()` (endpoint riêng `/mechanics/me/jobs/{id}`) cho job detail
+ * đầy đủ gồm `problem_description`, `motorcycle`, `latest_quote`.
+ *
+ * Vì vậy:
+ *  - `customer` = placeholder an toàn, không chứa PII (BE không expose).
+ *  - `symptom` = `request.problem_description` (nếu list có trả).
+ *  - `vehicle` = placeholder; thật sự nằm ở job detail.
  */
 function assignmentToJob(
   a: AssignmentResponse & {
@@ -130,6 +189,8 @@ function assignmentToJob(
       service_type: string;
       scheduled_start_at?: string;
       created_at: string;
+      problem_description?: string;
+      address_text?: string;
     };
     latest_quote_status?: string;
   },
@@ -146,8 +207,10 @@ function assignmentToJob(
   return {
     id: a.id,
     customer: {
+      // Không có rider identity trong list response — dùng mã yêu cầu làm
+      // nhãn nhận diện an toàn (không PII).
       id: '',
-      name: r?.request_code ?? 'Khách hàng',
+      name: r?.request_code ?? 'Yêu cầu cứu hộ',
       phone: '',
     },
     vehicle: {
@@ -159,7 +222,7 @@ function assignmentToJob(
       mileage: 0,
     },
     type,
-    symptom: '',
+    symptom: r?.problem_description ?? '',
     status,
     scheduledDate,
     scheduledTime,
@@ -184,7 +247,10 @@ function mapAssignmentStatus(s: string): MechanicJobStatus {
       return 'completed';
     case 'canceled':
     case 'recovery_canceled':
-      return 'completed'; // best-effort cho UI mechanic
+      // Trước đây map về 'completed' để "best-effort cho UI mechanic"
+      // nhưng khiến user thấy "Hoàn tất" thay vì "Đã huỷ". Giờ render đúng
+      // status canceled với tone neutral để thợ phân biệt được.
+      return 'canceled';
     default:
       return 'pending';
   }
@@ -223,7 +289,11 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
   const [jobs, setJobs] = useState<MechanicJob[]>([]);
   const [assignmentStatusMap, setAssignmentStatusMap] = useState<Record<string, string>>({});
   const [serviceTypeMap, setServiceTypeMap] = useState<Record<string, string>>({});
+  const [requestIdMap, setRequestIdMap] = useState<Record<string, string>>({});
+  const [jobDetailMap, setJobDetailMap] = useState<Record<string, MechanicJobDetailResponse>>({});
+  const [jobDetailLoadingId, setJobDetailLoadingId] = useState<string | null>(null);
   const [latestDiagnosisMap, setLatestDiagnosisMap] = useState<Record<string, DiagnosisRecord>>({});
+  const [diagnosisHistoryMap, setDiagnosisHistoryMap] = useState<Record<string, DiagnosisRecord[]>>({});
   const [latestQuoteMap, setLatestQuoteMap] = useState<Record<string, Quote>>({});
   const [mechanic, setMechanic] = useState<MechanicProfile>({
     id: '',
@@ -242,10 +312,17 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState(false);
-  // Live-sharing state - 1.2
+  // Live-sharing state - 1.2 + auto parity
   const [sharingAssignmentId, setSharingAssignmentId] = useState<string | null>(null);
   const [sharingError, setSharingError] = useState<string | null>(null);
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState(false);
+  // Khi `true`, provider sẽ tự động start ingest cho assignment mới chuyển
+  // sang `accepted`/`en_route`. Khi `false`, chỉ chạy khi user bấm toggle.
+  const [autoTrackingEnabled, setAutoTrackingEnabledState] = useState(true);
+  // Refs để cleanup khi unmount / đổi assignment.
   const watchHandleRef = useRef<LocationWatchHandle | null>(null);
+  const autoHandleRef = useRef<AutoTrackingHandle | null>(null);
+  const heartbeatHandleRef = useRef<AvailabilityHeartbeatHandle | null>(null);
   const lastIngestAtRef = useRef<Record<string, number>>({});
 
   /**
@@ -267,7 +344,7 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
     setLoading(true);
     setError(null);
     try {
-      const [profile, dash, jobsPage] = await Promise.all([
+      const [profile, dash, jobsPage, perf] = await Promise.all([
         getMyMechanicProfile().catch((e) => {
           if (e instanceof ApiError && e.status === 404) return null;
           throw e;
@@ -277,22 +354,37 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
           if (e instanceof ApiError && e.status === 403) return { items: [], next_cursor: undefined };
           throw e;
         }),
+        getMechanicPerformance().catch(() => null),
       ]);
 
       if (profile) {
-        setMechanic((prev) => ({
-          ...profileToUi(profile),
-          // Ưu tiên tên/avatar/phone từ auth context cho UI
-          name: authUser?.name || prev.name,
-          avatar: authUser?.avatar || prev.avatar,
-          phone: authUser?.phone || prev.phone,
-        }));
+        setMechanic((prev) => {
+          // totalJobs semantic = số job đã completed (BE aggregate).
+          // Trước đây map từ rating_count (số review) → sai nghĩa.
+          // Ưu tiên seven_day_performance, fallback performance.completed_jobs.
+          const completedFromDash =
+            dash?.seven_day_performance.completed_jobs ??
+            dash?.today_counts.completed_jobs;
+          const completedFromPerf = perf?.completed_jobs;
+          const totalJobs =
+            completedFromDash ??
+            completedFromPerf ??
+            // Cuối cùng fallback rating_count (giữ behaviour cũ nếu cả
+            // dashboard + performance đều không có).
+            profile.rating_count;
+          return {
+            ...profileToUi(profile),
+            totalJobs,
+            // Ưu tiên tên/avatar/phone từ auth context cho UI
+            name: authUser?.name || prev.name,
+            avatar: authUser?.avatar || prev.avatar,
+            phone: authUser?.phone || prev.phone,
+          };
+        });
       }
       if (dash) setDashboard(dash);
-      // Load performance song song (không chặn reload chính).
-      void getMechanicPerformance()
-        .then(setPerformance)
-        .catch(() => undefined);
+      // Performance đã load song song ở trên, set ngay nếu chưa có.
+      if (perf) setPerformance(perf);
       const list = (jobsPage?.items ?? []) as (AssignmentResponse & { request?: unknown })[];
       // BE wire: chỉ dùng jobs từ assignments. Nếu rỗng → EmptyState, KHÔNG fallback mock.
       setJobs(
@@ -313,13 +405,18 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       // Cache BE raw status + service type cho filter (2.1) và quote suggest (1.1).
       const nextStatusMap: Record<string, string> = {};
       const nextServiceMap: Record<string, string> = {};
+      // Map assignmentId → requestId. Cần cho submitQuote vì
+      // `MechanicJob.customer.id` không mang request id (xem `assignmentToJob`).
+      const nextRequestIdMap: Record<string, string> = {};
       for (const a of list) {
         nextStatusMap[a.id] = a.status;
         const svc = (a as { request?: { service_type?: string } }).request?.service_type;
         if (svc) nextServiceMap[a.id] = svc;
+        if (a.request_id) nextRequestIdMap[a.id] = a.request_id;
       }
       setAssignmentStatusMap(nextStatusMap);
       setServiceTypeMap(nextServiceMap);
+      setRequestIdMap(nextRequestIdMap);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không thể tải dữ liệu thợ');
     } finally {
@@ -445,6 +542,14 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
   const toggleDarkMode = useCallback(() => setDarkMode((d) => !d), []);
 
   /**
+   * Bật / tắt auto-tracking. Khi tắt, provider sẽ stopAutoTracking() ngay;
+   * ngược lại, useEffect watcher sẽ tự start lại cho assignment hiện tại.
+   */
+  const setAutoTrackingEnabled = useCallback((enabled: boolean) => {
+    setAutoTrackingEnabledState(enabled);
+  }, []);
+
+  /**
    * Reload performance metrics. Best-effort - lỗi chỉ set null và không
    * hiển thị error banner (vì performance page là second-class UI, không
    * blocking flow mechanic).
@@ -470,6 +575,36 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
 
   // ---- Live sharing ----
 
+  /**
+   * Helper ingest: rate-limit + accuracy filter + chỉ gửi nếu assignment
+   * còn ở travel state. Tách ra để dùng được cả cho manual toggle và auto
+   * tracking đều đi qua cùng 1 rate-limit (per-assignment).
+   */
+  const ingestForAssignment = useCallback(
+    async (assignmentId: string, loc: { latitude: number; longitude: number; accuracy?: number }) => {
+      // Skip nếu status đã rời travel states (race trong lúc polling).
+      const status = assignmentStatusMap[assignmentId];
+      if (!status || !LIVE_TRACKING_STATUSES.has(status)) return;
+      const last = lastIngestAtRef.current[assignmentId] ?? 0;
+      const now = Date.now();
+      if (now - last < 10_000) return;
+      if (typeof loc.accuracy === 'number' && loc.accuracy > 100) return;
+      lastIngestAtRef.current[assignmentId] = now;
+      try {
+        await ingestLiveLocation(assignmentId, {
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          observed_at: new Date().toISOString(),
+          accuracy_meters: loc.accuracy ?? 50,
+        });
+      } catch {
+        // Lỗi không dừng vòng watch - chỉ set banner.
+        setSharingError('Không thể gửi vị trí. Kiểm tra kết nối mạng.');
+      }
+    },
+    [assignmentStatusMap],
+  );
+
   const stopLiveSharing = useCallback(() => {
     if (watchHandleRef.current) {
       watchHandleRef.current.stop();
@@ -478,90 +613,254 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
     setSharingAssignmentId(null);
   }, []);
 
+  const stopAutoTracking = useCallback(() => {
+    if (autoHandleRef.current) {
+      autoHandleRef.current.stop();
+      autoHandleRef.current = null;
+    }
+  }, []);
+
+  const stopAvailabilityHeartbeat = useCallback(() => {
+    if (heartbeatHandleRef.current) {
+      heartbeatHandleRef.current.stop();
+      heartbeatHandleRef.current = null;
+    }
+  }, []);
+
   /**
-   * Bật/tắt chia sẻ vị trí cho 1 assignment.
-   *
-   * - Nếu đã đang chia sẻ assignment này → toggle off.
-   * - Nếu đang chia sẻ assignment khác → dừng cái cũ, bật cái mới.
-   * - Lần đầu bật → xin permission qua `watchCurrentPosition`, lắng nghe
-   *   position fix → `ingestLiveLocation` mỗi lần có update (rate-limited
-   *   tối thiểu 10s/lần client-side; BE cũng rate-limit theo env).
-   * - Auto-stop khi assignment không còn ở state active (completed/canceled)
-   *   qua useEffect watcher bên dưới.
+   * Bật chia sẻ vị trí thủ công cho 1 assignment. Idempotent.
+   * - Nếu đã chạy cho assignment này → no-op.
+   * - Nếu đang chạy cho assignment khác → swap.
+   * - Nếu job đã rời travel state → set error, return.
    */
-  const toggleLiveSharing = useCallback(
+  const startLiveSharing = useCallback(
     async (assignmentId: string) => {
-      // Đang chia sẻ cùng assignment → tắt.
-      if (sharingAssignmentId === assignmentId) {
-        stopLiveSharing();
-        return;
+      if (sharingAssignmentId === assignmentId && watchHandleRef.current) {
+        return; // đã chạy
       }
-      // Đang chia sẻ assignment khác → dừng cái cũ trước.
       if (sharingAssignmentId && sharingAssignmentId !== assignmentId) {
         stopLiveSharing();
       }
-      // Guard: job phải còn active.
       const status = assignmentStatusMap[assignmentId];
-      if (status === 'completed' || status === 'canceled' || status === 'recovery_canceled') {
-        setSharingError('Job đã hoàn tất hoặc bị huỷ, không thể chia sẻ vị trí.');
+      if (!status || !LIVE_TRACKING_STATUSES.has(status)) {
+        setSharingError('Job không ở trạng thái cho phép chia sẻ vị trí.');
         return;
       }
-
       setSharingError(null);
       try {
         const handle = await watchCurrentPosition(
           (loc) => {
-            // Rate-limit client-side tối thiểu 10s/lần (BE cũng rate-limit).
-            const last = lastIngestAtRef.current[assignmentId] ?? 0;
-            const now = Date.now();
-            if (now - last < 10_000) return;
-            // Skip nếu accuracy quá kém (chỉ khi BE trả về > 100m).
-            if (typeof loc.accuracy === 'number' && loc.accuracy > 100) return;
-            lastIngestAtRef.current[assignmentId] = now;
-            void ingestLiveLocation(assignmentId, {
-              latitude: loc.latitude,
-              longitude: loc.longitude,
-              observed_at: new Date().toISOString(),
-              accuracy_meters: loc.accuracy ?? 50,
-            }).catch(() => {
-              // Lỗi không dừng vòng watch - chỉ log vào error state.
-              setSharingError('Không thể gửi vị trí. Kiểm tra kết nối mạng.');
-            });
+            void ingestForAssignment(assignmentId, loc);
           },
           (err) => {
             setSharingError(err.message);
             stopLiveSharing();
+            setLocationPermissionGranted(false);
           },
           { timeInterval: 15_000, distanceInterval: 25 },
         );
         watchHandleRef.current = handle;
         setSharingAssignmentId(assignmentId);
+        setLocationPermissionGranted(true);
       } catch (err) {
         if (err instanceof LocationCaptureError) {
           setSharingError(err.message);
+          setLocationPermissionGranted(err.code !== 'PERMISSION_DENIED');
         } else {
           setSharingError('Không thể bật chia sẻ vị trí.');
         }
       }
     },
-    [sharingAssignmentId, stopLiveSharing, assignmentStatusMap],
+    [sharingAssignmentId, stopLiveSharing, assignmentStatusMap, ingestForAssignment],
   );
 
-  // Auto-stop khi assignment active đổi sang completed/canceled.
+  /**
+   * Toggle thủ công giữ nguyên hành vi cũ (back-compat cho UI cũ):
+   * - Đang bật cho cùng assignment → tắt.
+   * - Đang tắt → bật.
+   */
+  const toggleLiveSharing = useCallback(
+    async (assignmentId: string) => {
+      if (sharingAssignmentId === assignmentId) {
+        stopLiveSharing();
+        return;
+      }
+      await startLiveSharing(assignmentId);
+    },
+    [sharingAssignmentId, startLiveSharing, stopLiveSharing],
+  );
+
+  // Auto-stop manual share khi assignment rời travel state.
   useEffect(() => {
     if (!sharingAssignmentId) return;
     const status = assignmentStatusMap[sharingAssignmentId];
-    if (status === 'completed' || status === 'canceled' || status === 'recovery_canceled') {
+    if (!status || !LIVE_TRACKING_STATUSES.has(status)) {
       stopLiveSharing();
     }
   }, [sharingAssignmentId, assignmentStatusMap, stopLiveSharing]);
 
-  // Cleanup watch khi unmount provider.
+  // Permission check khi provider mount - cập nhật flag để UI render hint.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const granted = await isLocationPermissionGranted();
+      if (!cancelled) setLocationPermissionGranted(granted);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Auto-start watch cho assignment active sớm nhất (accepted/en_route).
+  // Tự tắt khi assignment rời travel state, khi permission bị deny, hoặc
+  // khi user bật/tắt autoTrackingEnabled.
+  useEffect(() => {
+    if (!autoTrackingEnabled) {
+      stopAutoTracking();
+      return;
+    }
+    if (!locationPermissionGranted) {
+      // Không start watch nếu user chưa cấp permission. UI sẽ render hint.
+      stopAutoTracking();
+      return;
+    }
+    // Tìm assignment đang ở travel state.
+    const candidate = Object.entries(assignmentStatusMap).find(([, s]) =>
+      LIVE_TRACKING_STATUSES.has(s),
+    );
+    if (!candidate) {
+      stopAutoTracking();
+      return;
+    }
+    const [assignmentId] = candidate;
+    // Đã chạy cho assignment này rồi thì thôi.
+    if (autoHandleRef.current && sharingAssignmentId === assignmentId) {
+      return;
+    }
+    // Nếu manual share đang chạy cho assignment khác, auto track không cần can thiệp.
+    if (sharingAssignmentId && sharingAssignmentId !== assignmentId && watchHandleRef.current) {
+      return;
+    }
+    let cancelledEffect = false;
+    void (async () => {
+      // Stop any stale handle trước khi start mới.
+      stopAutoTracking();
+      const handle = await startAutoTracking(
+        (loc) => {
+          void ingestForAssignment(assignmentId, loc);
+        },
+        (err) => {
+          setSharingError(err.message);
+          setLocationPermissionGranted(false);
+          stopAutoTracking();
+        },
+        { minTickIntervalMs: 10_000, maxAccuracyMeters: 100, distanceInterval: 25 },
+      );
+      if (cancelledEffect) {
+        handle.stop();
+        return;
+      }
+      if (!handle.permissionGranted) {
+        // Permission bị deny giữa chừng (race với user revoke).
+        setLocationPermissionGranted(false);
+        return;
+      }
+      autoHandleRef.current = handle;
+      setLocationPermissionGranted(true);
+      // Không ghi đè `sharingAssignmentId` - đó là manual UI flag.
+      // Auto-track chỉ chạy ngầm; rider vẫn nhận được update qua BE.
+    })();
+    return () => {
+      cancelledEffect = true;
+      stopAutoTracking();
+    };
+  }, [
+    autoTrackingEnabled,
+    locationPermissionGranted,
+    assignmentStatusMap,
+    sharingAssignmentId,
+    ingestForAssignment,
+    stopAutoTracking,
+  ]);
+
+  // =========================================================
+  // Availability heartbeat (1.x)
+  // -------------------------------------------------------------
+  // Khi mechanic `is_available=true` mà chưa accept assignment nào, FE
+  // cần ping location định kỳ lên BE để `mechanic_profiles.latest_location`
+  // luôn nằm trong fresh window (BE: `DISPATCH_LOCATION_MAX_AGE_SECONDS=300s`).
+  // Nếu location quá cũ, `listEligibility` loại mechanic ra khỏi round → offer
+  // cho request gần nhất bị rỗng.
+  //
+  // Cách hoạt động:
+  //  - Ping mỗi 180s (3 phút) < 300s fresh window.
+  //  - Auto-stop khi: `is_available=false`, khi có assignment đang ở travel
+  //    state (đã có watch handle riêng), hoặc khi permission bị revoke.
+  //  - Skip ping nếu accuracy > 100m; skip nếu BE fail.
+  // =========================================================
+  const isAvailableForDispatch = dashboard?.availability.is_available ?? false;
+  const hasActiveTravelAssignment = Object.values(assignmentStatusMap).some((s) =>
+    LIVE_TRACKING_STATUSES.has(s),
+  );
+  useEffect(() => {
+    if (!isBackendConfigured || authStatus !== 'authenticated') {
+      stopAvailabilityHeartbeat();
+      return;
+    }
+    if (!isAvailableForDispatch) {
+      stopAvailabilityHeartbeat();
+      return;
+    }
+    // Khi đã có travel assignment, watch handle riêng đã đẩy location liên tục
+    // → heartbeat thừa. Skip.
+    if (hasActiveTravelAssignment) {
+      stopAvailabilityHeartbeat();
+      return;
+    }
+    if (!locationPermissionGranted) {
+      stopAvailabilityHeartbeat();
+      return;
+    }
+    // Đã chạy rồi thì thôi.
+    if (heartbeatHandleRef.current) return;
+
+    const handle = startAvailabilityHeartbeat(
+      async (loc) => {
+        try {
+          await updateMyLocation({ latitude: loc.latitude, longitude: loc.longitude });
+        } catch {
+          // Lỗi BE (network/auth) → bỏ qua tick này, loop sẽ retry ở tick sau.
+        }
+      },
+      { intervalMs: 180_000, maxAccuracyMeters: 100 },
+    );
+    heartbeatHandleRef.current = handle;
+    return () => {
+      stopAvailabilityHeartbeat();
+    };
+  }, [
+    isBackendConfigured,
+    authStatus,
+    isAvailableForDispatch,
+    hasActiveTravelAssignment,
+    locationPermissionGranted,
+    stopAvailabilityHeartbeat,
+  ]);
+
+  // Cleanup khi provider unmount.
   useEffect(() => {
     return () => {
       if (watchHandleRef.current) {
         watchHandleRef.current.stop();
         watchHandleRef.current = null;
+      }
+      if (autoHandleRef.current) {
+        autoHandleRef.current.stop();
+        autoHandleRef.current = null;
+      }
+      if (heartbeatHandleRef.current) {
+        heartbeatHandleRef.current.stop();
+        heartbeatHandleRef.current = null;
       }
     };
   }, []);
@@ -591,9 +890,66 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
     [serviceTypeMap],
   );
 
+  const getJobDetail = useCallback(
+    (id: string) => jobDetailMap[id] ?? null,
+    [jobDetailMap],
+  );
+
+  /**
+   * Fetch chi tiết job (problem description, motorcycle, latest quote,
+   * completion checklist) từ `GET /api/v1/mechanics/me/jobs/{id}`.
+   *
+   * Best-effort: 403 (không phải job của mechanic) hoặc 404 → trả null,
+   * không set error banner vì đây là read-only supplementary data.
+   */
+  const loadJobDetail = useCallback(
+    async (jobId: string) => {
+      if (!isBackendConfigured) return null;
+      setJobDetailLoadingId(jobId);
+      try {
+        const detail = await fetchJobDetail(jobId);
+        setJobDetailMap((prev) => ({ ...prev, [jobId]: detail }));
+        return detail;
+      } catch {
+        return null;
+      } finally {
+        setJobDetailLoadingId((cur) => (cur === jobId ? null : cur));
+      }
+    },
+    [isBackendConfigured],
+  );
+
   const getLatestDiagnosisForJob = useCallback(
     (id: string) => latestDiagnosisMap[id] ?? null,
     [latestDiagnosisMap],
+  );
+
+  const getDiagnosisHistoryForJob = useCallback(
+    (id: string) => diagnosisHistoryMap[id] ?? [],
+    [diagnosisHistoryMap],
+  );
+
+  /**
+   * Lazy load lịch sử diagnosis versions cho 1 assignment.
+   * Best-effort: BE fail → trả `[]` và cache rỗng, không set error banner.
+   * Cache trong `diagnosisHistoryMap` để UI không phải gọi lại khi remount.
+   */
+  const loadDiagnosisHistory = useCallback(
+    async (jobId: string): Promise<DiagnosisRecord[]> => {
+      if (!isBackendConfigured) return [];
+      try {
+        const items = await fetchDiagnosisHistory(jobId);
+        // BE không đảm bảo sort → sort theo created_at desc cho chắc.
+        const sorted = [...items].sort((a, b) =>
+          (b.created_at ?? '').localeCompare(a.created_at ?? ''),
+        );
+        setDiagnosisHistoryMap((prev) => ({ ...prev, [jobId]: sorted }));
+        return sorted;
+      } catch {
+        return [];
+      }
+    },
+    [isBackendConfigured],
   );
 
   const getLatestPendingQuote = useCallback(
@@ -630,10 +986,11 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
 
       const previousQuote = latestQuoteMap[jobId];
       // Optimistic placeholder để UI phản hồi nhanh.
+      const requestIdForQuote = requestIdMap[jobId] ?? '';
       const placeholderSubtotal = calculateSubtotal(input.lines);
       const optimistic: Quote = {
         id: `optimistic-${Date.now()}`,
-        request_id: job.customer.id || '',
+        request_id: requestIdForQuote,
         assignment_id: jobId,
         ...(input.diagnosis_id ? { diagnosis_id: input.diagnosis_id } : {}),
         version: (previousQuote?.version ?? 0) + 1,
@@ -659,14 +1016,10 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       setLatestQuoteMap((prev) => ({ ...prev, [jobId]: optimistic }));
 
       try {
-        // BE `submitQuote` cần `requestId`. UI mechanic chỉ giữ `assignmentId`.
-        // Lấy `requestId` từ `latestQuoteMap` (cache) hoặc fallback từ job.customer.id.
-        // Lưu ý: MechanicJob.customer.id hiện đang rỗng (xem `assignmentToJob`) →
-        // dùng cách an toàn: gọi fetch job detail nếu cache rỗng.
-        // Đơn giản hơn: truyền job.customer.id (BE hiện trả qua `request.id` field của
-        // assignment - xem `assignmentToJob` chỗ `customer.id`).
-        const requestId =
-          job.customer.id && job.customer.id.length > 0 ? job.customer.id : null;
+        // BE `submitQuote` cần `requestId`. Lấy từ cache `requestIdMap` được
+        // build từ `GET /api/v1/assignments` (field `request_id`).
+        // `MechanicJob.customer.id` không phải request id → không dùng.
+        const requestId = requestIdMap[jobId];
         if (!requestId) {
           // Rollback placeholder, set error.
           setLatestQuoteMap((prev) => {
@@ -708,7 +1061,7 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
         return null;
       }
     },
-    [jobs, serviceTypeMap, latestQuoteMap, isBackendConfigured, authUser?.id],
+    [jobs, serviceTypeMap, requestIdMap, latestQuoteMap, isBackendConfigured, authUser?.id],
   );
 
   /**
@@ -799,6 +1152,9 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       getJob,
       getAssignmentStatus,
       getJobServiceType,
+      jobDetail: getJobDetail,
+      jobDetailLoading: jobDetailLoadingId !== null,
+      loadJobDetail,
       updateJobStatus,
       completeJob,
       toggleAvailability,
@@ -813,14 +1169,20 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       submitQuoteForRequest,
       submitDiagnosisForJob,
       getLatestDiagnosisForJob,
+      getDiagnosisHistoryForJob,
+      loadDiagnosisHistory,
       getLatestPendingQuote,
       sharingAssignmentId,
       sharingError,
+      locationPermissionGranted,
       toggleLiveSharing,
+      startLiveSharing,
       stopLiveSharing,
       performance,
       performanceLoading,
       reloadPerformance,
+      autoTrackingEnabled,
+      setAutoTrackingEnabled,
     }),
     [
       mechanic,
@@ -831,6 +1193,9 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       getJob,
       getAssignmentStatus,
       getJobServiceType,
+      getJobDetail,
+      jobDetailLoadingId,
+      loadJobDetail,
       updateJobStatus,
       completeJob,
       toggleAvailability,
@@ -844,14 +1209,20 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       submitQuoteForRequest,
       submitDiagnosisForJob,
       getLatestDiagnosisForJob,
+      getDiagnosisHistoryForJob,
+      loadDiagnosisHistory,
       getLatestPendingQuote,
       sharingAssignmentId,
       sharingError,
+      locationPermissionGranted,
       toggleLiveSharing,
+      startLiveSharing,
       stopLiveSharing,
       performance,
       performanceLoading,
       reloadPerformance,
+      autoTrackingEnabled,
+      setAutoTrackingEnabled,
     ],
   );
 

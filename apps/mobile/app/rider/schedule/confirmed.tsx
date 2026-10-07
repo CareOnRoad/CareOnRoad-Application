@@ -11,7 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Field, FormTextInput } from '@/components/ui/form';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { NearMechanicsCard } from '@/components/mechanic/cards/near-mechanics-card';
-import { getServiceRequest, type ServiceRequestResponse } from '@/lib/service-requests-service';
+import { getServiceRequest, statusLabel, type ServiceRequestResponse } from '@/lib/service-requests-service';
 import { formatDdMmYyyyHHmm } from '@/lib/format';
 
 /**
@@ -90,7 +90,7 @@ export default function ConfirmedScreen() {
           </Text>
           {request?.status && (
             <View className="mt-1">
-              <Text className="text-xs text-muted-foreground">Trạng thái: {request.status}</Text>
+              <Text className="text-xs text-muted-foreground">Trạng thái: {statusLabel(request.status)}</Text>
             </View>
           )}
         </Card>

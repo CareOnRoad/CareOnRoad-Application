@@ -247,7 +247,10 @@ export class PostgresAssignmentRepository implements AssignmentRepository {
   async listVisibleToActor(actor: {
     id: string;
     roles: AuditActorRole[];
-  }, input: ListFilter = { limit: 20 }): Promise<Assignment[]> {
+  }, input: ListFilter & { statuses?: readonly AssignmentStatus[] } = { limit: 20 }): Promise<Assignment[]> {
+    // Postgres `IN` cho `statuses`. Nếu rỗng (caller không truyền) → truyền null
+    // để rơi vào nhánh "không filter" giống `status`.
+    const statuses = input.statuses && input.statuses.length > 0 ? input.statuses : null;
     const rows = await this.sql<AssignmentRow[]>`
       select assignment.*
       from assignments assignment
@@ -256,6 +259,7 @@ export class PostgresAssignmentRepository implements AssignmentRepository {
         or (${actor.roles.includes("mechanic")} and assignment.mechanic_id = ${actor.id})
         or (${actor.roles.includes("rider")} and request.rider_id = ${actor.id}))
         and (${input.status ?? null}::text is null or assignment.status::text = ${input.status ?? null})
+        and (${statuses}::text[] is null or assignment.status::text = any(${statuses}::text[]))
         and (${input.date_from ?? null}::timestamptz is null or assignment.created_at >= ${input.date_from ?? null}::timestamptz)
         and (${input.date_to ?? null}::timestamptz is null or assignment.created_at <= ${input.date_to ?? null}::timestamptz)
         and (${input.cursor?.timestamp ?? null}::timestamptz is null or

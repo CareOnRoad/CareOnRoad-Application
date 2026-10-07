@@ -12,7 +12,7 @@
  *  - GET  /api/v1/assignments/{id}/live-location         - poll vị trí
  *  - GET  /api/v1/assignments                            - danh sách (mechanic + admin + rider)
  */
-import { apiGet, apiPost, apiPut } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { newIdempotencyKey } from '@/lib/idempotency';
 
 export type AssignmentStatus =
@@ -61,6 +61,89 @@ export async function listAssignments(
   query: ListAssignmentsQuery = {},
 ): Promise<AssignmentListPage> {
   return apiGet<AssignmentListPage>('/api/v1/assignments', { query });
+}
+
+// =========================================================
+// Job detail (mechanic-owned)
+// =========================================================
+
+/**
+ * Response của `GET /api/v1/mechanics/me/jobs/{assignmentId}`.
+ *
+ * Xem `apps/api/src/features/mechanic-operations/mechanic-job-list.service.ts`
+ * → `getJob()`.
+ *
+ * Lưu ý:
+ *  - `sensitive_details_redacted === true` khi assignment đã terminal
+ *    (completed/canceled) → BE cố tình bỏ `request.location`,
+ *    `request.address_text` và `motorcycle.license_plate`.
+ *  - `request` / `motorcycle` / `latest_quote` / `completion_checklist` là
+ *    optional — không phải assignment nào cũng có.
+ */
+export interface MechanicJobDetailResponse {
+  assignment: AssignmentResponse & {
+    source?: string;
+    scheduled_start_at?: string;
+    appointment_status?: string;
+  };
+  request?: {
+    id: string;
+    request_code: string;
+    service_type: string;
+    fulfillment_mode?: string;
+    status: string;
+    problem_description: string;
+    scheduled_start_at?: string;
+    location?: { latitude: number; longitude: number };
+    address_text?: string;
+  };
+  motorcycle?: {
+    id: string;
+    brand_text?: string;
+    model_text?: string;
+    year?: number;
+    license_plate?: string;
+  };
+  latest_quote?: unknown;
+  agreements?: {
+    rescue_labor?: unknown;
+    rescue_payment_timing?: string;
+    maintenance_labor?: unknown;
+  };
+  completion_checklist?: {
+    id: string;
+    revision: number;
+    approved_quote_id?: string;
+    work_summary?: string;
+    safety_checklist?: Record<string, boolean>;
+    created_at: string;
+  };
+  media?: {
+    items: {
+      upload_intent_id: string;
+      media_metadata_id: string;
+      resource_type: string;
+      purpose: string;
+      content_type: string;
+      size_bytes: number;
+      created_at: string;
+    }[];
+    has_more: boolean;
+  };
+  sensitive_details_redacted: boolean;
+}
+
+/**
+ * Đọc chi tiết job của mechanic hiện tại.
+ *
+ * 403 nếu assignment thuộc mechanic khác; 404 nếu không tồn tại.
+ */
+export async function getJobDetail(
+  assignmentId: string,
+): Promise<MechanicJobDetailResponse> {
+  return apiGet<MechanicJobDetailResponse>(
+    `/api/v1/mechanics/me/jobs/${encodeURIComponent(assignmentId)}`,
+  );
 }
 
 // =========================================================
@@ -215,6 +298,25 @@ export async function getLatestDiagnosis(
   }
 }
 
+/**
+ * Lấy tất cả diagnosis versions cho assignment, sắp xếp mới nhất trước.
+ *
+ * Dùng cho UI "Xem các phiên trước" trong DiagnosisForm. Trả về `[]` nếu
+ * chưa có hoặc BE fail (silent - best-effort, không set error banner).
+ */
+export async function listDiagnoses(
+  assignmentId: string,
+): Promise<DiagnosisRecord[]> {
+  try {
+    const res = await apiGet<{ items?: DiagnosisRecord[] } | DiagnosisRecord[]>(
+      `/api/v1/assignments/${encodeURIComponent(assignmentId)}/diagnoses`,
+    );
+    return Array.isArray(res) ? res : (res.items ?? []);
+  } catch {
+    return [];
+  }
+}
+
 // =========================================================
 // Recover (pre-quote)
 // =========================================================
@@ -248,37 +350,6 @@ export async function recoverAssignment(
     `/api/v1/assignments/${encodeURIComponent(assignmentId)}/recover`,
     input,
     { headers: { 'X-Idempotency-Key': newIdempotencyKey() } },
-  );
-}
-
-// =========================================================
-// Live location (ingest cho mechanic)
-// =========================================================
-
-export interface LiveLocationInput {
-  latitude: number;
-  longitude: number;
-  observed_at: string; // ISO datetime
-  accuracy_meters: number;
-}
-
-export interface LiveLocationResponse {
-  assignment_id: string;
-  mechanic_id: string;
-  location: { latitude: number; longitude: number };
-  accuracy_meters?: number;
-  observed_at: string;
-  captured_at: string;
-  age_seconds?: number;
-}
-
-export async function ingestLiveLocation(
-  assignmentId: string,
-  input: LiveLocationInput,
-): Promise<LiveLocationResponse> {
-  return apiPut<LiveLocationResponse>(
-    `/api/v1/assignments/${encodeURIComponent(assignmentId)}/live-location`,
-    input,
   );
 }
 

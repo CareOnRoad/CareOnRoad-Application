@@ -41,7 +41,7 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
             </Badge>
           </View>
           <Text className="mt-1.5 text-xs text-muted-foreground">
-            Next service: {formatDate(vehicle.nextMaintenance)}
+            Bảo dưỡng tiếp theo: {formatDate(vehicle.nextMaintenance)}
           </Text>
         </View>
       </View>

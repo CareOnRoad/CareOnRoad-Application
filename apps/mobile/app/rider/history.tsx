@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { Bike, Calendar, FileText, History, LucideIcon, Receipt, Wrench } from 'lucide-react-native';
+import { router, type Href } from 'expo-router';
+import { Bike, Calendar, CheckCircle2, FileText, History, LucideIcon, Receipt, Star, Wrench } from 'lucide-react-native';
 
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
@@ -12,7 +12,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { HeroCard } from '@/components/ui/hero-card';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { useServiceRequests } from '@/hooks/use-service-requests';
-import { statusLabel, type ServiceRequestResponse } from '@/lib/service-requests-service';
+import { statusLabel, serviceTypeLabel, type ServiceRequestResponse } from '@/lib/service-requests-service';
 
 /**
  * HistoryScreen - lịch sử dịch vụ từ backend.
@@ -48,7 +48,7 @@ export default function HistoryScreen() {
               </View>
               <View className="flex-1">
                 <Text className="text-lg font-bold leading-tight text-foreground">
-                  {selected.service_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                  {serviceTypeLabel(selected.service_type)}
                 </Text>
                 <Badge tone="green" className="mt-1 self-start">
                   <Text className="text-xs font-semibold text-green">Hoàn tất</Text>
@@ -58,11 +58,7 @@ export default function HistoryScreen() {
             <View className="mt-4 gap-3">
               <DetailRow icon={Bike} label="Mã xe" value={selected.motorcycle_id.slice(0, 8) + '…'} />
               <DetailRow icon={Calendar} label="Ngày tạo" value={formatDate(selected.created_at)} />
-              <DetailRow
-                icon={Wrench}
-                label="Loại dịch vụ"
-                value={selected.service_type.replace(/_/g, ' ')}
-              />
+              <DetailRow icon={Wrench} label="Loại dịch vụ" value={serviceTypeLabel(selected.service_type)} />
               {selected.address_text && (
                 <DetailRow icon={FileText} label="Địa điểm" value={selected.address_text} />
               )}
@@ -77,6 +73,36 @@ export default function HistoryScreen() {
               <Text className="text-sm leading-relaxed text-muted-foreground">
                 {selected.problem_description}
               </Text>
+            </Card>
+          )}
+
+          {/* Đánh giá thợ — CTA từ màn hình history. Cùng route với (tabs)/rescue
+              để logic BE + state xử lý giống nhau. */}
+          {selected.status === 'completed' && (
+            <Card className="mt-4 border-green/20 bg-green/5 p-4">
+              <View className="flex-row items-center gap-2">
+                <CheckCircle2 size={16} color="#145413" />
+                <Text className="font-bold text-foreground">Hoàn tất dịch vụ</Text>
+              </View>
+              <Text className="mt-1 text-sm text-muted-foreground">
+                Bạn có thể đánh giá thợ để giúp cộng đồng CareOnRoad.
+              </Text>
+              <ActionButton
+                fullWidth
+                className="mt-3"
+                onPress={() =>
+                  router.push({
+                    pathname: '/rider/review',
+                    params: { requestId: selected.id },
+                  } as Href)
+                }
+                accessibilityLabel="Đánh giá thợ"
+              >
+                <Star size={16} color="#ffffff" />
+                <Text className="text-sm font-semibold text-primary-foreground">
+                  Đánh giá thợ
+                </Text>
+              </ActionButton>
             </Card>
           )}
 
@@ -142,7 +168,20 @@ export default function HistoryScreen() {
         ) : (
           <View className="mt-5 gap-3">
             {sr.list.map((r) => (
-              <HistoryCard key={r.id} request={r} onPress={() => setSelected(r)} />
+              <HistoryCard
+                key={r.id}
+                request={r}
+                onPress={() => router.push(`/rider/rescue/${r.id}` as Href)}
+                onReviewPress={
+                  r.status === 'completed'
+                    ? () =>
+                        router.push({
+                          pathname: '/rider/review',
+                          params: { requestId: r.id },
+                        } as Href)
+                    : undefined
+                }
+              />
             ))}
           </View>
         )}
@@ -154,9 +193,11 @@ export default function HistoryScreen() {
 function HistoryCard({
   request,
   onPress,
+  onReviewPress,
 }: {
   request: ServiceRequestResponse;
   onPress: () => void;
+  onReviewPress?: () => void;
 }) {
   const isCompleted = request.status === 'completed';
   const isCanceled = request.status === 'canceled';
@@ -164,36 +205,57 @@ function HistoryCard({
   const badgeText = isCompleted ? 'Hoàn tất' : isCanceled ? 'Đã huỷ' : statusLabel(request.status);
 
   return (
-    <Card
-      className="p-4 active:scale-[0.99]"
-      onPress={onPress}
-    >
+    <Card className="p-4 active:scale-[0.99]">
       <View className="flex-row items-center gap-3">
-        <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
-          <Wrench size={20} color="#1974f7" />
-        </View>
-        <View className="min-w-0 flex-1">
-          <View className="flex-row items-center justify-between gap-2">
-            <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
-              {request.service_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-            </Text>
-            <Badge tone={badgeTone} className="shrink-0">
-              <Text className="text-xs font-semibold">{badgeText}</Text>
-            </Badge>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Mở chi tiết ${serviceTypeLabel(request.service_type)}`}
+          onPress={onPress}
+          className="min-w-0 flex-1 flex-row items-center gap-3 active:opacity-70"
+        >
+          <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
+            <Wrench size={20} color="#1974f7" />
           </View>
-          <Text className="mt-1 truncate text-xs text-muted-foreground">
-            {request.request_code}
-          </Text>
-          <View className="mt-1.5 flex-row items-center gap-2">
-            <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
-              <Calendar size={12} color="#64748b" />
-              <Text className="text-xs font-semibold text-secondary-foreground">
-                {formatDate(request.created_at)}
+          <View className="min-w-0 flex-1">
+            <View className="flex-row items-center justify-between gap-2">
+              <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
+                {serviceTypeLabel(request.service_type)}
               </Text>
+              <Badge tone={badgeTone} className="shrink-0">
+                <Text className="text-xs font-semibold">{badgeText}</Text>
+              </Badge>
+            </View>
+            <Text className="mt-1 truncate text-xs text-muted-foreground">
+              {request.request_code}
+            </Text>
+            <View className="mt-1.5 flex-row items-center gap-2">
+              <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
+                <Calendar size={12} color="#64748b" />
+                <Text className="text-xs font-semibold text-secondary-foreground">
+                  {formatDate(request.created_at)}
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
+        </Pressable>
       </View>
+      {/* CTA Đánh giá — chỉ cho service-request đã completed.
+          Nằm ngoài Pressable chính để tránh trigger card onPress khi user
+          chỉ muốn bấm vào nút. Nếu rider đã review (BE trả 409) → screen
+          review.tsx sẽ render banner "Bạn đã đánh giá rồi". */}
+      {isCompleted && onReviewPress ? (
+        <ActionButton
+          fullWidth
+          size="sm"
+          variant="outline"
+          className="mt-3"
+          onPress={onReviewPress}
+          accessibilityLabel="Đánh giá thợ"
+        >
+          <Star size={14} color="#1974f7" />
+          <Text className="text-xs font-semibold text-primary">Đánh giá thợ</Text>
+        </ActionButton>
+      ) : null}
     </Card>
   );
 }

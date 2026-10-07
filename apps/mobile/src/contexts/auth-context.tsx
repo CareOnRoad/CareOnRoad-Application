@@ -37,6 +37,7 @@ import type { AuthRole, PublicAuthUser, StoredAuthSession } from '@/lib/auth-typ
 import { toPublicUser } from '@/lib/auth-types';
 import { getSupabase } from '@/lib/supabase-client';
 import { setAccessTokenProvider } from '@/lib/api';
+import { requestLocationPermissionOnce } from '@/lib/location-service';
 
 type AuthStatus = 'loading' | 'unauthenticated' | 'authenticated';
 
@@ -114,6 +115,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [demoSession, setDemoSession] = useState<StoredAuthSession | null>(null);
 
   const backendReady = useMemo(() => isAuthConfigured() && getSupabase() !== null, []);
+
+  // =========================================================
+  // Auto xin foreground location permission cho mechanic ngay khi
+  // authenticated. Idempotent: chỉ hỏi 1 lần, nếu đã grant thì return
+  // ngay không hiện dialog. Lỗi được nuốt (fire-and-forget) để không
+  // block auth flow.
+  // =========================================================
+  useEffect(() => {
+    if (status !== 'authenticated' || role !== 'mechanic') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const granted = await requestLocationPermissionOnce();
+        if (cancelled) return;
+        if (!granted && __DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(
+            '[auth] Mechanic chưa cấp location permission - auto-tracking sẽ bị skip cho tới khi user bật trong Settings.',
+          );
+        }
+      } catch (err) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[auth] requestLocationPermissionOnce failed:', err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, role]);
 
   // =========================================================
   // Subscribe deep-link cho Google OAuth callback

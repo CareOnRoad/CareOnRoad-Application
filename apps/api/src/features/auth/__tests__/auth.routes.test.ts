@@ -40,9 +40,9 @@ describe("auth routes", () => {
       expect((await patch({ display_name: "Injected", [field]: field === "roles" ? ["admin"] : "anything" })).status).toBe(400);
     }
     const state = uow.snapshot();
-    expect(state.auditLogs.at(-1)?.metadata).toEqual({ field: "display_name" });
+    expect(state.auditLogs.at(-1)?.metadata).toEqual({ resource_id: identity.subject });
     expect(JSON.stringify(state.auditLogs)).not.toContain("Updated");
-    expect(state.outboxEvents).toHaveLength(1);
+    expect(state.outboxEvents).toHaveLength(2);
     await expect(service.updateProfile({ ...identity, subject: "22222222-2222-4222-8222-222222222222" }, { display_name: "Other" }))
       .rejects.toMatchObject({ status: 404 });
     state.users[0]!.status = "suspended";

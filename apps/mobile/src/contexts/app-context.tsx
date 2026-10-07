@@ -447,8 +447,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // Khi backend lên, demo mode sẽ hiển thị EmptyState đúng nghĩa.
         const local: Vehicle = {
           id: `local-${Date.now()}`,
-          name: `${input.brand || 'Motorcycle'} ${input.model || 'Vehicle'}`.trim(),
-          brand: input.brand.trim() || 'Motorcycle',
+          name: `${input.brand || 'Xe máy'} ${input.model || 'Xe'}`.trim(),
+          brand: input.brand.trim() || 'Xe máy',
           plate: input.plate.trim(),
           mileage: 0,
           color: '—',

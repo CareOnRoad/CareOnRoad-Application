@@ -452,7 +452,8 @@ function ModeTab({
 }) {
   return (
     <Pressable
-      accessibilityRole="tab"
+      accessibilityRole="button"
+      accessibilityLabel={active ? `${label}, đang chọn` : label}
       accessibilityState={{ selected: active }}
       onPress={onPress}
       className={cn(

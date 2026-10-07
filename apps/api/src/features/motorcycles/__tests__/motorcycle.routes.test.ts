@@ -49,10 +49,14 @@ describe("motorcycle routes", () => {
       )
     );
     expect(created.status).toBe(201);
-    await expect(created.json()).resolves.toMatchObject({
+    const createdBody = await created.json();
+    expect(createdBody).toMatchObject({
       id: motorcycleId,
       rider_id: riderId
     });
+    // Maintenance fields are omitted when no service request / reminder history exists.
+    expect(createdBody.last_maintenance_at).toBeUndefined();
+    expect(createdBody.next_maintenance_at).toBeUndefined();
 
     const nonOwner = await handlers.getMotorcycle(
       request("GET", `/api/v1/motorcycles/${motorcycleId}`, undefined, "other-rider"),

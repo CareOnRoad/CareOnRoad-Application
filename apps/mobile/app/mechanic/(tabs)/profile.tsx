@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Linking, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   Award,
@@ -33,6 +33,7 @@ import { NavRow, RowIcon, ToggleRow } from '@/components/ui/toggle-row';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { SectionHeader } from '@/components/ui/form';
 import { StatTile } from '@/components/ui/stat-tile';
+import { Banner } from '@/components/ui/banner';
 import { cn } from '@/lib/utils';
 import { formatVND } from '@/lib/format';
 import { loadProfile, type LocalProfile } from '@/lib/profile-service';
@@ -47,7 +48,16 @@ const languageCopy = { EN: 'English', VI: 'Tiếng Việt' } as const;
  * Các phần: Garage, Certifications, Settings, Switch role, Logout.
  */
 export default function MechanicProfileScreen() {
-  const { mechanic, garage, earnings, darkMode, toggleDarkMode } = useMechanicApp();
+  const {
+    mechanic,
+    garage,
+    earnings,
+    darkMode,
+    toggleDarkMode,
+    autoTrackingEnabled,
+    setAutoTrackingEnabled,
+    locationPermissionGranted,
+  } = useMechanicApp();
   const {
     user: authUser,
     logout,
@@ -223,7 +233,7 @@ export default function MechanicProfileScreen() {
 
         {/* Garage info */}
         <View className="mt-6">
-          <SectionHeader title="Garage" />
+          <SectionHeader title="Thông tin garage" />
           <Card className="divide-y divide-border">
             <Row
               icon={MapPin}
@@ -259,6 +269,33 @@ export default function MechanicProfileScreen() {
               checked={notifications}
               onChange={() => setNotifications((v) => !v)}
             />
+            <View className="px-4 py-3">
+              <ToggleRow
+                icon={MapPin}
+                label="Tự động chia sẻ vị trí"
+                description={
+                  autoTrackingEnabled
+                    ? 'Hệ thống tự gửi vị trí khi có assignment đang chạy.'
+                    : 'Bạn cần bật thủ công cho từng job.'
+                }
+                checked={autoTrackingEnabled}
+                onChange={() => setAutoTrackingEnabled(!autoTrackingEnabled)}
+              />
+              {!locationPermissionGranted && (
+                <Pressable
+                  onPress={() => {
+                    Linking.openSettings().catch(() => undefined);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Mở cài đặt vị trí"
+                  className="mt-2 self-start rounded-full bg-amber-500/10 px-3 py-1.5 active:opacity-70"
+                >
+                  <Text className="text-xs font-semibold text-amber-700">
+                    Mở cài đặt vị trí (chưa cấp quyền)
+                  </Text>
+                </Pressable>
+              )}
+            </View>
             <LanguageRow
               language={language}
               onPress={() => setLanguage((l) => (l === 'EN' ? 'VI' : 'EN'))}
@@ -277,6 +314,16 @@ export default function MechanicProfileScreen() {
             />
           </Card>
         </View>
+
+        {!locationPermissionGranted && (
+          <View className="mt-4">
+            <Banner
+              tone="warning"
+              title="Quyền vị trí chưa được cấp"
+              description="Cấp quyền vị trí trong cài đặt hệ thống để auto-tracking hoạt động."
+            />
+          </View>
+        )}
 
         {!isBackendConfigured && (
           <ActionButton

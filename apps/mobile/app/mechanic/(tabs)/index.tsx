@@ -37,16 +37,23 @@ import { JobCard } from '@/components/mechanic/cards/job-card';
  *  6. Danh sách upcoming jobs (3 đầu).
  */
 export default function MechanicDashboardScreen() {
-  const { mechanic, garage, todayJobs, upcomingTodayJobs, updateJobStatus, earnings } = useMechanicApp();
+  const { mechanic, garage, todayJobs, upcomingTodayJobs, updateJobStatus, earnings, dashboard } = useMechanicApp();
   const { user: authUser } = useAuth();
   const { unreadCount: unread } = useNotifications();
 
   const displayName = authUser?.name ?? mechanic.name;
   const displayAvatar = authUser?.avatar ?? mechanic.avatar;
 
-  const pendingCount = todayJobs.filter((j) => j.status === 'pending').length;
-  const inProgressCount = todayJobs.filter((j) => j.status === 'in_progress').length;
-  const completedCount = todayJobs.filter((j) => j.status === 'completed').length;
+  // BE `dashboard.today_counts` đếm theo `accepted_at` trong ngày — semantic
+  // chính xác hơn `todayJobs.filter()` (chỉ filter theo scheduledDate). Khi
+  // BE chưa có data → fallback về filter local để UI không bị trống.
+  const todayCounts = dashboard?.today_counts;
+  const pendingCount = todayCounts?.accepted_jobs ?? todayJobs.filter((j) => j.status === 'pending').length;
+  const inProgressCount =
+    todayCounts?.accepted_jobs ??
+    todayJobs.filter((j) => j.status === 'in_progress' || j.status === 'pending').length;
+  const completedCount = todayCounts?.completed_jobs ?? todayJobs.filter((j) => j.status === 'completed').length;
+  const canceledCount = todayCounts?.canceled_jobs ?? 0;
   const nextJob = upcomingTodayJobs[0];
 
   const handleStartNext = () => {
@@ -61,7 +68,7 @@ export default function MechanicDashboardScreen() {
   return (
     <View className="flex-1 bg-background">
       <AppHeader
-        title="Dashboard"
+        title="Tổng quan"
         subtitle={greeting()}
         right={
           <View className="flex-row items-center gap-2">
@@ -109,7 +116,8 @@ export default function MechanicDashboardScreen() {
           <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5">
             <Bell size={16} color="#a9ffad" />
             <Text className="text-xs font-medium text-white">
-              {pendingCount + inProgressCount} công việc đang hoạt động hôm nay
+              {pendingCount} công việc đang hoạt động hôm nay
+              {canceledCount > 0 ? ` · ${canceledCount} đã huỷ` : ''}
             </Text>
           </View>
         </HeroCard>
@@ -122,6 +130,14 @@ export default function MechanicDashboardScreen() {
             <StatTile icon={Clock} tone="blue" label="Đang làm" value={inProgressCount} />
             <StatTile icon={CheckCircle2} tone="green" label="Hoàn tất" value={completedCount} />
           </View>
+          {canceledCount > 0 ? (
+            <View className="mt-3 flex-row items-center gap-2 rounded-2xl bg-secondary px-3 py-2">
+              <View className="size-1.5 rounded-full bg-muted-foreground" />
+              <Text className="text-xs text-muted-foreground">
+                {canceledCount} yêu cầu đã bị huỷ hôm nay
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Earnings */}

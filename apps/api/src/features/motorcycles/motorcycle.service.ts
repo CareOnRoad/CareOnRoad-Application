@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ApiErrorCode } from "@/lib/api-error";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 import type { Motorcycle } from "@/server/repositories/contracts/motorcycle.repository";
+import type { ServiceRequest } from "@/server/repositories/contracts/service-request.repository";
 
 import type { VerifiedSupabaseIdentity } from "../auth/auth.types";
 import { requireActorRole } from "../auth/authorization";
@@ -16,9 +17,22 @@ export type MotorcycleResponse = {
   license_plate?: string;
   year?: number;
   notes?: string;
+  last_maintenance_at?: string;
+  next_maintenance_at?: string;
   created_at: string;
   updated_at: string;
 };
+
+const UPCOMING_SERVICE_REQUEST_STATUSES: readonly ServiceRequest["status"][] = [
+  "submitted",
+  "dispatching",
+  "offered",
+  "assigned",
+  "mechanic_en_route",
+  "in_service",
+  "awaiting_quote_approval",
+  "awaiting_payment"
+];
 
 export class MotorcycleService {
   constructor(
@@ -66,15 +80,30 @@ export class MotorcycleService {
         createdAt: now
       });
 
-      return toMotorcycleResponse(motorcycle);
+      return toMotorcycleResponse(motorcycle, { lastMaintenanceAt: undefined, nextMaintenanceAt: undefined });
     });
   }
 
   listMotorcycles(identity: VerifiedSupabaseIdentity): Promise<{ items: MotorcycleResponse[] }> {
-    return this.unitOfWork.execute(async ({ motorcycles, users }) => {
+    return this.unitOfWork.execute(async ({ motorcycles, reminders, serviceRequests, users }) => {
       const actor = await loadRiderActor(users, identity.subject);
+      const now = this.options.now?.() ?? new Date();
       const items = await motorcycles.listActiveByRider(actor.id);
-      return { items: items.map(toMotorcycleResponse) };
+      if (items.length === 0) {
+        return { items: [] };
+      }
+      const motorcycleIds = items.map((motorcycle) => motorcycle.id);
+      const maintenance = await deriveMaintenanceDates({
+        serviceRequests,
+        reminders,
+        motorcycleIds,
+        now
+      });
+      return {
+        items: items.map((motorcycle) =>
+          toMotorcycleResponse(motorcycle, maintenance.get(motorcycle.id))
+        )
+      };
     });
   }
 
@@ -82,10 +111,17 @@ export class MotorcycleService {
     identity: VerifiedSupabaseIdentity,
     motorcycleId: string
   ): Promise<MotorcycleResponse> {
-    return this.unitOfWork.execute(async ({ motorcycles, users }) => {
+    return this.unitOfWork.execute(async ({ motorcycles, reminders, serviceRequests, users }) => {
       const actor = await loadRiderActor(users, identity.subject);
       const motorcycle = await loadOwnedMotorcycle(motorcycles, motorcycleId, actor.id);
-      return toMotorcycleResponse(motorcycle);
+      const now = this.options.now?.() ?? new Date();
+      const maintenance = await deriveMaintenanceDates({
+        serviceRequests,
+        reminders,
+        motorcycleIds: [motorcycle.id],
+        now
+      });
+      return toMotorcycleResponse(motorcycle, maintenance.get(motorcycle.id));
     });
   }
 
@@ -132,7 +168,7 @@ export class MotorcycleService {
         createdAt: now
       });
 
-      return toMotorcycleResponse(updated);
+      return toMotorcycleResponse(updated, { lastMaintenanceAt: undefined, nextMaintenanceAt: undefined });
     });
   }
 
@@ -252,7 +288,10 @@ async function loadOwnedMotorcycle(
   return motorcycle;
 }
 
-export function toMotorcycleResponse(motorcycle: Motorcycle): MotorcycleResponse {
+export function toMotorcycleResponse(
+  motorcycle: Motorcycle,
+  maintenance?: MaintenanceDates
+): MotorcycleResponse {
   return {
     id: motorcycle.id,
     rider_id: motorcycle.riderId,
@@ -261,7 +300,73 @@ export function toMotorcycleResponse(motorcycle: Motorcycle): MotorcycleResponse
     ...(motorcycle.licensePlate ? { license_plate: motorcycle.licensePlate } : {}),
     ...(motorcycle.year ? { year: motorcycle.year } : {}),
     ...(motorcycle.notes ? { notes: motorcycle.notes } : {}),
+    ...(maintenance?.lastMaintenanceAt
+      ? { last_maintenance_at: maintenance.lastMaintenanceAt.toISOString() }
+      : {}),
+    ...(maintenance?.nextMaintenanceAt
+      ? { next_maintenance_at: maintenance.nextMaintenanceAt.toISOString() }
+      : {}),
     created_at: motorcycle.createdAt.toISOString(),
     updated_at: motorcycle.updatedAt.toISOString()
   };
+}
+
+type MaintenanceDates = {
+  lastMaintenanceAt?: Date;
+  nextMaintenanceAt?: Date;
+};
+
+type MaintenanceRepositories = {
+  serviceRequests: Pick<
+    Parameters<Parameters<UnitOfWork["execute"]>[0]>[0]["serviceRequests"],
+    "listCompletedLastUpdatedByMotorcycles" | "listUpcomingMaintenanceByMotorcycles"
+  >;
+  reminders: Pick<
+    Parameters<Parameters<UnitOfWork["execute"]>[0]>[0]["reminders"],
+    "listUpcomingByMotorcycles"
+  >;
+};
+
+async function deriveMaintenanceDates(input: {
+  serviceRequests: MaintenanceRepositories["serviceRequests"];
+  reminders: MaintenanceRepositories["reminders"];
+  motorcycleIds: string[];
+  now: Date;
+}): Promise<Map<string, MaintenanceDates>> {
+  const result = new Map<string, MaintenanceDates>();
+  if (input.motorcycleIds.length === 0) {
+    return result;
+  }
+  const [lastByMotorcycle, upcomingByMotorcycle, reminderByMotorcycle] = await Promise.all([
+    input.serviceRequests.listCompletedLastUpdatedByMotorcycles({
+      motorcycleIds: input.motorcycleIds
+    }),
+    input.serviceRequests.listUpcomingMaintenanceByMotorcycles({
+      motorcycleIds: input.motorcycleIds,
+      activeStatuses: UPCOMING_SERVICE_REQUEST_STATUSES,
+      now: input.now
+    }),
+    input.reminders.listUpcomingByMotorcycles({
+      motorcycleIds: input.motorcycleIds,
+      now: input.now
+    })
+  ]);
+
+  for (const motorcycleId of input.motorcycleIds) {
+    const last = lastByMotorcycle.get(motorcycleId);
+    const upcoming = upcomingByMotorcycle.get(motorcycleId);
+    const reminder = reminderByMotorcycle.get(motorcycleId);
+    let nextMaintenanceAt: Date | undefined;
+    if (upcoming && reminder) {
+      nextMaintenanceAt =
+        upcoming.getTime() <= reminder.getTime() ? upcoming : reminder;
+    } else {
+      nextMaintenanceAt = upcoming ?? reminder;
+    }
+    result.set(motorcycleId, {
+      lastMaintenanceAt: last,
+      nextMaintenanceAt
+    });
+  }
+  return result;
 }

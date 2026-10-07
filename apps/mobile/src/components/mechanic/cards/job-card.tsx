@@ -3,30 +3,24 @@ import { Text, View } from 'react-native';
 import { Phone, Bike, Wrench, ChevronRight, Clock } from 'lucide-react-native';
 import { Card } from '@/components/ui/card';
 import { formatVND } from '@/lib/format';
-import type { MechanicJob } from '@/lib/mechanic-types';
+import {
+  JOB_STATUS_LABELS,
+  JOB_STATUS_TONE,
+  JOB_STATUS_TONE_COLOR,
+  type MechanicJob,
+} from '@/lib/mechanic-types';
 
-const statusTone: Record<MechanicJob['status'], 'amber' | 'blue' | 'red' | 'green'> = {
-  pending: 'amber',
-  in_progress: 'blue',
-  awaiting_parts: 'red',
-  completed: 'green',
-};
-
-const statusLabel: Record<MechanicJob['status'], string> = {
-  pending: 'Chờ xử lý',
-  in_progress: 'Đang xử lý',
-  awaiting_parts: 'Chờ phụ tùng',
-  completed: 'Hoàn tất',
-};
-
-const toneTextColor: Record<string, string> = {
-  amber: '#d97706',
-  blue: '#1974f7',
-  red: '#ed3f3a',
-  green: '#145413',
-};
-
+/**
+ * JobCard - card hiển thị job của mechanic trong list/dashboard.
+ *
+ * Status label + tone lấy từ shared maps trong `mechanic-types.ts` để đảm bảo
+ * tất cả UI mechanic (dashboard hero, jobs list, filter chips, job detail
+ * header) render cùng 1 vocabulary.
+ */
 export function JobCard({ job, onPress }: { job: MechanicJob; onPress?: () => void }) {
+  const tone = JOB_STATUS_TONE[job.status];
+  const label = JOB_STATUS_LABELS[job.status];
+  const toneColor = JOB_STATUS_TONE_COLOR[tone];
   return (
     <Card onPress={onPress} className="p-4">
       <View className="flex-row items-start gap-3">
@@ -41,9 +35,12 @@ export function JobCard({ job, onPress }: { job: MechanicJob; onPress?: () => vo
                 {job.customer.name} · {job.vehicle.plate}
               </Text>
             </View>
-            <View className={`rounded-full px-2.5 py-1`} style={{ backgroundColor: `${toneTextColor[statusTone[job.status]]}20` }}>
-              <Text className="text-xs font-semibold" style={{ color: toneTextColor[statusTone[job.status]] }}>
-                {statusLabel[job.status]}
+            <View
+              className="rounded-full px-2.5 py-1"
+              style={{ backgroundColor: `${toneColor}20` }}
+            >
+              <Text className="text-xs font-semibold" style={{ color: toneColor }}>
+                {label}
               </Text>
             </View>
           </View>
@@ -51,7 +48,7 @@ export function JobCard({ job, onPress }: { job: MechanicJob; onPress?: () => vo
             <View className="flex-row items-center gap-1">
               <Clock size={14} color="#64748b" />
               <Text className="text-xs text-muted-foreground">
-                {job.scheduledTime} · {job.durationMin} min
+                {job.scheduledTime} · {job.durationMin} phút
               </Text>
             </View>
             <Text className="text-xs font-bold text-foreground">{formatVND(job.price)}</Text>

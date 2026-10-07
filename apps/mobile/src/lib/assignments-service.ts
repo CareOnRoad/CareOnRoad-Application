@@ -21,14 +21,61 @@ export interface AssignmentListItem {
   completed_at?: string;
 }
 
+/**
+ * Response của `GET/PUT /api/v1/assignments/{id}/live-location`.
+ *
+ * LƯU Ý contract: BE trả **flat shape** (xem
+ * `apps/api/src/features/live-tracking/live-tracking.service.ts` → `toResponse`):
+ *   { assignment_id, latitude, longitude, observed_at, accuracy_meters,
+ *     received_at, expires_at, freshness }
+ *
+ * Không có field `mechanic_id`, `location` (nested) hay `age_seconds`.
+ * Dùng optional + tolerant parsing ở consumer để không crash nếu BE đổi
+ * shape về sau.
+ */
 export interface LiveLocationResponse {
   assignment_id: string;
-  mechanic_id: string;
-  location: { latitude: number; longitude: number };
+  latitude: number;
+  longitude: number;
   accuracy_meters?: number;
   observed_at: string;
-  captured_at: string;
+  received_at?: string;
+  expires_at?: string;
+  /** 'current' | 'stale' — BE đánh dấu freshness của point. */
+  freshness?: string;
+  /** Legacy/nested shape: một số path cũ vẫn bọc trong `location`. */
+  location?: { latitude: number; longitude: number };
+  /** Legacy: tuổi point (giây) nếu có. */
   age_seconds?: number;
+  mechanic_id?: string;
+  captured_at?: string;
+}
+
+/**
+ * Chuẩn hoá `LiveLocationResponse` về `{ latitude, longitude, ageSeconds }`
+ * hoặc `null` nếu payload không có toạ độ hợp lệ.
+ *
+ * Chấp nhận cả flat shape (BE hiện tại) và nested shape (fallback) để app
+ * không crash khi contract lệch.
+ */
+export function normalizeLiveLocation(
+  raw: LiveLocationResponse | null | undefined,
+  now: () => number = Date.now,
+): { latitude: number; longitude: number; ageSeconds: number } | null {
+  if (!raw) return null;
+  const lat = typeof raw.latitude === 'number' ? raw.latitude : raw.location?.latitude;
+  const lng = typeof raw.longitude === 'number' ? raw.longitude : raw.location?.longitude;
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const observedAt = raw.observed_at ?? raw.captured_at;
+  let ageSeconds = 0;
+  if (observedAt) {
+    const parsed = Date.parse(observedAt);
+    if (!Number.isNaN(parsed)) ageSeconds = Math.max(0, Math.round((now() - parsed) / 1000));
+  } else if (typeof raw.age_seconds === 'number') {
+    ageSeconds = raw.age_seconds;
+  }
+  return { latitude: lat, longitude: lng, ageSeconds };
 }
 
 export interface CreateReviewInput {

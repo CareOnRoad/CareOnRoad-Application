@@ -11,7 +11,7 @@ export function AiChatbox() {
     {
       id: 'intro',
       role: 'ai',
-      text: "Hi! I'm CareBot. Describe what's wrong with your motorcycle — or attach a photo — and I'll suggest the likely cause and an estimated price.",
+      text: 'Xin chào! Mình là CareBot. Mô tả sự cố của xe máy — hoặc đính kèm ảnh — để mình gợi ý nguyên nhân và ước tính chi phí giúp bạn.',
     },
   ]);
   const [input, setInput] = useState('');
@@ -42,10 +42,10 @@ export function AiChatbox() {
           <Bot size={20} color="#1974f7" />
         </View>
         <View className="flex-1">
-          <Text className="text-sm font-bold leading-tight text-foreground">CareBot Assistant</Text>
+          <Text className="text-sm font-bold leading-tight text-foreground">Trợ lý CareBot</Text>
           <View className="flex-row items-center gap-1">
             <View className="size-1.5 rounded-full bg-green" />
-            <Text className="text-xs text-green">Online</Text>
+            <Text className="text-xs text-green">Đang hoạt động</Text>
           </View>
         </View>
         <Sparkles size={16} color="#1974f7" />
@@ -109,8 +109,8 @@ export function AiChatbox() {
       >
         <View className="flex-row items-center gap-2 border-t border-border p-3">
           <Pressable
-            accessibilityLabel="Attach photo"
-            onPress={() => send('Here is a photo of the issue [image attached]')}
+            accessibilityLabel="Đính kèm ảnh"
+            onPress={() => send('Đây là ảnh sự cố [đã đính kèm ảnh]')}
             className="size-10 shrink-0 items-center justify-center rounded-full bg-secondary active:scale-90"
           >
             <ImagePlus size={20} color="#64748b" />
@@ -118,14 +118,14 @@ export function AiChatbox() {
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="Describe the problem..."
+            placeholder="Mô tả sự cố..."
             placeholderTextColor="#94a3b8"
             className="min-w-0 flex-1 rounded-full border border-input bg-background px-4 py-2.5 text-sm text-foreground"
             onSubmitEditing={() => send(input)}
             returnKeyType="send"
           />
           <Pressable
-            accessibilityLabel="Send message"
+            accessibilityLabel="Gửi tin nhắn"
             onPress={() => send(input)}
             className="size-10 shrink-0 items-center justify-center rounded-full bg-primary active:scale-90"
           >

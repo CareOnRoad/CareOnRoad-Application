@@ -7,6 +7,7 @@ import {
   Home,
   LucideIcon,
   Siren,
+  Activity,
   User as UserIcon,
 } from 'lucide-react-native';
 
@@ -23,6 +24,7 @@ const tabIcons: Record<string, LucideIcon> = {
   index: Home,
   vehicles: Bike,
   rescue: Siren,
+  tracking: Activity,
   schedule: CalendarPlus,
   profile: UserIcon,
 };
@@ -58,23 +60,27 @@ export default function RiderTabsLayout() {
     >
       <Tabs.Screen
         name="index"
-        options={{ title: 'Home', tabBarIcon: makeTabBarIcon('index') }}
+        options={{ title: 'Trang chủ', tabBarIcon: makeTabBarIcon('index') }}
       />
       <Tabs.Screen
         name="vehicles"
-        options={{ title: 'Vehicles', tabBarIcon: makeTabBarIcon('vehicles') }}
+        options={{ title: 'Xe của tôi', tabBarIcon: makeTabBarIcon('vehicles') }}
       />
       <Tabs.Screen
         name="rescue"
-        options={{ title: 'Rescue', tabBarIcon: makeTabBarIcon('rescue') }}
+        options={{ title: 'Cứu hộ', tabBarIcon: makeTabBarIcon('rescue') }}
+      />
+      <Tabs.Screen
+        name="tracking"
+        options={{ title: 'Theo dõi', tabBarIcon: makeTabBarIcon('tracking') }}
       />
       <Tabs.Screen
         name="schedule"
-        options={{ title: 'Schedule', tabBarIcon: makeTabBarIcon('schedule') }}
+        options={{ title: 'Đặt lịch', tabBarIcon: makeTabBarIcon('schedule') }}
       />
       <Tabs.Screen
         name="profile"
-        options={{ title: 'Profile', tabBarIcon: makeTabBarIcon('profile') }}
+        options={{ title: 'Hồ sơ', tabBarIcon: makeTabBarIcon('profile') }}
       />
     </Tabs>
   );

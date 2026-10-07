@@ -20,7 +20,7 @@ export function CustomerCard({ customer }: { customer: MechanicCustomer }) {
           </View>
         </View>
         <Pressable
-          accessibilityLabel={`Call ${customer.name}`}
+          accessibilityLabel={`Gọi ${customer.name}`}
           className="size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 active:opacity-60"
         >
           <Phone size={16} color="#1974f7" />
@@ -28,9 +28,9 @@ export function CustomerCard({ customer }: { customer: MechanicCustomer }) {
       </View>
       <View className="mt-3 flex-row items-center gap-2">
         <MapPin size={14} color="#64748b" />
-        <Text className="text-xs text-muted-foreground">Returning customer</Text>
+        <Text className="text-xs text-muted-foreground">Khách hàng thân thiết</Text>
         <Badge tone="green" className="ml-auto">
-          <Text className="text-xs font-semibold text-green">Verified</Text>
+          <Text className="text-xs font-semibold text-green">Đã xác thực</Text>
         </Badge>
       </View>
     </Card>

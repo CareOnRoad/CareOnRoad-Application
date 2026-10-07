@@ -18,7 +18,7 @@ function shiftDate(iso: string, days: number) {
 }
 
 function getDayLabel(iso: string) {
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  return new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: 'short' });
 }
 
 /**

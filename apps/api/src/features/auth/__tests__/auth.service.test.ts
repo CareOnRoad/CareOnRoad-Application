@@ -358,6 +358,60 @@ describe("AuthService", () => {
       "not visible"
     );
   });
+
+  it("updateProfile patches phone, address and avatar_url together with display_name", async () => {
+    const unitOfWork = createActiveRiderUnitOfWork();
+    const now = new Date("2026-06-25T02:00:00Z");
+    const service = new AuthService(unitOfWork, {
+      now: () => now
+    });
+
+    const updated = await service.updateProfile(identity, {
+      display_name: "Rider Updated",
+      phone: "+84 90 555 1234",
+      address: "124 Nguyễn Văn Cừ, Quận 5",
+      avatar_url: "https://i.pravatar.cc/200?img=15"
+    });
+
+    expect(updated).toMatchObject({
+      id: identity.subject,
+      display_name: "Rider Updated",
+      phone: "+84 90 555 1234",
+      address: "124 Nguyễn Văn Cừ, Quận 5",
+      avatar_url: "https://i.pravatar.cc/200?img=15",
+      roles: ["rider"]
+    });
+
+    const snapshot = unitOfWork.snapshot();
+    const storedUser = snapshot.users.find((item) => item.id === identity.subject);
+    expect(storedUser?.phoneMasked).toMatch(/^\*+1234$/);
+    const profileAudit = snapshot.auditLogs.filter(
+      (item) => item.action === "user.profile.updated"
+    );
+    expect(profileAudit).toHaveLength(1);
+    expect(profileAudit[0]).toMatchObject({
+      actorId: identity.subject,
+      actorRole: "rider",
+      entityType: "app_user",
+      entityId: identity.subject,
+      metadata: { resource_id: identity.subject }
+    });
+
+    const profileOutbox = snapshot.outboxEvents.filter(
+      (item) => item.topic === "user.profile.updated"
+    );
+    expect(profileOutbox).toHaveLength(1);
+    expect(profileOutbox[0]).toMatchObject({
+      aggregateType: "app_user",
+      aggregateId: identity.subject,
+      payload: { resource_id: identity.subject }
+    });
+    expect(profileOutbox[0]?.dedupeKey).toContain(`user.profile.updated:${identity.subject}:`);
+
+    // Sanitize: raw phone value must not leak into audit or outbox payloads.
+    expect(JSON.stringify(snapshot.auditLogs)).not.toContain("+84 90 555 1234");
+    expect(JSON.stringify(snapshot.outboxEvents)).not.toContain("+84 90 555 1234");
+  });
 });
 
 function createActiveRiderUnitOfWork() {

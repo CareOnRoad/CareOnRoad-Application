@@ -56,12 +56,20 @@ export function AppHeader({
           onPress={onBack}
           accessibilityLabel="Quay lại"
           accessibilityRole="button"
-          className={cn(
-            'size-9 shrink-0 items-center justify-center rounded-full active:scale-95',
-            isDark ? 'bg-white/10' : 'bg-secondary',
-          )}
+          style={({ pressed }) => [
+            {
+              transform: [{ scale: pressed ? 0.95 : 1 }],
+            },
+          ]}
         >
-          <ArrowLeft size={20} color={isDark ? '#ffffff' : '#16202f'} />
+          <View
+            className={cn(
+              'size-9 shrink-0 items-center justify-center rounded-full',
+              isDark ? 'bg-white/10' : 'bg-secondary',
+            )}
+          >
+            <ArrowLeft size={20} color={isDark ? '#ffffff' : '#16202f'} />
+          </View>
         </Pressable>
       )}
       <View className="min-w-0 flex-1">
@@ -97,9 +105,15 @@ export function HeaderBell({ onPress }: { onPress?: () => void }) {
       onPress={onPress}
       accessibilityLabel="Thông báo"
       accessibilityRole="button"
-      className="size-9 shrink-0 items-center justify-center rounded-full bg-secondary active:scale-95"
+      style={({ pressed }) => [
+        {
+          transform: [{ scale: pressed ? 0.95 : 1 }],
+        },
+      ]}
     >
-      <Bell size={18} color="#16202f" />
+      <View className="size-9 shrink-0 items-center justify-center rounded-full bg-secondary">
+        <Bell size={18} color="#16202f" />
+      </View>
     </Pressable>
   );
 }

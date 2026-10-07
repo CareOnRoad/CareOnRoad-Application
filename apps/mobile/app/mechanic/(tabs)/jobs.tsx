@@ -73,7 +73,7 @@ export default function MechanicJobsScreen() {
           {MECHANIC_JOB_FILTERS.map((f) => (
             <Pressable
               key={f.id}
-              accessibilityRole="tab"
+              accessibilityRole="button"
               accessibilityState={{ selected: filter === f.id }}
               accessibilityLabel={`Lọc ${f.label}`}
               onPress={() => setFilter(f.id)}

@@ -28,6 +28,7 @@ import {
 import { getRouteEta, getLiveLocation } from '@/lib/assignments-service';
 import { getLatestPendingQuote, approveQuote, rejectQuote, type Quote } from '@/lib/quotes-service';
 import { listAssignments, type AssignmentListItem } from '@/lib/assignments-service';
+import { useActiveRequest } from '@/contexts/active-request-context';
 import type { DispatchRoundResponse, RouteEtaResponse } from '@/lib/service-requests-service';
 import type { LiveLocationResponse } from '@/lib/assignments-service';
 
@@ -103,6 +104,12 @@ export function useServiceRequests(): UseServiceRequestsReturn {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const etaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Persist request đang theo dõi qua AsyncStorage. Đây là nguồn sự thật
+  // duy nhất — mọi screen gọi `useServiceRequests()` đều thấy cùng giá trị,
+  // và giá trị sống qua app restart. Xem `active-request-context.tsx`.
+  const { activeRequestId, hydrated: activeHydrated, setActiveRequest, clearActiveRequest } =
+    useActiveRequest();
 
   const clearTimers = useCallback(() => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
@@ -234,6 +241,50 @@ export function useServiceRequests(): UseServiceRequestsReturn {
     [clearTimers, refreshActive],
   );
 
+  /**
+   * Hydrate session từ AsyncStorage khi app mở lại.
+   *
+   * `ActiveRequestProvider` mirror `activeRequestId` sang AsyncStorage, nên sau
+   * khi app restart rider vẫn thấy request đang chạy (thợ đã nhận / chờ báo
+   * giá / chờ thanh toán) thay vì màn hình trống.
+   *
+   * Chỉ chạy 1 lần sau khi AsyncStorage đọc xong (`activeHydrated`) và chỉ
+   * khi session local vẫn `idle` — tránh ghi đè một flow đang diễn ra.
+   */
+  useEffect(() => {
+    if (!activeHydrated) return;
+    if (!activeRequestId) return;
+    if (active.requestId === activeRequestId) return;
+    // Session local đang theo dõi request khác → không hydrate đè lên.
+    if (active.requestId) return;
+    void (async () => {
+      try {
+        const request = await getServiceRequest(activeRequestId);
+        setActive({
+          ...INITIAL_SESSION,
+          requestId: request.id,
+          request,
+          phase: statusToPhase(request.status),
+        });
+        await refreshActive(activeRequestId);
+        const phase = statusToPhase(request.status);
+        if (['searching', 'tracking', 'quote', 'payment', 'completed'].includes(phase)) {
+          scheduleNextPoll(activeRequestId, phase);
+        }
+      } catch {
+        // Request không còn tồn tại (đã xoá ở máy khác / BE reset) → xoá persist.
+        clearActiveRequest();
+      }
+    })();
+  }, [
+    activeHydrated,
+    activeRequestId,
+    active.requestId,
+    clearActiveRequest,
+    refreshActive,
+    scheduleNextPoll,
+  ]);
+
   const startRescue = useCallback<UseServiceRequestsReturn['startRescue']>(
     async ({ motorcycleId, problemDescription, location, addressText }) => {
       clearTimers();
@@ -256,6 +307,8 @@ export function useServiceRequests(): UseServiceRequestsReturn {
           phase: 'searching',
           busy: true,
         });
+        // Persist request id → app restart vẫn vào lại được màn hình này.
+        setActiveRequest(created.id);
         // Auto-start dispatch
         try {
           const round = await apiStartDispatch(created.id);
@@ -278,7 +331,7 @@ export function useServiceRequests(): UseServiceRequestsReturn {
         }));
       }
     },
-    [clearTimers, reloadList, scheduleNextPoll],
+    [clearTimers, reloadList, scheduleNextPoll, setActiveRequest],
   );
 
   const scheduleMaintenance = useCallback<UseServiceRequestsReturn['scheduleMaintenance']>(
@@ -303,6 +356,8 @@ export function useServiceRequests(): UseServiceRequestsReturn {
           phase: 'searching',
           busy: false,
         });
+        // Persist request id → app restart vẫn vào lại được màn hình này.
+        setActiveRequest(created.id);
         await reloadList();
         // Không tự dispatch — scheduled request sẽ được worker tự động dispatch
         // khi tới giờ (xem AGENTS.md "reminder-originated periodic-maintenance").
@@ -316,18 +371,21 @@ export function useServiceRequests(): UseServiceRequestsReturn {
         }));
       }
     },
-    [clearTimers, reloadList, scheduleNextPoll],
+    [clearTimers, reloadList, scheduleNextPoll, setActiveRequest],
   );
 
   const cancel = useCallback<UseServiceRequestsReturn['cancel']>(
     async (reason) => {
-      const { requestId } = active;
+      const requestId = active.requestId;
       if (!requestId) return;
       setActive((prev) => ({ ...prev, busy: true }));
       try {
         await apiCancelServiceRequest(requestId, reason);
+        // Huỷ xong thì không còn request "đang chạy" → xoá persist.
+        clearActiveRequest();
         await refreshActive(requestId);
         await reloadList();
+        setActive((prev) => ({ ...prev, busy: false }));
       } catch (e) {
         setActive((prev) => ({
           ...prev,
@@ -336,7 +394,7 @@ export function useServiceRequests(): UseServiceRequestsReturn {
         }));
       }
     },
-    [active.requestId, refreshActive, reloadList], // eslint-disable-line react-hooks/exhaustive-deps
+    [active.requestId, refreshActive, reloadList, clearActiveRequest],
   );
 
   /**
@@ -346,9 +404,11 @@ export function useServiceRequests(): UseServiceRequestsReturn {
   const cancelById = useCallback<UseServiceRequestsReturn['cancelById']>(
     async (requestId, reason) => {
       await apiCancelServiceRequest(requestId, reason);
+      // Nếu huỷ đúng request đang theo dõi thì xoá persist.
+      if (requestId === activeRequestId) clearActiveRequest();
       await reloadList();
     },
-    [reloadList],
+    [reloadList, activeRequestId, clearActiveRequest],
   );
 
   const approveQuoteHandler = useCallback(async () => {
@@ -359,6 +419,7 @@ export function useServiceRequests(): UseServiceRequestsReturn {
       await approveQuote(quote.id);
       await refreshActive(requestId);
       await reloadList();
+      setActive((prev) => ({ ...prev, busy: false }));
     } catch (e) {
       setActive((prev) => ({
         ...prev,
@@ -376,6 +437,7 @@ export function useServiceRequests(): UseServiceRequestsReturn {
       try {
         await rejectQuote(quote.id, reason);
         await refreshActive(requestId);
+        setActive((prev) => ({ ...prev, busy: false }));
       } catch (e) {
         setActive((prev) => ({
           ...prev,
@@ -390,6 +452,12 @@ export function useServiceRequests(): UseServiceRequestsReturn {
   const reset = useCallback(() => {
     clearTimers();
     setActive(INITIAL_SESSION);
+    // KHÔNG xoá `activeRequestId` ở đây.
+    //
+    // `reset()` được gọi khi rider bấm "Quay lại" trên màn hình tracking để
+    // dọn session cũ (đã render xong). Xoá persist ở đây sẽ khiến rider mất
+    // đường quay lại request đang chạy — đúng thứ họ cần giữ. Persist chỉ bị
+    // xoá khi request thực sự kết thúc (cancel) hoặc không còn tồn tại ở BE.
   }, [clearTimers]);
 
   // Cleanup timers khi unmount

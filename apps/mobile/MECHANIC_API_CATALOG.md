@@ -521,16 +521,17 @@ Tương tự — mechanic chỉ đọc.
 {
   "latitude": 10.75,
   "longitude": 106.67,
-  "accuracy_m": 12,                  // optional
-  "captured_at": "2026-09-21T08:30:00.000Z"
+  "observed_at": "2026-09-21T08:30:00.000Z+07:00",
+  "accuracy_meters": 12
 }
 ```
 
-- **Response 200:** echo điểm đã lưu.
-- **Điều kiện BE:** Yêu cầu `LIVE_TRACKING_ENABLED=true`, cấu hình retention/freshness hợp lệ.
-  Nếu feature chưa bật, endpoint trả `404` / `disabled` — FE nên handle gracefully (ẩn nút "Bật chia sẻ vị trí").
+- **Response 200:** echo điểm đã lưu (`LiveLocationResponse`).
+- **Điều kiện BE:** Yêu cầu `LIVE_TRACKING_ENABLED=true` + `LIVE_TRACKING_RETENTION_MINUTES` (1..1440).
+  Mặc định local dev đã bật (`.env.local`: `true` + 30 phút). Nếu feature
+  chưa bật, endpoint trả 409 `CONFLICT`; FE sẽ tự im lặng và chỉ set banner.
 - **Lưu ý:** BE enforce min update interval (`LIVE_TRACKING_MIN_UPDATE_INTERVAL_SECONDS`).
-  Tránh spam > 1 lần / 10s.
+  Tránh spam > 1 lần / 10s. FE cũng throttle 10s + skip accuracy > 100m.
 
 ### 9.3 `GET /api/v1/assignments/{assignmentId}/live-location` (rider/mechanic/admin poll)
 

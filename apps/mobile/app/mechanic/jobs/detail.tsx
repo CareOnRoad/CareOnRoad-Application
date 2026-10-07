@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Image, Linking, Pressable, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Linking, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   Circle,
   Clock,
-  Gauge,
   MapPin,
   Wrench,
 } from 'lucide-react-native';
@@ -20,15 +19,22 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Banner } from '@/components/ui/banner';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
-import { CustomerCard } from '@/components/mechanic/cards/customer-card';
 import { LiveSharingCard } from '@/components/mechanic/cards/live-sharing-card';
+import { RouteEtaCard } from '@/components/mechanic/cards/route-eta-card';
 import { JobUpdateForm } from '@/components/mechanic/forms/job-update-form';
 import { DiagnosisForm } from '@/components/mechanic/forms/diagnosis-form';
+import { FieldPhotoUploader } from '@/components/mechanic/forms/field-photo-uploader';
 import { QuoteForm } from '@/components/mechanic/forms/quote-form';
 import { suggestPurposeForServiceType } from '@/lib/mechanic-quotes-service';
 import { formatDate, formatVND } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { MechanicJobStatus } from '@/lib/mechanic-types';
+import {
+  JOB_STATUS_LABELS,
+  JOB_STATUS_TONE,
+  JOB_STATUS_TONE_COLOR,
+  type MechanicJobTone,
+} from '@/lib/mechanic-types';
 
 const purposeLabelMap: Record<string, string> = {
   standard: 'Sửa chữa thường',
@@ -45,32 +51,14 @@ const timeline: { id: MechanicJobStatus; label: string }[] = [
   { id: 'completed', label: 'Hoàn tất' },
 ];
 
-const statusTone: Record<MechanicJobStatus, 'amber' | 'blue' | 'red' | 'green'> = {
-  pending: 'amber',
-  in_progress: 'blue',
-  awaiting_parts: 'red',
-  completed: 'green',
-};
-
-const statusLabel: Record<MechanicJobStatus, string> = {
-  pending: 'Chờ xử lý',
-  in_progress: 'Đang xử lý',
-  awaiting_parts: 'Chờ phụ tùng',
-  completed: 'Hoàn tất',
-};
-
-const toneColor: Record<string, string> = {
-  amber: '#d97706',
-  blue: '#1974f7',
-  red: '#ed3f3a',
-  green: '#145413',
-};
-
-const toneBg: Record<string, string> = {
+// statusTone/statusLabel/toneColor giờ derive từ shared maps trong
+// `mechanic-types.ts` để UI thống nhất với JobCard + filter chips.
+const toneBg: Record<MechanicJobTone, string> = {
   amber: 'bg-amber-500/15',
   blue: 'bg-primary/10',
   red: 'bg-destructive/10',
   green: 'bg-green/10',
+  neutral: 'bg-secondary',
 };
 
 /**
@@ -87,6 +75,21 @@ const toneBg: Record<string, string> = {
  *  8. Update form.
  *  9. Pickup location link.
  */
+/**
+ * Job detail của mechanic.
+ *
+ * `freezeOnBlur: false` — màn hình này render `RefreshControl` + nhiều form
+ * submit. Với `freezeOnBlur` mặc định (react-native-screens), khi user quay
+ * lại tab trước rồi vào lại, screen bị detach rồi re-attach ở trạng thái
+ * "unmounted" trong khi `NavigationStateContext` của react-navigation đã bị
+ * dispose → warning "Couldn't find a navigation context" và UI trắng.
+ * Tắt freeze cho phép screen giữ nguyên cây view nên không gặp lỗi này.
+ */
+export const unstable_settings = {
+  freezeOnBlur: false,
+  detachPreviousScreen: false,
+};
+
 export default function MechanicJobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
@@ -94,27 +97,49 @@ export default function MechanicJobDetailScreen() {
     updateJobStatus,
     completeJob,
     getJobServiceType,
+    getAssignmentStatus,
     submitDiagnosisForJob,
     submitQuoteForRequest,
-    getLatestDiagnosisForJob,
+    getDiagnosisHistoryForJob,
+    loadDiagnosisHistory,
     getLatestPendingQuote,
+    jobDetail,
+    loadJobDetail,
     sharingAssignmentId,
     sharingError,
+    locationPermissionGranted,
+    autoTrackingEnabled,
     toggleLiveSharing,
   } = useMechanicApp();
   const job = id ? getJob(id) : undefined;
-  const diagnosis = id ? getLatestDiagnosisForJob(id) : null;
+  const detail = id ? jobDetail(id) : null;
+  const diagnosisHistory = id ? getDiagnosisHistoryForJob(id) : [];
   const latestQuote = id ? getLatestPendingQuote(id) : null;
   const serviceType = id ? getJobServiceType(id) : undefined;
   const quotePurpose = suggestPurposeForServiceType(serviceType ?? null);
   const quotePurposeLabel = purposeLabelMap[quotePurpose] ?? quotePurpose;
   const isSharing = sharingAssignmentId === id;
-  const canShare = job?.status !== 'completed';
+  // Chỉ cho phép share khi assignment thật sự ở travel state (BE whitelist
+  // `accepted`/`en_route`). Phản ánh đúng contract server-side thay vì chỉ
+  // guard UI = "không completed".
+  const beStatus = id ? getAssignmentStatus(id) : undefined;
+  const canShare = beStatus === 'accepted' || beStatus === 'en_route';
+  // Auto-tracking ngầm: provider đang watch + còn assignment travel state.
+  const autoTrackingActive = autoTrackingEnabled && (isSharing || canShare);
 
   const [diagnosisSubmitting, setDiagnosisSubmitting] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState<string | null>(null);
   const [quoteSubmitting, setQuoteSubmitting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+
+  // Job detail (problem description, motorcycle, latest quote) chỉ có ở
+  // `GET /api/v1/mechanics/me/jobs/{id}` — list endpoint không trả.
+  // Diagnosis history cũng lazy load để tránh request lúc mở list page.
+  useEffect(() => {
+    if (!id) return;
+    void loadJobDetail(id);
+    void loadDiagnosisHistory(id);
+  }, [id, loadJobDetail, loadDiagnosisHistory]);
 
   if (!job) {
     return (
@@ -132,7 +157,7 @@ export default function MechanicJobDetailScreen() {
   }
 
   const currentStep = timeline.findIndex((s) => s.id === job.status);
-  const tone = statusTone[job.status];
+  const tone = JOB_STATUS_TONE[job.status];
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-background">
@@ -144,8 +169,11 @@ export default function MechanicJobDetailScreen() {
       <ScreenScroll>
         <View className="mb-4 flex-row items-center gap-2">
           <View className={cn('rounded-full px-2.5 py-1', toneBg[tone])}>
-            <Text className="text-xs font-semibold" style={{ color: toneColor[tone] }}>
-              {statusLabel[job.status]}
+            <Text
+              className="text-xs font-semibold"
+              style={{ color: JOB_STATUS_TONE_COLOR[tone] }}
+            >
+              {JOB_STATUS_LABELS[job.status]}
             </Text>
           </View>
           <Text className="text-xs text-muted-foreground">
@@ -160,19 +188,31 @@ export default function MechanicJobDetailScreen() {
               <Bike size={24} color="#1974f7" />
             </View>
             <View className="min-w-0 flex-1">
-              <Text className="truncate font-bold leading-tight text-foreground">{job.vehicle.name}</Text>
+              <Text className="truncate font-bold leading-tight text-foreground">
+                {detail?.motorcycle
+                  ? [detail.motorcycle.brand_text, detail.motorcycle.model_text]
+                      .filter(Boolean)
+                      .join(' ') || 'Xe của khách'
+                  : 'Chưa có thông tin xe'}
+              </Text>
               <Text className="text-xs text-muted-foreground">
-                {job.vehicle.brand} · {job.vehicle.plate}
+                {detail?.motorcycle?.license_plate
+                  ? `Biển số ${detail.motorcycle.license_plate}`
+                  : detail?.sensitive_details_redacted
+                    ? 'Chi tiết đã được ẩn sau khi hoàn tất'
+                    : 'Chưa có biển số'}
               </Text>
             </View>
           </View>
           <View className="mt-3 flex-row flex-wrap items-center gap-3 border-t border-border pt-3">
-            <View className="flex-row items-center gap-1.5">
-              <Gauge size={14} color="#64748b" />
-              <Text className="text-xs text-muted-foreground">
-                {job.vehicle.mileage.toLocaleString()} km
-              </Text>
-            </View>
+            {detail?.motorcycle?.year ? (
+              <View className="flex-row items-center gap-1.5">
+                <Calendar size={14} color="#64748b" />
+                <Text className="text-xs text-muted-foreground">
+                  {detail.motorcycle.year}
+                </Text>
+              </View>
+            ) : null}
             <View className="flex-row items-center gap-1.5">
               <Calendar size={14} color="#64748b" />
               <Text className="text-xs text-muted-foreground">
@@ -195,8 +235,20 @@ export default function MechanicJobDetailScreen() {
           <Card className="p-4">
             <View className="flex-row items-start gap-2">
               <AlertCircle size={16} color="#d97706" className="mt-0.5 shrink-0" />
-              <Text className="flex-1 text-sm leading-relaxed text-foreground">{job.symptom}</Text>
+              <Text className="flex-1 text-sm leading-relaxed text-foreground">
+                {detail?.request?.problem_description ||
+                  job.symptom ||
+                  'Khách chưa mô tả chi tiết vấn đề.'}
+              </Text>
             </View>
+            {detail?.request?.address_text ? (
+              <View className="mt-3 flex-row items-start gap-2 border-t border-border pt-3">
+                <MapPin size={14} color="#1974f7" className="mt-0.5 shrink-0" />
+                <Text className="flex-1 text-xs text-muted-foreground">
+                  {detail.request.address_text}
+                </Text>
+              </View>
+            ) : null}
           </Card>
         </View>
 
@@ -204,7 +256,30 @@ export default function MechanicJobDetailScreen() {
           <Text className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Khách hàng
           </Text>
-          <CustomerCard customer={job.customer} />
+          <Card className="p-4">
+            <View className="flex-row items-center gap-3">
+              <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-secondary">
+                <Text className="text-lg font-bold text-secondary-foreground">
+                  {(detail?.request?.request_code ?? job.customer.name ?? 'K').slice(0, 1)}
+                </Text>
+              </View>
+              <View className="min-w-0 flex-1">
+                <Text className="truncate text-sm font-bold text-foreground">
+                  {detail?.request?.request_code ?? job.customer.name}
+                </Text>
+                <Text className="text-xs text-muted-foreground">
+                  Yêu cầu {detail?.request?.service_type ?? job.type}
+                </Text>
+              </View>
+            </View>
+            <View className="mt-3 border-t border-border pt-3">
+              <Banner
+                tone="info"
+                title="Thông tin liên hệ được bảo vệ"
+                description="Số điện thoại và hồ sơ khách hàng chỉ hiển thị trên kênh hỗ trợ chính thức của hệ thống. Bạn dùng mã yêu cầu ở trên để tra cứu và trao đổi."
+              />
+            </View>
+          </Card>
         </View>
 
         {/* Job progress */}
@@ -252,34 +327,39 @@ export default function MechanicJobDetailScreen() {
           </Card>
         </View>
 
-        {/* Before/After */}
-        <View className="mt-5">
-          <Text className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Trước / Sau
-          </Text>
-          <View className="flex-row gap-3">
-            <Card className="flex-1 overflow-hidden p-0">
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?w=600' }}
-                className="aspect-square w-full bg-secondary"
-                resizeMode="cover"
+        {/* Ảnh hiện trường - BE lưu media metadata theo purpose.
+            Trước = diagnosis (chụp khi tới nơi, trước khi sửa).
+            Sau = work_proof (chụp sau khi hoàn tất / trước khi bàn giao). */}
+        {job.status !== 'completed' ? (
+          <View className="mt-5 gap-4">
+            <Text className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Ảnh chẩn đoán (trước khi sửa)
+            </Text>
+            <Card className="p-4">
+              <FieldPhotoUploader
+                assignmentId={job.id}
+                purpose="diagnosis"
+                label="Ảnh trước"
+                existingItems={detail?.media?.items ?? []}
               />
-              <View className="p-2">
-                <Text className="text-center text-xs font-semibold text-muted-foreground">Trước</Text>
-              </View>
             </Card>
-            <Card className="flex-1 overflow-hidden p-0">
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=600' }}
-                className="aspect-square w-full bg-secondary"
-                resizeMode="cover"
-              />
-              <View className="p-2">
-                <Text className="text-center text-xs font-semibold text-muted-foreground">Sau</Text>
-              </View>
-            </Card>
+            {beStatus === 'in_progress' || beStatus === 'awaiting_payment' ? (
+              <>
+                <Text className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Ảnh hoàn tất (sau khi sửa)
+                </Text>
+                <Card className="p-4">
+                  <FieldPhotoUploader
+                    assignmentId={job.id}
+                    purpose="work_proof"
+                    label="Ảnh sau"
+                    existingItems={detail?.media?.items ?? []}
+                  />
+                </Card>
+              </>
+            ) : null}
           </View>
-        </View>
+        ) : null}
 
         {/* Update form */}
         <View className="mt-5">
@@ -311,9 +391,22 @@ export default function MechanicJobDetailScreen() {
             isSharing={isSharing}
             canShare={canShare}
             error={sharingError}
+            permissionGranted={locationPermissionGranted}
+            autoTrackingActive={autoTrackingActive}
             onToggle={() => {
               if (id) void toggleLiveSharing(id);
             }}
+          />
+        </View>
+
+        {/* Route ETA - chỉ hiển thị khi assignment ở travel states */}
+        <View className="mt-5">
+          <Text className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Thời gian di chuyển
+          </Text>
+          <RouteEtaCard
+            assignmentId={job.id}
+            canShow={beStatus === 'accepted' || beStatus === 'en_route' || beStatus === 'on_site'}
           />
         </View>
 
@@ -322,7 +415,7 @@ export default function MechanicJobDetailScreen() {
           <View className="mt-5 gap-5">
             <Card className="p-4">
               <DiagnosisForm
-                existing={diagnosis}
+                history={diagnosisHistory}
                 submitting={diagnosisSubmitting}
                 errorMessage={diagnosisError}
                 onSubmit={async (input) => {
@@ -330,6 +423,8 @@ export default function MechanicJobDetailScreen() {
                   setDiagnosisSubmitting(true);
                   try {
                     await submitDiagnosisForJob(job.id, input);
+                    // Refresh history sau khi tạo mới.
+                    await loadDiagnosisHistory(job.id);
                   } finally {
                     setDiagnosisSubmitting(false);
                   }
@@ -357,22 +452,38 @@ export default function MechanicJobDetailScreen() {
           </View>
         )}
 
-        <Pressable
-          accessibilityRole="link"
-          accessibilityLabel="Mở vị trí đón khách trên bản đồ"
-          onPress={() => {
-            // Trong khi location chi tiết chưa được wire lên job UI,
-            // mở Google Maps với query là địa chỉ khách hàng.
-            // Khi MapPicker tích hợp, thay bằng lat/lng cụ thể từ request.location.
-            const q = job.customer?.name ?? 'CareOnRoad';
-            const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
-            Linking.openURL(url).catch(() => undefined);
-          }}
-          className="mt-5 flex-row items-center gap-2 self-start"
-        >
-          <MapPin size={14} color="#64748b" />
-          <Text className="text-xs text-muted-foreground underline">Mở vị trí đón khách trên bản đồ</Text>
-        </Pressable>
+        {/* Vị trí đón khách - dùng lat/lng thật từ BE, fallback address_text.
+            Ẩn nếu cả 2 đều null. Dùng guard optional chaining để tránh crash UI. */}
+        {(() => {
+          const req = detail?.request;
+          const loc = req?.location;
+          const hasCoords =
+            loc && typeof loc.latitude === 'number' && typeof loc.longitude === 'number';
+          const address =
+            req?.address_text && req.address_text.trim().length > 0
+              ? req.address_text.trim()
+              : null;
+          if (!hasCoords && !address) return null;
+          const url = hasCoords
+            ? `https://www.google.com/maps/search/?api=1&query=${loc!.latitude},${loc!.longitude}`
+            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address!)}`;
+          return (
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Mở vị trí đón khách trên bản đồ"
+              onPress={() => {
+                Linking.openURL(url).catch(() => undefined);
+              }}
+              className="mt-5 flex-row items-center gap-2 self-start"
+              style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}
+            >
+              <MapPin size={14} color="#64748b" />
+              <Text className="text-xs text-muted-foreground underline">
+                Mở vị trí đón khách trên bản đồ
+              </Text>
+            </Pressable>
+          );
+        })()}
       </ScreenScroll>
     </SafeAreaView>
   );

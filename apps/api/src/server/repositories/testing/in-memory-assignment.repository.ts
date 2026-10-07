@@ -196,15 +196,20 @@ export class InMemoryAssignmentRepository implements AssignmentRepository {
   async listVisibleToActor(actor: {
     id: string;
     roles: AuditActorRole[];
-  }, input: ListFilter = { limit: 20 }): Promise<Assignment[]> {
+  }, input: ListFilter & { statuses?: readonly AssignmentStatus[] } = { limit: 20 }): Promise<Assignment[]> {
     const ownedRequestIds = new Set(
       this.serviceRequests
         .filter((request) => request.riderId === actor.id)
         .map((request) => request.id)
     );
-    return filterPage(this.assignments.filter((assignment) => actor.roles.includes("admin") ||
+    const visible = this.assignments.filter((assignment) => actor.roles.includes("admin") ||
         (actor.roles.includes("mechanic") && assignment.mechanicId === actor.id) ||
-        (actor.roles.includes("rider") && ownedRequestIds.has(assignment.requestId))), input).map(cloneAssignment);
+        (actor.roles.includes("rider") && ownedRequestIds.has(assignment.requestId)));
+    // Apply status-set filter (nếu FE truyền `statuses` để exclude terminal).
+    const filtered = input.statuses && input.statuses.length > 0
+      ? visible.filter((a) => input.statuses!.includes(a.status))
+      : visible;
+    return filterPage(filtered, input).map(cloneAssignment);
   }
 
   async hasVisibleByRequest(actor: { id: string; roles: AuditActorRole[] }, requestId: string): Promise<boolean> {

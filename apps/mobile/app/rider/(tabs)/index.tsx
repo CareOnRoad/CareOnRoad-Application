@@ -10,11 +10,13 @@ import {
   LucideIcon,
   ShieldCheck,
   Siren,
+  Activity,
   Wrench,
 } from 'lucide-react-native';
 
 import { useApp } from '@/contexts/app-context';
 import { useAuth } from '@/contexts/auth-context';
+import { useServiceRequests } from '@/hooks/use-service-requests';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +46,13 @@ const quickActions: QuickAction[] = [
     icon: Siren,
     tone: 'destructive',
     href: '/rider/(tabs)/rescue',
+  },
+  {
+    id: 'tracking',
+    label: 'Yêu cầu đang chạy',
+    icon: Activity,
+    tone: 'primary',
+    href: '/rider/(tabs)/tracking',
   },
   {
     id: 'schedule',
@@ -104,6 +113,23 @@ export default function HomeScreen() {
     reloadReminders,
   } = useApp();
   const { user: authUser } = useAuth();
+
+  // Request đang chạy — hiện banner ở đầu Home để rider không bị mất đường
+  // vào màn hình theo dõi sau khi rời tab Rescue hoặc restart app.
+  const { list: activeRequestList } = useServiceRequests();
+  const runningRequest = activeRequestList.find((r) =>
+    [
+      'submitted',
+      'dispatching',
+      'offered',
+      'manual_escalation',
+      'assigned',
+      'mechanic_en_route',
+      'in_service',
+      'awaiting_quote_approval',
+      'awaiting_payment',
+    ].includes(r.status),
+  );
 
   // Khi Home được focus lại (sau khi đọc notification, tạo request, v.v.) → reload.
   useFocusEffect(
@@ -178,6 +204,36 @@ export default function HomeScreen() {
             </Text>
           </View>
         </HeroCard>
+
+        {/* Active request banner — luôn dẫn tới màn hình chi tiết nếu đang có
+            yêu cầu chạy (thợ đã nhận / chờ báo giá / chờ thanh toán). */}
+        {runningRequest ? (
+          <Pressable
+            onPress={() => router.push(`/rider/rescue/${runningRequest.id}` as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Xem yêu cầu đang chạy"
+            className="mt-5 active:scale-[0.98]"
+          >
+            <Card className="border-primary/30 bg-primary/5 p-4">
+              <View className="flex-row items-center gap-3">
+                <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15">
+                  <Wrench size={20} color="#1974f7" />
+                </View>
+                <View className="min-w-0 flex-1">
+                  <Text className="text-xs font-semibold uppercase tracking-wide text-primary">
+                    Yêu cầu đang chạy
+                  </Text>
+                  <Text className="mt-0.5 text-sm font-bold text-foreground">
+                    {runningRequest.request_code
+                      ? `#${runningRequest.request_code}`
+                      : runningRequest.service_type}
+                  </Text>
+                </View>
+                <ArrowRight size={18} color="#1974f7" />
+              </View>
+            </Card>
+          </Pressable>
+        ) : null}
 
         {/* Quick stats */}
         <View className="mt-5">

@@ -50,6 +50,11 @@ const config: ExpoConfig = {
         'CareOnRoad needs camera to take photos of motorcycle issues',
       NSLocationWhenInUseUsageDescription:
         'CareOnRoad needs location to find nearby mechanics',
+      // Background location là optional; chỉ bật khi BE có opt-in flow
+      // cho live tracking khi app ở background. Hiện tại FE chỉ dùng
+      // foreground watch.
+      NSLocationAlwaysAndWhenInUseUsageDescription:
+        'CareOnRoad uses background location to keep your live tracking accurate when the app is not in the foreground.',
       NSPhotoLibraryUsageDescription:
         'CareOnRoad needs photo library to send issue photos',
     },
@@ -59,7 +64,7 @@ const config: ExpoConfig = {
       backgroundColor: '#16202f',
     },
     package: `com.careonroad.mobile${settings.packageSuffix}`,
-    permissions: ['CAMERA', 'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION'],
+    permissions: ['CAMERA', 'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'READ_MEDIA_IMAGES'],
     // Intent filter để Android nhận deep-link scheme careonroad://
     // (vd: careonroad://auth/callback từ Google OAuth redirect).
     // Lưu ý Android 11+ (API 30+) yêu cầu cả scheme + host/pathPrefix rõ ràng

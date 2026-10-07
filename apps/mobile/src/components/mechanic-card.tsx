@@ -24,19 +24,19 @@ export function MechanicCard({ mechanic }: { mechanic: Mechanic }) {
             <Star size={14} color="#fbbf24" fill="#fbbf24" />
             <Text className="text-xs font-semibold text-foreground">{mechanic.rating}</Text>
             <Text className="text-xs text-muted-foreground">
-              · {mechanic.trips.toLocaleString()} trips
+              · {mechanic.trips.toLocaleString()} chuyến
             </Text>
           </View>
         </View>
         <View className="flex-row gap-2">
           <Pressable
-            accessibilityLabel="Call mechanic"
+            accessibilityLabel="Gọi thợ"
             className="size-10 items-center justify-center rounded-full bg-green active:scale-90"
           >
             <Phone size={16} color="#ffffff" />
           </Pressable>
           <Pressable
-            accessibilityLabel="Message mechanic"
+            accessibilityLabel="Nhắn tin cho thợ"
             className="size-10 items-center justify-center rounded-full bg-primary active:scale-90"
           >
             <MessageCircle size={16} color="#ffffff" />
@@ -56,7 +56,7 @@ export function MechanicCard({ mechanic }: { mechanic: Mechanic }) {
         <View className="flex-row items-center gap-2">
           <Award size={16} color="#1974f7" />
           <Text className="text-xs font-semibold text-foreground">
-            View certifications & skills
+            Xem chứng chỉ & kỹ năng
           </Text>
         </View>
         <ChevronDown

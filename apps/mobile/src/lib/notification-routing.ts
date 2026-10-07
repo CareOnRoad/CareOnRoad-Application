@@ -86,7 +86,10 @@ export function routeFor(notification: NotificationItem, role: Role): RouteTarge
 export function hrefFor(target: RouteTarget): string | null {
   switch (target.kind) {
     case 'rider-rescue':
-      return '/rider/(tabs)/rescue';
+      // Màn hình chi tiết theo requestId. Tab `/rider/(tabs)/rescue` chỉ theo
+      // dõi session "đang chạy" trong bộ nhớ nên sẽ trống nếu rider mở app
+      // lại hoặc vào từ notification/history.
+      return `/rider/rescue/${encodeURIComponent(target.requestId)}`;
     case 'rider-payment':
       return `/rider/payments/${encodeURIComponent(target.quoteId)}?requestId=${encodeURIComponent(target.requestId)}`;
     case 'rider-review':

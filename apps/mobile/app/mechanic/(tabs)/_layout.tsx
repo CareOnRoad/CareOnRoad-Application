@@ -59,15 +59,15 @@ export default function MechanicTabsLayout() {
     >
       <Tabs.Screen
         name="index"
-        options={{ title: 'Dashboard', tabBarIcon: makeTabBarIcon('index') }}
+        options={{ title: 'Tổng quan', tabBarIcon: makeTabBarIcon('index') }}
       />
       <Tabs.Screen
         name="offers"
-        options={{ title: 'Offers', tabBarIcon: makeTabBarIcon('offers') }}
+        options={{ title: 'Yêu cầu nhận', tabBarIcon: makeTabBarIcon('offers') }}
       />
       <Tabs.Screen
         name="jobs"
-        options={{ title: 'Jobs', tabBarIcon: makeTabBarIcon('jobs') }}
+        options={{ title: 'Công việc', tabBarIcon: makeTabBarIcon('jobs') }}
       />
       <Tabs.Screen
         name="performance"
@@ -75,11 +75,11 @@ export default function MechanicTabsLayout() {
       />
       <Tabs.Screen
         name="schedule"
-        options={{ title: 'Schedule', tabBarIcon: makeTabBarIcon('schedule') }}
+        options={{ title: 'Lịch làm việc', tabBarIcon: makeTabBarIcon('schedule') }}
       />
       <Tabs.Screen
         name="profile"
-        options={{ title: 'Profile', tabBarIcon: makeTabBarIcon('profile') }}
+        options={{ title: 'Hồ sơ', tabBarIcon: makeTabBarIcon('profile') }}
       />
     </Tabs>
   );

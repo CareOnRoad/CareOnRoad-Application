@@ -16,22 +16,37 @@ interface CardProps extends ViewProps {
  * Khi có onPress sẽ tự thêm active:scale-[0.98] để feedback tốt hơn.
  */
 export function Card({ children, className, onPress, interactive, ...rest }: CardProps) {
-  const merged = cn(
-    'w-full rounded-3xl border border-border bg-card shadow-sm',
-    (onPress || interactive) && 'active:scale-[0.98]',
-    className,
-  );
-
   if (onPress) {
     return (
-      <Pressable onPress={onPress} className={merged} {...(rest as PressableProps)}>
-        {children}
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [
+          {
+            transform: [{ scale: pressed ? 0.98 : 1 }],
+          },
+        ]}
+        {...(rest as PressableProps)}
+      >
+        <View
+          className={cn(
+            'w-full rounded-3xl border border-border bg-card shadow-sm',
+            className,
+          )}
+        >
+          {children}
+        </View>
       </Pressable>
     );
   }
 
   return (
-    <View className={merged} {...rest}>
+    <View
+      className={cn(
+        'w-full rounded-3xl border border-border bg-card shadow-sm',
+        className,
+      )}
+      {...rest}
+    >
       {children}
     </View>
   );

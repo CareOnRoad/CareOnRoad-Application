@@ -263,6 +263,23 @@ export function statusLabel(status: RequestStatus): string {
   }
 }
 
+export function serviceTypeLabel(type: ServiceType): string {
+  switch (type) {
+    case 'emergency_rescue':
+      return 'Cứu hộ khẩn cấp';
+    case 'mobile_repair':
+      return 'Sửa chữa lưu động';
+    case 'at_home_service':
+      return 'Sửa chữa tại nhà';
+    case 'periodic_maintenance':
+      return 'Bảo dưỡng định kỳ';
+    case 'other':
+      return 'Dịch vụ khác';
+    default:
+      return 'Dịch vụ';
+  }
+}
+
 export function isActive(status: RequestStatus): boolean {
   return !['completed', 'canceled', 'manual_escalation'].includes(status);
 }

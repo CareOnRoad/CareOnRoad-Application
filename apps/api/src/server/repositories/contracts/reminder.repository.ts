@@ -63,6 +63,10 @@ export type ClaimDueReminderRulesInput = {
 export interface ReminderRepository {
   listRulesAdmin(input: ReminderAdminFilter): Promise<ReminderRule[]>;
   listOccurrencesAdmin(input: ReminderAdminFilter): Promise<ReminderOccurrence[]>;
+  listUpcomingByMotorcycles(input: {
+    motorcycleIds: string[];
+    now: Date;
+  }): Promise<Map<string, Date>>;
   createRule(input: CreateReminderRule): Promise<ReminderRule>;
   listRulesByRider(riderId: string): Promise<ReminderRule[]>;
   findRuleById(id: string): Promise<ReminderRule | undefined>;

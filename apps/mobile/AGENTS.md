@@ -173,13 +173,23 @@ apps/mobile/
   + quote approval/acceptance/decline rate + thời gian trung bình.
 
 ### 4.8. Mechanic live-location sharing
-- `apps/mobile/src/lib/location-service.ts` export `watchCurrentPosition()`.
-- Bật/tắt qua `useMechanicApp().toggleLiveSharing(assignmentId)`.
-- BE rate-limit theo env `LIVE_TRACKING_MIN_UPDATE_INTERVAL_SECONDS` (mặc định
-  ~10-15s). Client-side cũng throttle 10s + skip accuracy > 100m.
-- Auto-stop khi assignment chuyển sang `completed` / `canceled` /
-  `recovery_canceled` (qua `useEffect` watcher trong context).
-- Cleanup watch handle khi unmount provider hoặc job rời màn hình.
+- `apps/mobile/src/lib/location-service.ts` export `watchCurrentPosition()` (manual),
+  `startAutoTracking()` (idempotent foreground-permission + watch với rate-limit
+  + accuracy filter), `isLocationPermissionGranted()` (read-only check),
+  `requestLocationPermissionOnce()` (idempotent request, không hỏi 2 lần),
+  và `openLocationSettings()` (mở Settings OS).
+- `MechanicAppProvider` tự xin permission foreground ngay khi `auth.role === 'mechanic'`
+  (qua `useEffect` trong `auth-context.tsx`) và auto-start `PUT
+  /api/v1/assignments/{id}/live-location` cho assignment mới chuyển sang
+  `accepted`/`en_route`. Auto dừng khi status rời travel state, khi user
+  logout, hoặc khi permission bị deny.
+- Auto-tracking có thể tắt qua `useMechanicApp().setAutoTrackingEnabled(false)`
+  hoặc trong tab Profile → Settings → "Tự động chia sẻ vị trí".
+- UI toggle thủ công giữ nguyên (`LiveSharingCard`) — card sẽ hiển thị
+  pill "Tự động" khi provider đang watch ngầm, và banner "Mở cài đặt vị trí"
+  khi user đã deny permission.
+- Client-side rate-limit 10s/lần (BE cũng rate-limit theo
+  `LIVE_TRACKING_MIN_UPDATE_INTERVAL_SECONDS`).
 
 ### 4.9. Mechanic submit quote
 - `apps/mobile/src/lib/mechanic-quotes-service.ts` export `submitQuote()`.

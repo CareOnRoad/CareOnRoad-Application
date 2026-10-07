@@ -49,14 +49,16 @@ export function ConfirmDialog({
     >
       <Pressable
         // Nhấn ra ngoài dialog sẽ cancel (giống pattern iOS/Android).
+        // `flex-1` phải nằm trên chính Pressable này: bọc ngoài bằng View
+        // sẽ khiến overlay co lại theo nội dung và đẩy card ra ngoài màn hình.
         onPress={bothDisabled ? undefined : onCancel}
-        className="flex-1 items-center justify-center bg-black/50 px-6"
         accessibilityLabel="Đóng dialog"
         accessibilityRole="button"
+        className="flex-1 items-center justify-center bg-black/50 px-6"
       >
         {/* Chặn sự kiện nhấn xuyên qua card */}
-        <Pressable onPress={() => undefined}>
-          <View className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 shadow-xl">
+        <Pressable onPress={() => undefined} className="w-full max-w-sm">
+          <View className="w-full rounded-3xl border border-border bg-card p-6 shadow-xl">
             <Text className="text-center text-lg font-bold text-foreground">{title}</Text>
             {description && (
               <Text className="mt-2 text-center text-sm text-muted-foreground">
@@ -70,12 +72,17 @@ export function ConfirmDialog({
                 disabled={bothDisabled}
                 accessibilityRole="button"
                 accessibilityLabel={cancelLabel}
-                className={cn(
-                  'flex-1 items-center justify-center rounded-2xl border border-border bg-secondary py-3 active:scale-[0.97]',
-                  bothDisabled && 'opacity-50',
-                )}
+                className="flex-1"
+                style={({ pressed }) => [
+                  {
+                    opacity: bothDisabled ? 0.5 : pressed ? 0.85 : 1,
+                    transform: [{ scale: pressed && !bothDisabled ? 0.97 : 1 }],
+                  },
+                ]}
               >
-                <Text className="text-sm font-semibold text-foreground">{cancelLabel}</Text>
+                <View className="items-center justify-center rounded-2xl border border-border bg-secondary py-3">
+                  <Text className="text-sm font-semibold text-foreground">{cancelLabel}</Text>
+                </View>
               </Pressable>
 
               <Pressable
@@ -83,19 +90,23 @@ export function ConfirmDialog({
                 disabled={bothDisabled}
                 accessibilityRole="button"
                 accessibilityLabel={confirmLabel}
-                className={cn(
-                  'flex-1 items-center justify-center rounded-2xl py-3 active:scale-[0.97]',
-                  confirmTone.bg,
-                  bothDisabled && 'opacity-70',
-                )}
+                className="flex-1"
+                style={({ pressed }) => [
+                  {
+                    opacity: bothDisabled ? 0.7 : pressed ? 0.85 : 1,
+                    transform: [{ scale: pressed && !bothDisabled ? 0.97 : 1 }],
+                  },
+                ]}
               >
-                {loading ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <Text className={cn('text-sm font-semibold', confirmTone.fg)}>
-                    {confirmLabel}
-                  </Text>
-                )}
+                <View className={cn('items-center justify-center rounded-2xl py-3', confirmTone.bg)}>
+                  {loading ? (
+                    <ActivityIndicator color="#ffffff" />
+                  ) : (
+                    <Text className={cn('text-sm font-semibold', confirmTone.fg)}>
+                      {confirmLabel}
+                    </Text>
+                  )}
+                </View>
               </Pressable>
             </View>
           </View>

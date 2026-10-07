@@ -68,6 +68,25 @@ export class PostgresReminderRepository implements ReminderRepository {
     return rows.map(mapOccurrence);
   }
 
+  async listUpcomingByMotorcycles(input: { motorcycleIds: string[]; now: Date }): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    if (input.motorcycleIds.length === 0) {
+      return result;
+    }
+    const rows = await this.sql<{ motorcycle_id: string; earliest: Date }[]>`
+      select motorcycle_id, min(coalesce(snoozed_until, next_due_at)) as earliest
+      from reminder_rules
+      where motorcycle_id = any(${this.sql.array(input.motorcycleIds)}::uuid[])
+        and enabled = true
+        and coalesce(snoozed_until, next_due_at) > ${input.now}
+      group by motorcycle_id
+    `;
+    for (const row of rows) {
+      result.set(row.motorcycle_id, row.earliest);
+    }
+    return result;
+  }
+
   async createRule(input: CreateReminderRule): Promise<ReminderRule> {
     const rows = await this.sql<ReminderRuleRow[]>`
       insert into reminder_rules (

@@ -39,14 +39,15 @@ export function ToggleRow({
         accessibilityRole="switch"
         accessibilityState={{ checked }}
         accessibilityLabel={label}
-        className={cn('h-6 w-11 shrink-0 rounded-full', checked ? 'bg-primary' : 'bg-muted')}
       >
-        <View
-          className={cn(
-            'absolute top-0.5 size-5 rounded-full bg-white shadow',
-            checked ? 'translate-x-5' : 'translate-x-0.5',
-          )}
-        />
+        <View className={cn('h-6 w-11 shrink-0 rounded-full', checked ? 'bg-primary' : 'bg-muted')}>
+          <View
+            className={cn(
+              'absolute top-0.5 size-5 rounded-full bg-white shadow',
+              checked ? 'translate-x-5' : 'translate-x-0.5',
+            )}
+          />
+        </View>
       </Pressable>
     </View>
   );
@@ -98,16 +99,17 @@ export function NavRow({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      className="flex-row items-center gap-3 p-4 active:bg-secondary/40"
     >
-      <RowIcon icon={icon} />
-      <View className="flex-1">
-        <Text className="text-sm font-medium text-foreground">{label}</Text>
-        {description && (
-          <Text className="mt-0.5 text-xs text-muted-foreground">{description}</Text>
-        )}
+      <View className="flex-row items-center gap-3 p-4 active:bg-secondary/40">
+        <RowIcon icon={icon} />
+        <View className="flex-1">
+          <Text className="text-sm font-medium text-foreground">{label}</Text>
+          {description && (
+            <Text className="mt-0.5 text-xs text-muted-foreground">{description}</Text>
+          )}
+        </View>
+        {right}
       </View>
-      {right}
     </Pressable>
   );
 }

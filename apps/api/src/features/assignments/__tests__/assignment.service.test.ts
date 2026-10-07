@@ -44,6 +44,30 @@ describe("assignment service", () => {
     expect((await list(state)).items).toEqual([]);
   });
 
+  it("filters out terminal statuses when active_only=true", async () => {
+    const seed = createUnitOfWork();
+    const accepted = await new AcceptAssignmentService(seed, { now: () => now }).acceptOffer(identity(mechanicId), offerId);
+    const state = seed.snapshot();
+    // Add a second assignment ở trạng thái terminal (completed) thuộc cùng mechanic.
+    state.assignments.push({
+      id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      requestId: "aaaaaaaa-0000-4000-8000-000000000001",
+      mechanicId,
+      acceptedCandidateId: "aaaaaaaa-0000-4000-8000-000000000002",
+      status: "completed",
+      acceptedAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+    const service = new AssignmentService(new InMemoryUnitOfWork(state));
+    // active_only=true → exclude completed, chỉ trả về assignment active.
+    const activeOnly = await service.listAssignments(identity(mechanicId), { active_only: true, limit: 50 });
+    expect(activeOnly.items.map((item) => item.id)).toEqual([accepted.id]);
+    // active_only không truyền → trả cả completed.
+    const all = await service.listAssignments(identity(mechanicId), { limit: 50 });
+    expect(all.items).toHaveLength(2);
+  });
+
   it("accepts the first valid offer atomically and cancels competing offers", async () => {
     const unitOfWork = createUnitOfWork();
     const service = new AcceptAssignmentService(unitOfWork, {

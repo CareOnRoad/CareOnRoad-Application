@@ -19,11 +19,11 @@ export const issueCategories: readonly {
   label: string;
   icon: string;
 }[] = [
-  { id: 'engine', label: 'Engine Problem', icon: 'Cog' },
-  { id: 'tire', label: 'Flat Tire', icon: 'CircleDot' },
-  { id: 'battery', label: 'Battery Issue', icon: 'BatteryWarning' },
-  { id: 'fuel', label: 'Out of Fuel', icon: 'Fuel' },
-  { id: 'accident', label: 'Accident Assistance', icon: 'TriangleAlert' },
+  { id: 'engine', label: 'Sự cố động cơ', icon: 'Cog' },
+  { id: 'tire', label: 'Thủng / xẹp lốp', icon: 'CircleDot' },
+  { id: 'battery', label: 'Sự cố ắc quy', icon: 'BatteryWarning' },
+  { id: 'fuel', label: 'Hết xăng', icon: 'Fuel' },
+  { id: 'accident', label: 'Hỗ trợ tai nạn', icon: 'TriangleAlert' },
 ] as const;
 
 /**
@@ -38,10 +38,10 @@ export const serviceTypes: readonly {
   duration: string;
   icon?: string;
 }[] = [
-  { id: 'oil', label: 'Oil Change', price: 180000, duration: '30 min' },
-  { id: 'brake', label: 'Brake Inspection', price: 150000, duration: '45 min' },
-  { id: 'tire', label: 'Tire Inspection', price: 90000, duration: '20 min' },
-  { id: 'general', label: 'General Maintenance', price: 350000, duration: '90 min' },
+  { id: 'oil', label: 'Thay nhớt', price: 180000, duration: '30 phút' },
+  { id: 'brake', label: 'Kiểm tra phanh', price: 150000, duration: '45 phút' },
+  { id: 'tire', label: 'Kiểm tra lốp', price: 90000, duration: '20 phút' },
+  { id: 'general', label: 'Bảo dưỡng tổng quát', price: 350000, duration: '90 phút' },
 ] as const;
 
 /**

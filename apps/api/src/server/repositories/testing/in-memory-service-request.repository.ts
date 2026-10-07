@@ -91,6 +91,45 @@ export class InMemoryServiceRequestRepository implements ServiceRequestRepositor
       )
       .map(cloneHistory);
   }
+
+  async listCompletedLastUpdatedByMotorcycles(input: { motorcycleIds: string[] }): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    for (const motorcycleId of input.motorcycleIds) {
+      let last: Date | undefined;
+      for (const request of this.requests) {
+        if (request.motorcycleId !== motorcycleId || request.status !== "completed") continue;
+        if (!last || request.updatedAt.getTime() > last.getTime()) {
+          last = request.updatedAt;
+        }
+      }
+      if (last) result.set(motorcycleId, last);
+    }
+    return result;
+  }
+
+  async listUpcomingMaintenanceByMotorcycles(input: {
+    motorcycleIds: string[];
+    activeStatuses: readonly ServiceRequest["status"][];
+    now: Date;
+  }): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    const statuses = new Set(input.activeStatuses);
+    for (const motorcycleId of input.motorcycleIds) {
+      let earliest: Date | undefined;
+      for (const request of this.requests) {
+        if (request.motorcycleId !== motorcycleId) continue;
+        if (request.serviceType !== "periodic_maintenance") continue;
+        if (!statuses.has(request.status)) continue;
+        if (!request.scheduledStartAt) continue;
+        if (request.scheduledStartAt.getTime() <= input.now.getTime()) continue;
+        if (!earliest || request.scheduledStartAt.getTime() < earliest.getTime()) {
+          earliest = request.scheduledStartAt;
+        }
+      }
+      if (earliest) result.set(motorcycleId, earliest);
+    }
+    return result;
+  }
 }
 
 function cloneRequest(request: ServiceRequest): ServiceRequest {

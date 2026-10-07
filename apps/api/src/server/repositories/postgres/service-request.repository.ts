@@ -192,6 +192,56 @@ export class PostgresServiceRequestRepository implements ServiceRequestRepositor
     return rows.map(mapHistory);
   }
 
+  async listCompletedLastUpdatedByMotorcycles(input: {
+    motorcycleIds: string[];
+  }): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    if (input.motorcycleIds.length === 0) {
+      return result;
+    }
+    // Lấy ngày thực sự hoàn thành (timestamp chuyển status sang 'completed')
+    // từ request_status_history, không dùng service_requests.updated_at vì
+    // updated_at bị đụng bởi nhiều thao tác khác sau completion.
+    const rows = await this.sql<{ motorcycle_id: string; last_at: Date }[]>`
+      select sr.motorcycle_id, max(rsh.created_at) as last_at
+      from service_requests sr
+      join request_status_history rsh
+        on rsh.request_id = sr.id
+       and rsh.to_status = 'completed'
+      where sr.motorcycle_id = any(${this.sql.array(input.motorcycleIds)}::uuid[])
+      group by sr.motorcycle_id
+    `;
+    for (const row of rows) {
+      result.set(row.motorcycle_id, row.last_at);
+    }
+    return result;
+  }
+
+  async listUpcomingMaintenanceByMotorcycles(input: {
+    motorcycleIds: string[];
+    activeStatuses: readonly RequestStatus[];
+    now: Date;
+  }): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    if (input.motorcycleIds.length === 0) {
+      return result;
+    }
+    const rows = await this.sql<{ motorcycle_id: string; earliest: Date }[]>`
+      select motorcycle_id, min(scheduled_start_at) as earliest
+      from service_requests
+      where motorcycle_id = any(${this.sql.array(input.motorcycleIds)}::uuid[])
+        and service_type = 'periodic_maintenance'
+        and status::text = any(${this.sql.array([...input.activeStatuses])}::text[])
+        and scheduled_start_at is not null
+        and scheduled_start_at > ${input.now}
+      group by motorcycle_id
+    `;
+    for (const row of rows) {
+      result.set(row.motorcycle_id, row.earliest);
+    }
+    return result;
+  }
+
   private selection() {
     return this.sql`
       id,

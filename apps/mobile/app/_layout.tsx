@@ -3,8 +3,17 @@ import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { enableFreeze } from 'react-native-screens';
 import { AuthProvider, useAuth } from '@/contexts/auth-context';
 import './global.css';
+
+// Workaround cho warning "Couldn't find a navigation context" + crash khi bấm
+// tab trong ScheduleScreen với NativeWind CssInterop + react-native-screens 4.5.0.
+// enableFreeze(true) mặc định của react-native-screens gây race condition ngắn
+// giữa Pressable mount và NavigationContainer context propagation → throw warning
+// và crash app ở Expo Go dev mode.
+// Gọi ngay tại top-level, trước khi bất kỳ NavigationContainer nào mount.
+enableFreeze(false);
 
 /**
  * Root layout - thiết lập providers cốt lõi và stack chính của app.

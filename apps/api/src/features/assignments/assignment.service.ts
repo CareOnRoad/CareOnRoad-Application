@@ -17,7 +17,7 @@ import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/c
 import { assertRequestStatusTransition } from "../service-requests/service-request-state";
 import { assertAssignmentStatusTransition } from "./assignment-state";
 import { assertNoAssignmentCommitment, CancellationConflict } from "./assignment-cancellation";
-import { assignmentStatusInputSchema, assignmentListSchema } from "./assignment.schemas";
+import { assignmentStatusInputSchema, assignmentListSchema, resolveAssignmentStatusFilter } from "./assignment.schemas";
 
 export type AssignmentResponse = {
   id: string;
@@ -57,12 +57,21 @@ export class AssignmentService {
   listAssignments(identity: VerifiedSupabaseIdentity, input: unknown = {}): Promise<{ items: AssignmentResponse[]; page: Page }> {
     const parsed = assignmentListSchema.safeParse(input);
     if (!parsed.success) throw new AssignmentError("INVALID_INPUT", "List query is invalid.", 400);
+    // `active_only=true` mà caller không truyền `status` → mở rộng sang list
+    // status đang active. Có `status` rồi thì ưu tiên status đó.
+    const statuses = resolveAssignmentStatusFilter({
+      ...(parsed.data.status ? { status: parsed.data.status } : {}),
+      ...(parsed.data.active_only !== undefined ? { active_only: parsed.data.active_only } : {})
+    });
     return this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
-      const assignments = await repositories.assignments.listVisibleToActor({
-        id: actor.id,
-        roles: actor.roles.filter(isAuditActorRole)
-      }, parsed.data);
+      const assignments = await repositories.assignments.listVisibleToActor(
+        {
+          id: actor.id,
+          roles: actor.roles.filter(isAuditActorRole)
+        },
+        { ...parsed.data, ...(statuses ? { statuses } : {}) }
+      );
       return toPage(assignments, parsed.data.limit, toAssignmentResponse);
     });
   }

@@ -56,21 +56,29 @@ export function ActionButton({
       disabled={isDisabled}
       accessibilityRole="button"
       accessibilityState={{ disabled: isDisabled }}
-      className={cn(
-        'inline-flex items-center justify-center gap-2 active:scale-[0.97]',
-        sizeStyles[size],
-        variantStyles[variant],
-        fullWidth && 'w-full self-stretch',
-        isDisabled && 'opacity-50',
-        className,
-      )}
+      style={({ pressed }) => [
+        {
+          opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1,
+          transform: [{ scale: pressed && !isDisabled ? 0.97 : 1 }],
+        },
+      ]}
       {...props}
     >
-      {typeof children === 'string' ? (
-        <Text className={cn('font-semibold', sizeText[size])}>{children}</Text>
-      ) : (
-        <View className="flex-row items-center gap-2">{children}</View>
-      )}
+      <View
+        className={cn(
+          'inline-flex items-center justify-center gap-2',
+          sizeStyles[size],
+          variantStyles[variant],
+          fullWidth && 'w-full self-stretch',
+          className,
+        )}
+      >
+        {typeof children === 'string' ? (
+          <Text className={cn('font-semibold', sizeText[size])}>{children}</Text>
+        ) : (
+          <View className="flex-row items-center gap-2">{children}</View>
+        )}
+      </View>
     </Pressable>
   );
 }

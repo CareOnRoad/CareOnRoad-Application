@@ -10,12 +10,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Pencil, X } from 'lucide-react-native';
+import { Camera, ImagePlus, Pencil, X } from 'lucide-react-native';
 
 import { cn } from '@/lib/utils';
 import { Banner } from '@/components/ui/banner';
 import { Field, FormTextInput } from '@/components/ui/form';
 import { useAuth } from '@/contexts/auth-context';
+import { captureAvatarFromCamera, pickAvatar } from '@/lib/avatar-upload';
 
 /**
  * EditProfileSheet - modal slide-up để sửa thông tin cá nhân.
@@ -31,6 +32,16 @@ import { useAuth } from '@/contexts/auth-context';
  *  - Form fields: avatar + name + phone + email + address.
  *  - Validation client-side trước khi save.
  *  - Save button disabled khi không có thay đổi hoặc đang lưu.
+ *
+ * Avatar (Phase 2 - Mục 4 plan):
+ *  - User bấm vào avatar → menu "Thư viện / Chụp ảnh".
+ *  - `pickAvatar()` mở `expo-image-picker` (đã có sẵn dep).
+ *  - Trả về local URI (file://...) → set state `avatar` → render ngay.
+ *  - Khi save, `updateProfile({ avatar })` sẽ gọi BE PATCH `/auth/profile`.
+ *    BE Zod `avatar_url` chỉ chấp nhận HTTP URL nên sẽ reject local URI
+ *    trong production. Trong demo mode sẽ được lưu vào session local để
+ *    UI khôi phục sau khi hydrate. Upload-to-BE pipeline sẽ được bật khi
+ *    BE bổ sung resource type `user_profile` cho media-upload.
  */
 export function EditProfileSheet({
   visible,
@@ -109,11 +120,42 @@ export function EditProfileSheet({
     }
   };
 
-  // Phase 1 chỉ là placeholder; Phase 2 sẽ dùng expo-image-picker.
-  const handlePickAvatar = () => {
-    // Tạm thời: cho user nhập URL hoặc dùng avatar hiện tại.
-    // Khi tích hợp image picker thật, thay thế bằng ImagePicker.launchImageLibraryAsync().
-  };
+// Phase 2 (Mục 4 plan): wire thật expo-image-picker. Trước đây là stub rỗng.
+// Pick ảnh → set `avatar` thành local URI → caller save qua `updateProfile`.
+// Hiện tại local URI chỉ hiển thị local (BE Zod `avatar_url` không nhận
+// file://), nhưng vẫn feed vào form để dirty state hoạt động đúng.
+const [picking, setPicking] = useState(false);
+const handlePickFromLibrary = async () => {
+  if (picking) return;
+  setPicking(true);
+  setError(null);
+  try {
+    const picked = await pickAvatar();
+    if (picked) {
+      setAvatar(picked.uri);
+    }
+  } catch (e) {
+    setError(e instanceof Error ? e.message : 'Không thể chọn ảnh.');
+  } finally {
+    setPicking(false);
+  }
+};
+
+const handleCapture = async () => {
+  if (picking) return;
+  setPicking(true);
+  setError(null);
+  try {
+    const picked = await captureAvatarFromCamera();
+    if (picked) {
+      setAvatar(picked.uri);
+    }
+  } catch (e) {
+    setError(e instanceof Error ? e.message : 'Không thể chụp ảnh.');
+  } finally {
+    setPicking(false);
+  }
+};
 
   return (
     <Modal
@@ -173,12 +215,7 @@ export function EditProfileSheet({
 
                 {/* Avatar */}
                 <View className="items-center">
-                  <Pressable
-                    onPress={handlePickAvatar}
-                    accessibilityLabel="Đổi ảnh đại diện"
-                    accessibilityRole="button"
-                    className="relative"
-                  >
+                  <View className="relative">
                     <View className="size-24 overflow-hidden rounded-full border-2 border-border bg-secondary">
                       {avatar ? (
                         <Image
@@ -193,14 +230,50 @@ export function EditProfileSheet({
                           </Text>
                         </View>
                       )}
+                      {/* Loading overlay khi picker đang chạy */}
+                      {picking ? (
+                        <View className="absolute inset-0 items-center justify-center rounded-full bg-black/40">
+                          <ActivityIndicator color="#ffffff" />
+                        </View>
+                      ) : null}
                     </View>
                     <View className="absolute bottom-0 right-0 size-8 items-center justify-center rounded-full bg-primary">
                       <Pencil size={14} color="#ffffff" />
                     </View>
-                  </Pressable>
-                  <Text className="mt-2 text-xs text-muted-foreground">
-                    Nhấn để đổi ảnh (sắp có)
-                  </Text>
+                  </View>
+                  {/* Action chips: Thư viện / Chụp ảnh */}
+                  <View className="mt-3 flex-row gap-2">
+                    <Pressable
+                      onPress={() => void handlePickFromLibrary()}
+                      disabled={picking}
+                      accessibilityRole="button"
+                      accessibilityLabel="Chọn ảnh từ thư viện"
+                      className={cn(
+                        'flex-row items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 active:opacity-70',
+                        picking && 'opacity-50',
+                      )}
+                    >
+                      <ImagePlus size={14} color="#16202f" />
+                      <Text className="text-xs font-semibold text-foreground">
+                        Thư viện
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void handleCapture()}
+                      disabled={picking}
+                      accessibilityRole="button"
+                      accessibilityLabel="Chụp ảnh mới"
+                      className={cn(
+                        'flex-row items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 active:opacity-70',
+                        picking && 'opacity-50',
+                      )}
+                    >
+                      <Camera size={14} color="#16202f" />
+                      <Text className="text-xs font-semibold text-foreground">
+                        Chụp ảnh
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
 
                 {/* Fields */}

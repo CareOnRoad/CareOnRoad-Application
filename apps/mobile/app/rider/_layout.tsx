@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 
 import { useAuth } from '@/contexts/auth-context';
 import { AppProvider } from '@/contexts/app-context';
+import { ActiveRequestProvider } from '@/contexts/active-request-context';
 
 /**
  * Layout cho nhóm Rider:
@@ -32,20 +33,27 @@ export default function RiderLayout() {
   }
 
   return (
-    <AppProvider>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          animation: 'slide_from_right',
-        }}
-      >
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="vehicles/form" options={{ headerShown: false }} />
-        <Stack.Screen name="vehicles/detail" options={{ headerShown: false }} />
-        <Stack.Screen name="schedule/booking" options={{ headerShown: false }} />
-        <Stack.Screen name="schedule/confirmed" options={{ headerShown: false }} />
-        <Stack.Screen name="history" options={{ headerShown: false }} />
-      </Stack>
-    </AppProvider>
+    <ActiveRequestProvider>
+      <AppProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+          }}
+        >
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="vehicles/form" options={{ headerShown: false }} />
+          <Stack.Screen name="vehicles/detail" options={{ headerShown: false }} />
+          <Stack.Screen name="schedule/booking" options={{ headerShown: false }} />
+          <Stack.Screen name="schedule/confirmed" options={{ headerShown: false }} />
+          <Stack.Screen name="history" options={{ headerShown: false }} />
+          <Stack.Screen name="rescue/[requestId]" options={{ headerShown: false }} />
+          <Stack.Screen name="payments/index" options={{ headerShown: false }} />
+          <Stack.Screen name="payments/[quoteId]" options={{ headerShown: false }} />
+          <Stack.Screen name="review" options={{ headerShown: false }} />
+          <Stack.Screen name="notifications" options={{ headerShown: false }} />
+        </Stack>
+      </AppProvider>
+    </ActiveRequestProvider>
   );
 }

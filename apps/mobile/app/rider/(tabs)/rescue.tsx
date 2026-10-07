@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import {
   BatteryWarning,
   CircleDot,
@@ -42,6 +42,7 @@ import {
   LocationCaptureError,
   type CapturedLocation,
 } from '@/lib/location-service';
+import { normalizeLiveLocation } from '@/lib/assignments-service';
 
 const iconMap: Record<string, LucideIcon> = {
   Cog,
@@ -116,7 +117,7 @@ export default function RescueScreen() {
 
   const issueLabel = issueCategories.find((i) => i.id === issue)?.label;
   const vehicle = vehicles[0];
-  const vehicleName = vehicle?.name ?? 'Vehicle';
+  const vehicleName = vehicle?.name ?? 'Xe của bạn';
   const phase = sr.active.phase;
 
   const refreshLocation = async () => {
@@ -289,13 +290,30 @@ export default function RescueScreen() {
                 </View>
               </View>
             )}
-            {sr.active.liveLocation && (
-              <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
-                <Text className="text-xs text-muted-foreground">
-                  Vị trí thợ: {sr.active.liveLocation.location.latitude.toFixed(4)},{' '}
-                  {sr.active.liveLocation.location.longitude.toFixed(4)} (cập nhật{' '}
-                  {Math.round(sr.active.liveLocation.age_seconds ?? 0)}s trước)
-                </Text>
+            {sr.active.liveLocation && (() => {
+              const loc = normalizeLiveLocation(sr.active.liveLocation);
+              if (!loc) return null;
+              return (
+                <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
+                  <Text className="text-xs text-muted-foreground">
+                    Vị trí thợ: {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)} (cập nhật{' '}
+                    {loc.ageSeconds}s trước)
+                  </Text>
+                </View>
+              );
+            })()}
+            {sr.active.requestId && (
+              <View className="mt-3 border-t border-border pt-3">
+                <ActionButton
+                  variant="outline"
+                  fullWidth
+                  onPress={() =>
+                    router.push(`/rider/rescue/${sr.active.requestId}` as Href)
+                  }
+                  accessibilityLabel="Mở chi tiết yêu cầu"
+                >
+                  <Text className="text-sm font-semibold text-foreground">Mở trang chi tiết</Text>
+                </ActionButton>
               </View>
             )}
           </Card>

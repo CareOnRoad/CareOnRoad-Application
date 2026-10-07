@@ -163,6 +163,197 @@ describe("MotorcycleService", () => {
     expect(snapshot.auditLogs).toHaveLength(0);
     expect(snapshot.outboxEvents).toHaveLength(1);
   });
+
+  it("derives last_maintenance_at and next_maintenance_at from service requests and reminder rules", async () => {
+    const referenceNow = new Date("2026-06-25T12:00:00Z");
+    const unitOfWork = new InMemoryUnitOfWork({
+      users: [activeUser(riderId)],
+      userRoles: [{ userId: riderId, role: "rider" }],
+      motorcycles: [
+        {
+          id: motorcycleId,
+          riderId,
+          brandText: "Honda",
+          modelText: "Wave",
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      serviceRequests: [
+        // Completed rescue (older) — should NOT be used (we want MAX).
+        {
+          id: "11111111-aaaa-4aaa-8aaa-111111111111",
+          requestCode: "COR-RESCUE-20260624-1",
+          riderId,
+          motorcycleId,
+          serviceType: "emergency_rescue",
+          problemDescription: "Flat tire",
+          status: "completed",
+          priority: "emergency",
+          updatedAt: new Date("2026-06-10T00:00:00Z"),
+          createdAt: new Date("2026-06-10T00:00:00Z")
+        },
+        // Completed maintenance (newer) — should be MAX.
+        {
+          id: "22222222-aaaa-4aaa-8aaa-222222222222",
+          requestCode: "COR-MAINT-20260624-1",
+          riderId,
+          motorcycleId,
+          serviceType: "periodic_maintenance",
+          problemDescription: "Oil change",
+          status: "completed",
+          priority: "normal",
+          updatedAt: new Date("2026-06-20T00:00:00Z"),
+          createdAt: new Date("2026-06-18T00:00:00Z")
+        },
+        // Active upcoming maintenance with scheduled_start_at in the future — should be MIN(scheduled).
+        {
+          id: "33333333-aaaa-4aaa-8aaa-333333333333",
+          requestCode: "COR-MAINT-20260624-2",
+          riderId,
+          motorcycleId,
+          serviceType: "periodic_maintenance",
+          problemDescription: "Tire check",
+          status: "assigned",
+          priority: "normal",
+          scheduledStartAt: new Date("2026-07-10T00:00:00Z"),
+          updatedAt: new Date("2026-06-25T00:00:00Z"),
+          createdAt: new Date("2026-06-25T00:00:00Z")
+        },
+        // Past-scheduled active request — should be filtered out (not in the future).
+        {
+          id: "44444444-aaaa-4aaa-8aaa-444444444444",
+          requestCode: "COR-MAINT-20260624-3",
+          riderId,
+          motorcycleId,
+          serviceType: "periodic_maintenance",
+          problemDescription: "Past",
+          status: "assigned",
+          priority: "normal",
+          scheduledStartAt: new Date("2026-06-20T00:00:00Z"),
+          updatedAt: new Date("2026-06-20T00:00:00Z"),
+          createdAt: new Date("2026-06-20T00:00:00Z")
+        },
+        // Canceled upcoming maintenance — should be filtered out.
+        {
+          id: "55555555-aaaa-4aaa-8aaa-555555555555",
+          requestCode: "COR-MAINT-20260624-4",
+          riderId,
+          motorcycleId,
+          serviceType: "periodic_maintenance",
+          problemDescription: "Canceled",
+          status: "canceled",
+          priority: "normal",
+          scheduledStartAt: new Date("2026-08-01T00:00:00Z"),
+          updatedAt: new Date("2026-06-25T00:00:00Z"),
+          createdAt: new Date("2026-06-25T00:00:00Z")
+        }
+      ],
+      reminderRules: [
+        // Earlier reminder — should win.
+        {
+          id: "66666666-aaaa-4aaa-8aaa-666666666666",
+          riderId,
+          motorcycleId,
+          title: "Oil change",
+          nextDueAt: new Date("2026-07-15T00:00:00Z"),
+          enabled: true,
+          failureCount: 0,
+          createdAt: now,
+          updatedAt: now
+        },
+        // Later reminder — should lose.
+        {
+          id: "77777777-aaaa-4aaa-8aaa-777777777777",
+          riderId,
+          motorcycleId,
+          title: "Brake check",
+          nextDueAt: new Date("2026-08-01T00:00:00Z"),
+          enabled: true,
+          failureCount: 0,
+          createdAt: now,
+          updatedAt: now
+        },
+        // Disabled reminder — should be filtered out.
+        {
+          id: "88888888-aaaa-4aaa-8aaa-888888888888",
+          riderId,
+          motorcycleId,
+          title: "Disabled",
+          nextDueAt: new Date("2026-06-30T00:00:00Z"),
+          enabled: false,
+          failureCount: 0,
+          createdAt: now,
+          updatedAt: now
+        }
+      ]
+    });
+    const service = new MotorcycleService(unitOfWork, { now: () => referenceNow });
+
+    const list = await service.listMotorcycles(riderIdentity);
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0]?.last_maintenance_at).toBe("2026-06-20T00:00:00.000Z");
+    // next_maintenance_at = MIN(upcoming, reminder) = MIN(2026-07-10, 2026-07-15) = 2026-07-10
+    expect(list.items[0]?.next_maintenance_at).toBe("2026-07-10T00:00:00.000Z");
+  });
+
+  it("omits maintenance dates when no completed or upcoming data exists", async () => {
+    const unitOfWork = new InMemoryUnitOfWork({
+      users: [activeUser(riderId)],
+      userRoles: [{ userId: riderId, role: "rider" }],
+      motorcycles: [
+        {
+          id: motorcycleId,
+          riderId,
+          brandText: "Honda",
+          modelText: "Wave",
+          createdAt: now,
+          updatedAt: now
+        }
+      ]
+    });
+    const service = new MotorcycleService(unitOfWork);
+
+    const list = await service.listMotorcycles(riderIdentity);
+    expect(list.items[0]?.last_maintenance_at).toBeUndefined();
+    expect(list.items[0]?.next_maintenance_at).toBeUndefined();
+  });
+
+  it("derives single-motorcycle maintenance dates via getMotorcycle", async () => {
+    const unitOfWork = new InMemoryUnitOfWork({
+      users: [activeUser(riderId)],
+      userRoles: [{ userId: riderId, role: "rider" }],
+      motorcycles: [
+        {
+          id: motorcycleId,
+          riderId,
+          brandText: "Honda",
+          modelText: "Wave",
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      serviceRequests: [
+        {
+          id: "99999999-aaaa-4aaa-8aaa-999999999999",
+          requestCode: "COR-MAINT-20260624-9",
+          riderId,
+          motorcycleId,
+          serviceType: "periodic_maintenance",
+          problemDescription: "Done",
+          status: "completed",
+          priority: "normal",
+          updatedAt: new Date("2026-06-15T00:00:00Z"),
+          createdAt: new Date("2026-06-15T00:00:00Z")
+        }
+      ]
+    });
+    const service = new MotorcycleService(unitOfWork);
+
+    const one = await service.getMotorcycle(riderIdentity, motorcycleId);
+    expect(one.last_maintenance_at).toBe("2026-06-15T00:00:00.000Z");
+    expect(one.next_maintenance_at).toBeUndefined();
+  });
 });
 
 function seededRiderUnitOfWork() {

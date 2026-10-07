@@ -114,7 +114,7 @@ export interface AssignmentRepository {
   listVisibleToActor(actor: {
     id: string;
     roles: AuditActorRole[];
-  }, input?: ListFilter): Promise<Assignment[]>;
+  }, input?: ListFilter & { statuses?: readonly AssignmentStatus[] }): Promise<Assignment[]>;
   hasVisibleByRequest(actor: { id: string; roles: AuditActorRole[] }, requestId: string): Promise<boolean>;
   updateStatus(input: {
     id: string;
