@@ -1,4 +1,4 @@
-package com.careonroad.app.preview
+package com.careonroad.app
 
 import android.os.Build
 import android.os.Bundle

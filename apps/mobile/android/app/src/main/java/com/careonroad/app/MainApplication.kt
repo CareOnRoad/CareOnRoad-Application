@@ -1,4 +1,4 @@
-package com.careonroad.mobile
+package com.careonroad.app
 
 import android.app.Application
 import android.content.res.Configuration

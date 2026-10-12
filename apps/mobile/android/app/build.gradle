@@ -86,9 +86,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.careonroad.app.preview'
+    namespace 'com.careonroad.app'
     defaultConfig {
-        applicationId 'com.careonroad.app.preview'
+        applicationId 'com.careonroad.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

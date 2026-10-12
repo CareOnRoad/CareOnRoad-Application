@@ -69,7 +69,11 @@ const config: ExpoConfig = {
       foregroundImage: './assets/logo.png',
       backgroundColor: '#16202f',
     },
-    package: `${BASE_PACKAGE_ID}${settings.packageSuffix}`,
+    // Lưu ý: Khi EAS build phát hiện folder `android/` tồn tại, nó sẽ bỏ qua
+    // giá trị `package` ở đây và dùng `applicationId`/`namespace` trong
+    // `android/app/build.gradle`. Giá trị dưới đây vẫn cần khớp để Expo Go
+    // (chạy JS-only) hoạt động đúng.
+    package: BASE_PACKAGE_ID,
     versionCode: 1,
     permissions: [
       'ACCESS_FINE_LOCATION',
