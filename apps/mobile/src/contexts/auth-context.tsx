@@ -11,13 +11,6 @@ import { Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  clearSession,
-  findUserByEmail,
-  loadSession,
-  registerUser as registerDemoUser,
-  saveSession as saveDemoSession,
-} from '@/lib/auth-storage';
-import {
   ensureDeviceRegistered,
   maybeGetExpoPushToken,
 } from '@/lib/devices-service';
@@ -33,8 +26,7 @@ import {
   type AppActor,
 } from '@/lib/auth-service';
 import { isAuthConfigured } from '@/lib/config';
-import type { AuthRole, PublicAuthUser, StoredAuthSession } from '@/lib/auth-types';
-import { toPublicUser } from '@/lib/auth-types';
+import type { AuthRole, PublicAuthUser } from '@/lib/auth-types';
 import { getSupabase } from '@/lib/supabase-client';
 import { setAccessTokenProvider } from '@/lib/api';
 import { requestLocationPermissionOnce } from '@/lib/location-service';
@@ -66,8 +58,7 @@ interface AuthState {
   logout: () => Promise<void>;
   /**
    * Cập nhật các trường profile editable. Khi backend đã cấu hình sẽ gọi
-   * PATCH /api/v1/auth/profile rồi cập nhật state. Trong demo mode chỉ ghi
-   * vào local storage.
+   * PATCH /api/v1/auth/profile rồi cập nhật state.
    */
   updateProfile: (input: {
     name?: string;
@@ -75,13 +66,6 @@ interface AuthState {
     address?: string;
     avatar?: string;
   }) => Promise<PublicAuthUser>;
-  /** Đổi vai trò demo - chỉ hoạt động trong demo mode. */
-  switchRoleDemo: () => Promise<void>;
-  /**
-   * Bypass login (CHỈ dành cho dev/test UI - sẽ xoá khi tích hợp backend).
-   * Tạo session demo với role + email mặc định không cần mật khẩu.
-   */
-  bypassLoginAs: (role: AuthRole) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -111,8 +95,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<PublicAuthUser | null>(null);
   const [role, setRole] = useState<AuthRole | null>(null);
-  // Track phiên demo (chỉ dùng khi Supabase chưa cấu hình)
-  const [demoSession, setDemoSession] = useState<StoredAuthSession | null>(null);
 
   const backendReady = useMemo(() => isAuthConfigured() && getSupabase() !== null, []);
 
@@ -301,22 +283,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) setStatus('unauthenticated');
         return;
       }
-
-      // Demo mode → dùng AsyncStorage
-      try {
-        const stored = await loadSession();
-        if (cancelled) return;
-        if (stored) {
-          setDemoSession(stored);
-          setUser(stored.user);
-          setRole(stored.user.role);
-          setStatus('authenticated');
-        } else {
-          setStatus('unauthenticated');
-        }
-      } catch {
-        if (!cancelled) setStatus('unauthenticated');
-      }
     }
 
     hydrate();
@@ -389,29 +355,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // =========================================================
   const login = useCallback(
     async ({ email, password }: LoginInput): Promise<PublicAuthUser> => {
-      if (backendReady) {
-        const { user: pub } = await authSignIn(email, password);
-        setUser(pub);
-        setRole(pub.role);
-        setStatus('authenticated');
-        return pub;
+      if (!backendReady) {
+        throw new Error(
+          'Backend chưa được cấu hình. Vui lòng liên hệ quản trị viên.',
+        );
       }
-      // Demo fallback
-      const existing = await findUserByEmail(email);
-      if (!existing || existing.password !== password) {
-        throw new Error('Email hoặc mật khẩu không đúng');
-      }
-      const newSession: StoredAuthSession = {
-        user: toPublicUser(existing),
-        token: `demo-token-${Date.now()}`,
-        issuedAt: new Date().toISOString(),
-      };
-      await saveDemoSession(newSession);
-      setDemoSession(newSession);
-      setUser(newSession.user);
-      setRole(newSession.user.role);
+      const { user: pub } = await authSignIn(email, password);
+      setUser(pub);
+      setRole(pub.role);
       setStatus('authenticated');
-      return newSession.user;
+      return pub;
     },
     [backendReady],
   );
@@ -421,30 +374,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // =========================================================
   const register = useCallback(
     async ({ role: r, name, email, phone, password }: RegisterInput) => {
-      if (backendReady) {
-        const { user: pub } = await authSignUp({
-          role: r,
-          name,
-          email,
-          phone,
-          password,
-        });
-        setUser(pub);
-        setRole(pub.role);
-        setStatus('authenticated');
-        return;
+      if (!backendReady) {
+        throw new Error(
+          'Backend chưa được cấu hình. Vui lòng liên hệ quản trị viên.',
+        );
       }
-      // Demo fallback
-      const created = await registerDemoUser({ role: r, name, email, phone, password });
-      const newSession: StoredAuthSession = {
-        user: toPublicUser(created),
-        token: `demo-token-${Date.now()}`,
-        issuedAt: new Date().toISOString(),
-      };
-      await saveDemoSession(newSession);
-      setDemoSession(newSession);
-      setUser(newSession.user);
-      setRole(newSession.user.role);
+      const { user: pub } = await authSignUp({
+        role: r,
+        name,
+        email,
+        phone,
+        password,
+      });
+      setUser(pub);
+      setRole(pub.role);
       setStatus('authenticated');
     },
     [backendReady],
@@ -453,8 +396,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // =========================================================
   // Update profile
   //
-  // Khi backend ready → PATCH /api/v1/auth/profile rồi refresh actor.
-  // Trong demo mode → ghi đè session user hiện tại với data mới.
+  // Gọi PATCH /api/v1/auth/profile rồi refresh actor từ BE.
   // =========================================================
   const updateProfile = useCallback(
     async (input: {
@@ -463,47 +405,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       address?: string;
       avatar?: string;
     }): Promise<PublicAuthUser> => {
-      if (backendReady) {
-        const client = getSupabase();
-        if (!client) throw new Error('Supabase chưa được cấu hình.');
-        setAccessTokenProvider(() =>
-          client.auth.getSession().then((s) => s.data.session?.access_token ?? null),
+      if (!backendReady) {
+        throw new Error(
+          'Backend chưa được cấu hình. Vui lòng liên hệ quản trị viên.',
         );
-        await authUpdateProfile(input);
-        const actor = await fetchCurrentActor();
-        if (!actor) {
-          throw new Error('Không lấy được hồ sơ sau khi cập nhật.');
-        }
-        const nextUser = actorToPublic(actor, user?.email ?? '');
-        setUser(nextUser);
-        setRole(nextUser.role);
-        return nextUser;
       }
-      // Demo mode: cập nhật user local trong session
-      if (!demoSession || !user) {
-        throw new Error('Chưa đăng nhập.');
+      const client = getSupabase();
+      if (!client) {
+        throw new Error('Supabase chưa được cấu hình.');
       }
-      const nextUser: PublicAuthUser = {
-        ...user,
-        name: input.name ?? user.name,
-        phone: input.phone ?? user.phone,
-        avatar: input.avatar ?? user.avatar,
-      };
-      if (input.address !== undefined) {
-        nextUser.address = input.address;
-      } else if (user.address !== undefined) {
-        nextUser.address = user.address;
+      setAccessTokenProvider(() =>
+        client.auth.getSession().then((s) => s.data.session?.access_token ?? null),
+      );
+      await authUpdateProfile(input);
+      const actor = await fetchCurrentActor();
+      if (!actor) {
+        throw new Error('Không lấy được hồ sơ sau khi cập nhật.');
       }
-      const nextSession: StoredAuthSession = {
-        ...demoSession,
-        user: nextUser,
-      };
-      await saveDemoSession(nextSession);
-      setDemoSession(nextSession);
+      const nextUser = actorToPublic(actor, user?.email ?? '');
       setUser(nextUser);
+      setRole(nextUser.role);
       return nextUser;
     },
-    [backendReady, demoSession, user],
+    [backendReady, user],
   );
 
   // =========================================================
@@ -513,92 +437,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Throw error để caller (UI) hiển thị banner nếu cần thiết.
   // =========================================================
   const logout = useCallback(async () => {
+    if (!backendReady) {
+      setUser(null);
+      setRole(null);
+      setStatus('unauthenticated');
+      return;
+    }
     let warning: string | null = null;
-    if (backendReady) {
-      try {
-        await authSignOut();
-      } catch (err) {
-        // Logout vẫn thành công về mặt UX — session local đã bị xoá.
-        // Ghi warning để caller có thể thông báo (vd. "Đăng xuất trên máy chủ thất bại").
-        if (__DEV__) {
-          // eslint-disable-next-line no-console
-          console.warn('[auth] signOut failed:', err);
-        }
-        warning =
-          err instanceof Error
-            ? err.message
-            : 'Đăng xuất trên máy chủ thất bại. Phiên local đã được xoá.';
+    try {
+      await authSignOut();
+    } catch (err) {
+      // Logout vẫn thành công về mặt UX — session local đã bị xoá.
+      // Ghi warning để caller có thể thông báo (vd. "Đăng xuất trên máy chủ thất bại").
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn('[auth] signOut failed:', err);
       }
-    } else {
-      try {
-        await clearSession();
-      } catch (err) {
-        if (__DEV__) {
-          // eslint-disable-next-line no-console
-          console.warn('[auth] clearSession failed:', err);
-        }
-      }
+      warning =
+        err instanceof Error
+          ? err.message
+          : 'Đăng xuất trên máy chủ thất bại. Phiên local đã được xoá.';
     }
     setUser(null);
     setRole(null);
-    setDemoSession(null);
     setStatus('unauthenticated');
     if (warning) {
       throw new Error(warning);
     }
   }, [backendReady]);
-
-  // =========================================================
-  // Switch role demo (chỉ dùng trong demo mode)
-  // =========================================================
-  const switchRoleDemo = useCallback(async () => {
-    if (backendReady) {
-      // Trong production cần logout + login với tài khoản khác.
-      throw new Error('switchRoleDemo không khả dụng khi đã tích hợp backend');
-    }
-    if (!demoSession) return;
-    const flipped: AuthRole = demoSession.user.role === 'rider' ? 'mechanic' : 'rider';
-    const counterpart = await findUserByEmail(
-      flipped === 'rider' ? 'rider1@gmail.com' : 'mechanic1@gmail.com',
-    );
-    if (!counterpart) return;
-    const newSession: StoredAuthSession = {
-      user: toPublicUser(counterpart),
-      token: `demo-token-${Date.now()}`,
-      issuedAt: new Date().toISOString(),
-    };
-    await saveDemoSession(newSession);
-    setDemoSession(newSession);
-    setUser(newSession.user);
-    setRole(newSession.user.role);
-  }, [backendReady, demoSession]);
-
-  // =========================================================
-  // Bypass login (dev only - sẽ xoá khi tích hợp backend)
-  // =========================================================
-  const bypassLoginAs = useCallback(
-    async (targetRole: AuthRole) => {
-      // Lấy thông tin seed user trước (dùng SEED_USERS nếu AsyncStorage trống).
-      const email = targetRole === 'rider' ? 'rider1@gmail.com' : 'mechanic1@gmail.com';
-      const seed = await findUserByEmail(email);
-      if (!seed) {
-        throw new Error('Không tìm thấy tài khoản demo để bypass');
-      }
-      // Nếu đã tích hợp Supabase, vẫn tiếp tục ghi đè session local để test UI
-      // (bypass vẫn dùng AsyncStorage, không gọi Supabase).
-      const newSession: StoredAuthSession = {
-        user: toPublicUser(seed),
-        token: `demo-bypass-${Date.now()}`,
-        issuedAt: new Date().toISOString(),
-      };
-      await saveDemoSession(newSession);
-      setDemoSession(newSession);
-      setUser(newSession.user);
-      setRole(newSession.user.role);
-      setStatus('authenticated');
-    },
-    [],
-  );
 
   const value = useMemo<AuthState>(
     () => ({
@@ -610,10 +476,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       register,
       updateProfile,
       logout,
-      switchRoleDemo,
-      bypassLoginAs,
     }),
-    [status, user, role, backendReady, login, register, updateProfile, logout, switchRoleDemo, bypassLoginAs],
+    [status, user, role, backendReady, login, register, updateProfile, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -13,7 +13,6 @@ import {
   Moon,
   Pencil,
   Phone,
-  RefreshCcw,
   ShieldCheck,
   User,
 } from 'lucide-react-native';
@@ -42,16 +41,13 @@ import { loadProfile, type LocalProfile } from '@/lib/profile-service';
  *  4. Personal info card (avatar/email/phone rows).
  *  5. Saved addresses card.
  *  6. Settings card (notifications, language, dark mode, help).
- *  7. Switch role + Logout buttons.
+ *  7. Logout button.
  */
 export default function ProfileScreen() {
   const { vehicles, services, darkMode, toggleDarkMode, user: appUser } = useApp();
   const {
     user: authUser,
     logout,
-    switchRoleDemo,
-    isBackendConfigured,
-    updateProfile,
   } = useAuth();
   const [language, setLanguage] = useState<'EN' | 'VI'>('VI');
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
@@ -116,17 +112,6 @@ export default function ProfileScreen() {
     if (loggingOut) return;
     setLogoutDialogOpen(false);
     setLogoutError(null);
-  };
-
-  const onSwitchRole = async () => {
-    if (!isBackendConfigured) {
-      // Trong demo mode: switch role bằng cách swap local account.
-      await switchRoleDemo();
-      router.replace('/mechanic');
-    } else {
-      // Production: cần logout + login với tài khoản khác.
-      router.replace('/login');
-    }
   };
 
   return (
@@ -226,20 +211,6 @@ export default function ProfileScreen() {
             <NavRow icon={LifeBuoy} label="Trung tâm hỗ trợ" right={<ChevronRight size={20} color="#64748b" />} />
           </Card>
         </View>
-
-        {/* Switch role - chỉ demo */}
-        {!isBackendConfigured && (
-          <ActionButton
-            fullWidth
-            variant="outline"
-            className="mt-6"
-            onPress={onSwitchRole}
-            accessibilityLabel="Chuyển sang vai trò thợ sửa xe"
-          >
-            <RefreshCcw size={16} color="#1974f7" />
-            <Text className="text-sm font-semibold text-primary">Chuyển sang Mechanic</Text>
-          </ActionButton>
-        )}
 
         <ActionButton
           fullWidth

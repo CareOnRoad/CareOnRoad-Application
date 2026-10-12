@@ -35,8 +35,8 @@ const DEFAULT_LOCAL_API_URL = 'http://localhost:3000';
  * EAS secrets đã set. KHÔNG dùng cho dev.
  */
 const VARIANT_FALLBACK: Record<string, string> = {
-  production: 'https://api.careonroad.example',
-  staging: 'https://staging-api.careonroad.example',
+  production: 'https://careonroad.dpdns.org',
+  staging: 'https://careonroad.dpdns.org',
   preview: 'http://localhost:3000',
   development: DEFAULT_LOCAL_API_URL,
 };

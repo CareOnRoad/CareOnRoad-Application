@@ -1,0 +1,65 @@
+# EAS Build ignore - files KHÔNG upload lên EAS Build server.
+# EAS chạy từ root monorepo nên dùng path tương đối từ root.
+# Xem https://docs.expo.dev/build-reference/easignore/
+
+# CHỈ giữ apps/mobile/ — bỏ tất cả thư khác
+apps/api/
+apps/web/
+apps/admin/
+apps/admin-web/
+packages/
+supabase/
+specs/
+tests/
+docs/
+ui-design/
+scripts/
+.next/
+.turbo/
+.vercel/
+.netlify/
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+.vscode/
+.idea/
+.cursor/
+*.md
+!apps/mobile/**/*.md
+!apps/mobile/README.md
+
+# Build artifacts
+build/
+dist/
+out/
+.expo/
+.expo-shared/
+android/build/
+android/.gradle/
+android/app/build/
+android/.idea/
+
+# Local files
+.env
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+
+# Node modules
+node_modules/
+**/node_modules/
+**/pnpm-lock.yaml
+!apps/mobile/pnpm-lock.yaml
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.bak
+*.tmp
+*.orig
+
+# Build logs từ session trước
+apps/mobile/eas-build-log.txt

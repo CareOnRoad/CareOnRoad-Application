@@ -31,7 +31,7 @@ import { DateTimePickerField } from '@/components/ui/datetime-picker-field';
 import { formatDdMmYyyyHHmm, isPastDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { updateReminder, snoozeReminder } from '@/lib/reminders-service';
-import type { Appointment, CanceledAppointment } from '@/lib/types';
+import type { Appointment } from '@/lib/types';
 import type { ServiceRequestResponse } from '@/lib/service-requests-service';
 import {
   deriveStatus,
@@ -42,7 +42,7 @@ import {
 } from '@/lib/reminders-service';
 
 type HistoryTab = 'maintenance' | 'reminders' | 'emergency';
-type MaintenanceFilter = 'upcoming' | 'canceled' | 'completed';
+type MaintenanceFilter = 'upcoming';
 
 const SERVICE_LABELS: Record<string, string> = {
   periodic_maintenance: 'Bảo dưỡng định kỳ',
@@ -82,19 +82,6 @@ function requestToAppointment(
     date,
     time,
     status: 'confirmed',
-  };
-}
-
-function requestToCanceled(req: ServiceRequestResponse, vehicleName: string): CanceledAppointment {
-  const dt = req.scheduled_start_at ? new Date(req.scheduled_start_at) : new Date(req.created_at);
-  return {
-    id: req.id,
-    vehicleName,
-    service: SERVICE_LABELS[req.service_type] ?? req.service_type,
-    date: dt.toISOString().slice(0, 10),
-    time: dt.toTimeString().slice(0, 5),
-    canceledAt: req.updated_at,
-    reason: req.canceled_reason ?? 'Không có lý do',
   };
 }
 
@@ -153,16 +140,11 @@ export default function ScheduleScreen() {
     .map((r) => requestToAppointment(r, vehicleNameById.get(r.motorcycle_id) ?? 'Xe'))
     .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
 
-  const canceledMaintenance: CanceledAppointment[] = maintenanceFromBE
-    .filter((r) => r.status === 'canceled')
-    .map((r) => requestToCanceled(r, vehicleNameById.get(r.motorcycle_id) ?? 'Xe'));
-
-  const completedCount = maintenanceFromBE.filter((r) => r.status === 'completed').length;
   const activeReminders = reminders.filter((r) => {
     const s = deriveStatus(r);
     return s === 'active' || s === 'snoozed';
   });
-  const totalMaintenance = upcomingMaintenance.length + canceledMaintenance.length;
+  const totalMaintenance = upcomingMaintenance.length;
   // Tab "Cứu hộ" lấy trực tiếp từ BE service-requests (service_type=emergency_rescue,
   // status=completed). Không dùng mock data.
   const completedEmergencyCount = sr.list.filter(
@@ -257,13 +239,11 @@ export default function ScheduleScreen() {
               </View>
             )}
 
-            {/* Filter cấp 2 */}
+            {/* Filter cấp 2 — chỉ giữ 'Sắp tới' (đã loại bỏ 'Đã huỷ' + 'Hoàn tất' để chốt release). */}
             <View className="mb-3 flex-row gap-2 rounded-2xl bg-secondary/40 p-1">
               {(
                 [
                   { id: 'upcoming', label: 'Sắp tới', count: upcomingMaintenance.length },
-                  { id: 'canceled', label: 'Đã huỷ', count: canceledMaintenance.length },
-                  { id: 'completed', label: 'Hoàn tất', count: completedCount },
                 ] as { id: MaintenanceFilter; label: string; count: number }[]
               ).map((f) => {
                 const active = maintenanceFilter === f.id;
@@ -328,45 +308,12 @@ export default function ScheduleScreen() {
               </View>
             )}
 
-            {maintenanceFilter === 'canceled' && (
-              <View className="gap-3">
-                {canceledMaintenance.length === 0 ? (
-                  <EmptyState
-                    icon={XCircle}
-                    title="Chưa có lịch bị huỷ"
-                    description="Các lịch bị huỷ kèm lý do sẽ hiển thị tại đây."
-                  />
-                ) : (
-                  canceledMaintenance.map((c) => <CanceledBookingCard key={c.id} canceled={c} />)
-                )}
-              </View>
-            )}
-
-            {maintenanceFilter === 'completed' && (
-              <View className="gap-3">
-                {maintenanceFromBE.filter((r) => r.status === 'completed').length === 0 ? (
-                  <EmptyState
-                    icon={Check}
-                    tone="success"
-                    title="Chưa có dịch vụ hoàn tất"
-                    description="Các lần bảo dưỡng đã hoàn thành sẽ hiển thị tại đây."
-                  />
-                ) : (
-                  maintenanceFromBE
-                    .filter((r) => r.status === 'completed')
-                    .map((r) => (
-                      <CompletedMaintenanceCard
-                        key={r.id}
-                        request={r}
-                        vehicleName={vehicleNameById.get(r.motorcycle_id) ?? 'Xe'}
-                      />
-                    ))
-                )}
-              </View>
-            )}
+            {/* 
+              Sub-tab 'Đã huỷ' và 'Hoàn tất' đã được loại bỏ để chốt release.
+              Lịch sử canceled/completed vẫn xem được ở /rider/history.
+            */}
           </>
         )}
-
         {tab === 'reminders' && (
           <View className="gap-3">
             <ActionButton
@@ -529,55 +476,6 @@ function TabButton({
   );
 }
 
-function CanceledBookingCard({
-  canceled,
-}: {
-  canceled: import('@/lib/types').CanceledAppointment;
-}) {
-  return (
-    <Card className="overflow-hidden">
-      <View className="flex-row items-center justify-between bg-destructive px-4 py-3">
-        <View className="flex-row items-center gap-2">
-          <XCircle size={16} color="#ffffff" />
-          <Text className="text-sm font-semibold text-white">{canceled.service}</Text>
-        </View>
-        <View className="rounded-full bg-white/15 px-2.5 py-1">
-          <Text className="text-xs font-semibold text-white">Đã huỷ</Text>
-        </View>
-      </View>
-      <View className="flex-row gap-2 p-4">
-        <View className="flex-1 gap-1">
-          <View className="flex-row items-center gap-1">
-            <Wrench size={14} color="#64748b" />
-            <Text className="text-xs text-muted-foreground">Xe</Text>
-          </View>
-          <Text className="text-sm font-semibold leading-tight text-foreground">
-            {canceled.vehicleName}
-          </Text>
-        </View>
-        <View className="flex-1 gap-1">
-          <View className="flex-row items-center gap-1">
-            <CalendarClock size={14} color="#64748b" />
-            <Text className="text-xs text-muted-foreground">Ngày</Text>
-          </View>
-          <Text className="text-sm font-semibold text-foreground">
-            {canceled.date} · {canceled.time}
-          </Text>
-        </View>
-        <View className="flex-1 gap-1">
-          <View className="flex-row items-center gap-1">
-            <FileText size={14} color="#64748b" />
-            <Text className="text-xs text-muted-foreground">Lý do</Text>
-          </View>
-          <Text className="text-xs font-medium text-foreground" numberOfLines={2}>
-            {canceled.reason}
-          </Text>
-        </View>
-      </View>
-    </Card>
-  );
-}
-
 function UpcomingMaintenanceCard({
   appointment,
   onCancel,
@@ -644,52 +542,6 @@ function UpcomingMaintenanceCard({
           <Text className="text-xs font-semibold text-destructive-foreground">Huỷ lịch</Text>
         </ActionButton>
       </View>
-    </Card>
-  );
-}
-
-function CompletedMaintenanceCard({
-  request,
-  vehicleName,
-}: {
-  request: ServiceRequestResponse;
-  vehicleName: string;
-}) {
-  return (
-    <Card className="p-4">
-      <View className="flex-row items-center gap-3">
-        <View className="size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10">
-          <Wrench size={20} color="#1974f7" />
-        </View>
-        <View className="min-w-0 flex-1">
-          <View className="flex-row items-center justify-between gap-2">
-            <Text className="flex-1 truncate font-semibold leading-tight text-foreground">
-              {SERVICE_LABELS[request.service_type] ?? request.service_type}
-            </Text>
-            <Badge tone="green">
-              <Text className="text-xs font-semibold text-green">Hoàn tất</Text>
-            </Badge>
-          </View>
-          <Text className="truncate text-xs text-muted-foreground">
-            {request.request_code} · {vehicleName}
-          </Text>
-          <View className="mt-1.5 flex-row items-center gap-2">
-            <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
-              <CalendarClock size={12} color="#64748b" />
-              <Text className="text-xs font-semibold text-secondary-foreground">
-                {new Date(request.created_at).toLocaleDateString('vi-VN')}
-              </Text>
-            </View>
-          </View>
-        </View>
-      </View>
-      {request.problem_description && (
-        <View className="mt-2 rounded-xl bg-secondary px-3 py-2">
-          <Text className="text-xs text-muted-foreground" numberOfLines={2}>
-            {request.problem_description}
-          </Text>
-        </View>
-      )}
     </Card>
   );
 }

@@ -1,11 +1,12 @@
 {
   "cli": {
     "version": ">= 14.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "remote",
+    "requireCommit": false
   },
   "build": {
     "base": {
-      "node": "20.x",
+      "node": "20.18.0",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://lwgwprxjyemihlkspgjc.supabase.co",
         "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3000"
@@ -18,7 +19,6 @@
       "ios": { "simulator": true },
       "env": {
         "APP_VARIANT": "development",
-        "EXPO_PUBLIC_API_BASE_URL_OVERRIDE": "",
         "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3000"
       }
     },
@@ -30,12 +30,21 @@
         "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3000"
       }
     },
+    "demo": {
+      "extends": "base",
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "APP_VARIANT": "production",
+        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
+      }
+    },
     "staging": {
       "extends": "base",
       "distribution": "internal",
       "env": {
         "APP_VARIANT": "staging",
-        "EXPO_PUBLIC_API_BASE_URL": "https://staging-api.careonroad.example"
+        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
       }
     },
     "production": {
@@ -43,7 +52,7 @@
       "autoIncrement": true,
       "env": {
         "APP_VARIANT": "production",
-        "EXPO_PUBLIC_API_BASE_URL": "https://api.careonroad.example"
+        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
       }
     }
   },

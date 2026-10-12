@@ -26,6 +26,8 @@ const variantSettings: Record<
   production: { name: 'CareOnRoad', bundleSuffix: '', packageSuffix: '' },
 };
 
+const BASE_PACKAGE_ID = 'com.careonroad.app';
+
 const settings = variantSettings[variant] ?? variantSettings.development;
 
 const config: ExpoConfig = {
@@ -37,14 +39,17 @@ const config: ExpoConfig = {
   // URL scheme cho deep-link (vd: careonroad://auth/callback).
   // Supabase OAuth redirect về scheme này sau khi user đăng nhập Google.
   scheme: ['careonroad'],
+  icon: './assets/logo.png',
   splash: {
+    image: './assets/logo.png',
+    resizeMode: 'contain',
     backgroundColor: '#16202f',
   },
   assetBundlePatterns: ['**/*'],
   newArchEnabled: true,
   ios: {
     supportsTablet: false,
-    bundleIdentifier: `com.careonroad.mobile${settings.bundleSuffix}`,
+    bundleIdentifier: `${BASE_PACKAGE_ID}${settings.bundleSuffix}`,
     infoPlist: {
       NSCameraUsageDescription:
         'CareOnRoad needs camera to take photos of motorcycle issues',
@@ -61,10 +66,17 @@ const config: ExpoConfig = {
   },
   android: {
     adaptiveIcon: {
+      foregroundImage: './assets/logo.png',
       backgroundColor: '#16202f',
     },
-    package: `com.careonroad.mobile${settings.packageSuffix}`,
-    permissions: ['CAMERA', 'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'READ_MEDIA_IMAGES'],
+    package: `${BASE_PACKAGE_ID}${settings.packageSuffix}`,
+    versionCode: 1,
+    permissions: [
+      'ACCESS_FINE_LOCATION',
+      'ACCESS_COARSE_LOCATION',
+      'POST_NOTIFICATIONS',
+      'READ_MEDIA_IMAGES',
+    ],
     // Intent filter để Android nhận deep-link scheme careonroad://
     // (vd: careonroad://auth/callback từ Google OAuth redirect).
     // Lưu ý Android 11+ (API 30+) yêu cầu cả scheme + host/pathPrefix rõ ràng
@@ -93,8 +105,9 @@ const config: ExpoConfig = {
   extra: {
     appVariant: variant,
     eas: {
-      // Khi build qua EAS, các biến này sẽ có giá trị thật.
-      // Khi dev local, chúng rỗng hoặc lấy từ .env.
+      // EAS project ID — được generate khi chạy `eas init`.
+      // Cần thiết để EAS Build, Submit, Update liên kết với project này.
+      projectId: 'a692153d-e5e8-4b0a-8293-3c846bffcafd',
     },
   },
 };

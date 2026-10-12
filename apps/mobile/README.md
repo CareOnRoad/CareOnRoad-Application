@@ -171,7 +171,6 @@ apps/mobile/
 │   │   ├── config.ts          # Đọc env vars + isAuthConfigured()
 │   │   ├── supabase-client.ts # Supabase client + AsyncStorage adapter
 │   │   ├── auth-service.ts    # Backend auth API (signIn/signUp/profile)
-│   │   ├── auth-storage.ts    # Demo fallback (AsyncStorage local users)
 │   │   └── auth-types.ts      # Types: AuthRole, PublicAuthUser, ...
 │   └── components/          # UI components (cards, buttons, ...)
 │
@@ -200,10 +199,10 @@ Mỗi môi trường có profile riêng trong `eas.json`:
 
 | Profile | API URL | Bundle ID | Mục đích |
 |---------|---------|-----------|----------|
-| `development` | `http://localhost:3000` | `com.careonroad.mobile.dev` | Dev trên simulator/emulator |
-| `preview` | `http://localhost:3000` | `com.careonroad.mobile.preview` | Internal test qua EAS build |
-| `staging` | `https://staging-api.careonroad.example` | `com.careonroad.mobile.staging` | Test với backend staging |
-| `production` | `https://api.careonroad.example` | `com.careonroad.mobile` | App store / production |
+| `development` | `http://localhost:3000` | `com.careonroad.app.dev` | Dev trên simulator/emulator |
+| `preview` | `http://localhost:3000` | `com.careonroad.app.preview` | Internal test qua EAS build |
+| `staging` | `https://staging-api.careonroad.example` | `com.careonroad.app.staging` | Test với backend staging |
+| `production` | `https://api.careonroad.example` | `com.careonroad.app` | App store / production |
 
 Build commands (cần `eas-cli`):
 

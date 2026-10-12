@@ -15,11 +15,8 @@ import {
   Bike,
   Eye,
   EyeOff,
-  FlaskConical,
   Lock,
   Mail,
-  ShieldCheck,
-  Wrench,
 } from 'lucide-react-native';
 
 import { useAuth } from '@/contexts/auth-context';
@@ -33,17 +30,17 @@ import type { AuthRole } from '@/lib/auth-types';
  *
  * Design principles:
  *  - Nền navy + glassmorphism cards → brand identity cho toàn auth flow.
- *  - Alerts đỏ (Banner tone="error"), warnings amber (chế độ demo) → theo chuẩn.
+ *  - Alerts đỏ (Banner tone="error") khi login thất bại.
  *  - Nút primary CTA = brand-blue (#1974f7), không bị mờ đi khi đang submit.
- *  - Tài khoản demo chỉ hiển thị khi chưa cấu hình backend, không gây nhiễu user thật.
+ *  - Production-first: form email/password + Google OAuth (khi BE đã cấu hình).
+ *    Nếu BE chưa cấu hình, AuthContext sẽ throw lỗi rõ ràng để user biết.
  */
 export default function LoginScreen() {
-  const { login, isBackendConfigured, bypassLoginAs } = useAuth();
+  const { login, isBackendConfigured } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [bypassing, setBypassing] = useState<AuthRole | null>(null);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,31 +105,6 @@ export default function LoginScreen() {
     }
   };
 
-  const onBypass = async (target: AuthRole) => {
-    setError(null);
-    setBypassing(target);
-    try {
-      await bypassLoginAs(target);
-      navigateAfterAuth(target);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Không thể bypass đăng nhập');
-    } finally {
-      setBypassing(null);
-    }
-  };
-
-  const fillDemoRider = () => {
-    setEmail('rider1@gmail.com');
-    setPassword('demo1234');
-    setError(null);
-  };
-
-  const fillDemoMechanic = () => {
-    setEmail('mechanic1@gmail.com');
-    setPassword('demo1234');
-    setError(null);
-  };
-
   return (
     <SafeAreaView className="flex-1 bg-navy" edges={['top', 'bottom']}>
       <KeyboardAvoidingView
@@ -157,17 +129,6 @@ export default function LoginScreen() {
           {error && (
             <View className="mt-6">
               <Banner tone="error" description={error} />
-            </View>
-          )}
-
-          {/* Demo mode warning */}
-          {!isBackendConfigured && (
-            <View className="mt-6">
-              <Banner
-                tone="warning"
-                title="Đang chạy ở chế độ Demo"
-                description="Backend chưa cấu hình. Đăng nhập dùng tài khoản local. Xem apps/mobile/README.md để thiết lập."
-              />
             </View>
           )}
 
@@ -281,76 +242,6 @@ export default function LoginScreen() {
                 )}
               </Pressable>
             )}
-
-            {!isBackendConfigured && (
-              <Pressable
-                disabled
-                accessibilityRole="button"
-                accessibilityLabel="Google sign-in chưa khả dụng"
-                className="flex-row items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5 py-4 opacity-40"
-              >
-                <Text className="text-sm text-white/50">
-                  Google sign-in (cần cấu hình Supabase)
-                </Text>
-              </Pressable>
-            )}
-          </View>
-
-          {/* Demo accounts - chỉ hiện khi chưa có backend */}
-          {!isBackendConfigured && (
-            <View className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-4">
-              <View className="mb-3 flex-row items-center gap-2">
-                <ShieldCheck size={16} color="#22c55e" />
-                <Text className="text-sm font-semibold text-white">Tài khoản demo</Text>
-              </View>
-              <Text className="mb-3 text-xs text-white/50">
-                Thử nghiệm nhanh với tài khoản có sẵn (mật khẩu: demo1234):
-              </Text>
-              <View className="gap-2">
-                <DemoAccount
-                  icon={Bike}
-                  iconBg="bg-primary/20"
-                  iconColor="#1974f7"
-                  title="Tài khoản Rider mẫu"
-                  email="rider1@gmail.com"
-                  onPress={fillDemoRider}
-                />
-                <DemoAccount
-                  icon={Wrench}
-                  iconBg="bg-mint/20"
-                  iconColor="#a9ffad"
-                  title="Tài khoản Thợ sửa xe mẫu"
-                  email="mechanic1@gmail.com"
-                  onPress={fillDemoMechanic}
-                />
-              </View>
-            </View>
-          )}
-
-          {/* Bypass login - dev only, dùng để test UI nhanh (sẽ xoá trong tương lai) */}
-          <View className="mt-4 rounded-3xl border border-dashed border-amber-500/40 bg-amber-500/10 p-4">
-            <View className="mb-3 flex-row items-center gap-2">
-              <FlaskConical size={16} color="#f59e0b" />
-              <Text className="text-sm font-semibold text-amber-700">Dev Bypass (sẽ xoá)</Text>
-            </View>
-            <Text className="mb-3 text-xs leading-relaxed text-amber-700/80">
-              Bỏ qua đăng nhập để xem nhanh giao diện từng role. Nút này chỉ dùng cho dev/test
-              và sẽ bị xoá khi tích hợp backend thật.
-            </Text>
-            <View className="flex-row gap-2">
-              <BypassButton
-                role="rider"
-                loading={bypassing === 'rider'}
-                disabled={!!bypassing}
-                onPress={() => onBypass('rider')}
-              />
-              <BypassButton
-                role="mechanic"
-                loading={bypassing === 'mechanic'}
-                disabled={!!bypassing}
-                onPress={() => onBypass('mechanic')}
-              />
-            </View>
           </View>
 
           {/* Register link */}
@@ -370,84 +261,5 @@ export default function LoginScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
-  );
-}
-
-function DemoAccount({
-  icon: Icon,
-  iconBg,
-  iconColor,
-  title,
-  email,
-  onPress,
-}: {
-  icon: typeof Bike;
-  iconBg: string;
-  iconColor: string;
-  title: string;
-  email: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Điền nhanh ${title}`}
-      className="flex-row items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3 active:scale-[0.98] active:bg-white/10"
-    >
-      <View className={cn('size-9 items-center justify-center rounded-lg', iconBg)}>
-        <Icon size={18} color={iconColor} />
-      </View>
-      <View className="flex-1">
-        <Text className="text-sm font-semibold text-white">{title}</Text>
-        <Text className="text-xs text-white/50">{email}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-const bypassTone = {
-  rider: { bg: 'bg-primary', fg: '#ffffff', iconBg: 'bg-white/15', Icon: Bike, label: 'Rider' },
-  mechanic: { bg: 'bg-green', fg: '#ffffff', iconBg: 'bg-white/15', Icon: Wrench, label: 'Thợ sửa xe' },
-} as const;
-
-function BypassButton({
-  role,
-  loading,
-  disabled,
-  onPress,
-}: {
-  role: AuthRole;
-  loading: boolean;
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  const tone = bypassTone[role];
-  const Icon = tone.Icon;
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel={`Bypass đăng nhập vào ${tone.label}`}
-      className={cn(
-        'flex-1 flex-row items-center justify-center gap-2 rounded-2xl py-3 active:scale-[0.98]',
-        tone.bg,
-        disabled && 'opacity-60',
-      )}
-    >
-      {loading ? (
-        <ActivityIndicator color={tone.fg} />
-      ) : (
-        <>
-          <View className={cn('size-6 items-center justify-center rounded-md', tone.iconBg)}>
-            <Icon size={14} color={tone.fg} />
-          </View>
-          <Text className="text-sm font-semibold" style={{ color: tone.fg }}>
-            Vào {tone.label}
-          </Text>
-        </>
-      )}
-    </Pressable>
   );
 }

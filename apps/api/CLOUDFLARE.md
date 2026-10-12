@@ -56,3 +56,39 @@ sẵn trong repo. API gốc `/` có thể trả 404 vì workspace API không có
 
 Khi chuyển sang server khác, chạy backend và connector trên server đó, đổi
 service URL của Tunnel nếu cổng thay đổi. Giữ token và `.env.local` ngoài Git.
+
+## CORS — khi nào cần
+
+Hiện tại BE **không có CORS middleware** (`apps/api/src/middleware.ts` chưa tồn tại,
+không có `Access-Control-Allow-*` trong route handlers, không có env
+`ALLOWED_ORIGINS`/`CORS_ORIGIN`). Điều này **chấp nhận được** vì toàn bộ client hiện
+tại gọi BE từ server runtime (Next.js server components / server actions) hoặc từ
+mobile (Expo Go / native), không phải từ browser cross-origin.
+
+CORS chỉ thật sự cần khi **một trong các trigger** sau xuất hiện:
+
+1. Web wire UI rider/mechanic thật (không phải mock) và cần gọi `/api/v1/**`
+   trực tiếp từ browser (client component dùng `fetch`/`apiClient.*`).
+2. Có client component nào trong `apps/web/src` bắt đầu gọi `fetch(...)` hoặc
+   `apiClient.*` thay vì đi qua server runtime.
+3. Có FE khác (mobile webview, Chrome extension, trang tĩnh ở domain khác)
+   gọi thẳng từ browser vào BE.
+
+Khi đó cần thực hiện:
+
+- Tạo `apps/api/src/middleware.ts` (matcher `/api/:path*`).
+- Đọc `ALLOWED_ORIGINS` (comma-separated origins) từ env, mirror header
+  `Access-Control-Allow-Origin` cho origin khớp.
+- Cho preflight `OPTIONS`: trả 204 với `Access-Control-Allow-Methods`,
+  `Access-Control-Allow-Headers` (Authorization, Content-Type,
+  X-Idempotency-Key, X-Worker-Secret), `Access-Control-Allow-Credentials: true`,
+  `Access-Control-Max-Age: 600`.
+- Thêm `ALLOWED_ORIGINS` vào `apps/api/.env.example` (placeholder) + `.env.local`
+  (giá trị thật, gitignored).
+- Verify preflight:
+  ```powershell
+  curl.exe -i -X OPTIONS -H "Origin: https://<domain-web-prod>" -H "Access-Control-Request-Method: GET" https://careonroad.dpdns.org/api/v1/internal/health/live
+  ```
+  Phải trả 204 với `Access-Control-Allow-*` headers.
+
+Đến lúc đó mở task mới trong plan và làm theo spec trên.

@@ -1,0 +1,56 @@
+# EAS Build ignore - files KHÔNG upload lên EAS Build server.
+# EAS chỉ cần apps/mobile/ source code + package.json + lock file.
+# Xem https://docs.expo.dev/build-reference/easignore/
+
+# Toàn bộ apps khác ngoài mobile
+apps/api/
+apps/web/
+packages/
+
+# Tài liệu, design, tests
+specs/
+tests/
+docs/
+ui-design/
+*.md
+!apps/mobile/README.md
+
+# Build artifacts của mọi app
+.next/
+build/
+dist/
+out/
+.turbo/
+.expo/
+.expo-shared/
+
+# Node modules ở mọi nơi
+node_modules/
+**/node_modules/
+
+# Local files
+.env
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+
+# CI/CD configs
+.vercel/
+.netlify/
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# IDE / OS
+.vscode/
+.idea/
+.cursor/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Backups
+*.bak
+*.tmp
+*.orig

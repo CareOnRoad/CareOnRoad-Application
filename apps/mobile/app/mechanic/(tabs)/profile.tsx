@@ -13,7 +13,6 @@ import {
   Moon,
   Pencil,
   Phone,
-  RefreshCcw,
   ShieldCheck,
   Star,
   TrendingUp,
@@ -45,7 +44,7 @@ const languageCopy = { EN: 'English', VI: 'Tiếng Việt' } as const;
  *
  * Hero card navy có avatar, rating, garage info.
  * Stats cards: total jobs, rating, this month earnings.
- * Các phần: Garage, Certifications, Settings, Switch role, Logout.
+ * Các phần: Garage, Certifications, Settings, Logout.
  */
 export default function MechanicProfileScreen() {
   const {
@@ -61,8 +60,6 @@ export default function MechanicProfileScreen() {
   const {
     user: authUser,
     logout,
-    switchRoleDemo,
-    isBackendConfigured,
   } = useAuth();
   const [notifications, setNotifications] = useState(true);
   const [language, setLanguage] = useState<'EN' | 'VI'>('VI');
@@ -111,15 +108,6 @@ export default function MechanicProfileScreen() {
     if (loggingOut) return;
     setLogoutDialogOpen(false);
     setLogoutError(null);
-  };
-
-  const onSwitchRole = async () => {
-    if (!isBackendConfigured) {
-      await switchRoleDemo();
-      router.replace('/rider');
-    } else {
-      router.replace('/login');
-    }
   };
 
   const displayName = localProfile?.name ?? authUser?.name ?? mechanic.name;
@@ -323,19 +311,6 @@ export default function MechanicProfileScreen() {
               description="Cấp quyền vị trí trong cài đặt hệ thống để auto-tracking hoạt động."
             />
           </View>
-        )}
-
-        {!isBackendConfigured && (
-          <ActionButton
-            fullWidth
-            variant="outline"
-            className="mt-6"
-            onPress={onSwitchRole}
-            accessibilityLabel="Chuyển sang vai trò Rider"
-          >
-            <RefreshCcw size={16} color="#1974f7" />
-            <Text className="text-sm font-semibold text-primary">Chuyển sang Rider</Text>
-          </ActionButton>
         )}
 
         <ActionButton

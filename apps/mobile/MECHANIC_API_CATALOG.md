@@ -585,7 +585,7 @@ qua `/mechanics/me/profile` hoặc `/mechanics/me/performance`.
 - Helper mới: `newIdempotencyKey()` đã có sẵn ở `apps/mobile/src/lib/idempotency.ts`.
 
 ### Phase M1 — Auth, Role, Tab shell
-- Hoàn thiện bypass login mechanic (đã có sẵn ở login.tsx).
+- Bypass login mechanic đã được loại bỏ cho production release.
 - Routing nhóm `(mechanic)`: Home / Jobs / Offers / Profile (4 tabs).
 
 ### Phase M2 — Home / Dashboard

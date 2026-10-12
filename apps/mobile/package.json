@@ -58,8 +58,11 @@
     "@babel/core": "^7.25.2",
     "@types/react": "~18.3.12",
     "babel-preset-expo": "~12.0.12",
+    "eas-cli": "^16.0.0",
     "eslint": "^8.57.1",
     "eslint-config-expo": "~8.0.1",
+    "expo-dev-client": "~5.2.4",
+    "sharp": "^0.35.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.3.3"
   },
