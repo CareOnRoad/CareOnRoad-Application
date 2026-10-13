@@ -1,9 +1,33 @@
 packages:
   - "."
 
-allowBuilds:
-  dtrace-provider: set this to true or false
-  protobufjs: set this to true or false
-  unrs-resolver: true
-
 nodeLinker: hoisted
+enableGlobalVirtualStore: false
+strictPeerDependencies: true
+autoInstallPeers: true
+verifyDepsBeforeRun: error
+
+allowBuilds:
+  dtrace-provider: false
+  protobufjs: false
+  unrs-resolver: true
+  sharp: true
+
+minimumReleaseAgeExclude:
+  - '@expo/cli@57.0.29'
+  - '@expo/fingerprint@0.20.14'
+  - '@expo/inline-modules@0.1.8'
+  - '@expo/local-build-cache-provider@57.0.9'
+  - '@expo/prebuild-config@57.0.18'
+  - '@expo/ui@57.0.23'
+  - babel-preset-expo@57.0.15
+  - expo-dev-client@57.0.20
+  - expo-dev-launcher@57.0.21
+  - expo-dev-menu@57.0.20
+  - expo-location@57.0.21
+  - expo-modules-autolinking@57.0.15
+  - expo-modules-core@57.0.22
+  - expo-modules-jsi@57.1.2
+  - expo-router@57.0.26
+  - expo-splash-screen@57.0.10
+  - expo@57.0.28

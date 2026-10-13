@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -242,13 +243,15 @@ export function FieldPhotoUploader({
     setBanner(null);
     setBusy(true);
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        setBanner('Cần cấp quyền truy cập thư viện ảnh để tiếp tục.');
-        return;
+      if (Platform.OS !== 'android') {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          setBanner('Cần cấp quyền truy cập thư viện ảnh để tiếp tục.');
+          return;
+        }
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsMultipleSelection: true,
         quality: 0.7,
         selectionLimit: maxCount,
@@ -273,7 +276,7 @@ export function FieldPhotoUploader({
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         quality: 0.7,
         exif: false,
       });

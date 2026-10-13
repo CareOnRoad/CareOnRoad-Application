@@ -5,6 +5,15 @@ App phục vụ cả **Rider** (người dùng) và **Mechanic** (thợ sửa xe
 
 ---
 
+
+## Expo 57 / Android API 36
+
+Bộ hiện tại: Expo 57.0.28, React Native 0.86.3, React 19.2.3; Android min/compile/target là 24/36/36. Mobile có workspace và lockfile pnpm riêng. Android native đã commit, được cập nhật bằng template diff; không chạy clean prebuild.
+
+`pnpm.cmd run check:native-sync` chỉ đọc cấu hình source. Nó không chứng minh APK/AAB đã build, signing hoặc merged manifest đã đúng. Scripts prebuild luôn có `--no-clean`; vẫn cần review diff sau khi chủ động chạy prebuild.
+
+`pnpm.cmd run test:upgrade` kiểm tra permission/picker và các cấu hình release nguy hiểm. Kết quả nâng cấp, các cảnh báo và checklist thiết bị/EAS nằm trong [SDK-UPGRADE-REPORT.md](./SDK-UPGRADE-REPORT.md).
+
 ## Trạng thái hiện tại
 
 | Module | Trạng thái |
@@ -195,31 +204,26 @@ apps/mobile/
 
 ## Build cho nhiều môi trường (EAS)
 
-Mỗi môi trường có profile riêng trong `eas.json`:
+Mỗi môi trường có profile riêng trong `eas.json`. Với Android native đã commit, mọi profile dùng `com.careonroad.app`; tên ứng dụng lấy từ `APP_VARIANT`. Development client có thể thay thế bản production trên cùng thiết bị.
 
-| Profile | API URL | Bundle ID | Mục đích |
-|---------|---------|-----------|----------|
-| `development` | `http://localhost:3000` | `com.careonroad.app.dev` | Dev trên simulator/emulator |
-| `preview` | `http://localhost:3000` | `com.careonroad.app.preview` | Internal test qua EAS build |
-| `staging` | `https://staging-api.careonroad.example` | `com.careonroad.app.staging` | Test với backend staging |
-| `production` | `https://api.careonroad.example` | `com.careonroad.app` | App store / production |
+| Profile | API URL | Android artifact |
+|---------|---------|------------------|
+| `development` | localhost trong `eas.json`; dùng LAN override khi chạy Metro | Development APK |
+| `preview` | localhost trong `eas.json` | Internal APK |
+| `staging` | Giá trị staging trong `eas.json` | Internal APK |
+| `production` | Giá trị production trong `eas.json` | Play AAB |
 
-Build commands (cần `eas-cli`):
+Chạy từ `apps/mobile` (CLI nằm ngoài dependencies ứng dụng):
 
-```bash
-# Dev client (cho simulator/emulator)
-eas build --profile development --platform ios
-eas build --profile development --platform android
-
-# Preview (internal tester, vẫn localhost API)
-eas build --profile preview
-
-# Staging (cho QA)
-eas build --profile staging
-
-# Production (lên store)
-eas build --profile production
+```powershell
+pnpm.cmd install --frozen-lockfile
+pnpm.cmd dlx eas-cli@24.12.0 login
+pnpm.cmd dlx eas-cli@24.12.0 whoami
+pnpm.cmd dlx eas-cli@24.12.0 build --profile development --platform android
+pnpm.cmd dlx eas-cli@24.12.0 build --profile production --platform android
 ```
+
+Các lệnh trên chỉ tạo artifact, không submit lên store. Build cần quyền EAS project và upload signing phù hợp. Kiểm tra certificate, API level và permissions trên artifact trước phát hành.
 
 EAS tự inject các biến `EXPO_PUBLIC_*` từ `eas.json` vào bundle. Khi cần
 thay đổi URL backend cho staging/production, sửa `eas.json` rồi rebuild,

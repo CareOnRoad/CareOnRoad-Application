@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ColorValue } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -30,7 +31,7 @@ const tabIcons: Record<string, LucideIcon> = {
 
 function makeTabBarIcon(iconName: keyof typeof tabIcons) {
   const Icon = tabIcons[iconName];
-  const TabBarIcon = ({ color, size }: { color: string; size: number }) => (
+  const TabBarIcon = ({ color, size }: { color: ColorValue; size: number }) => (
     <Icon color={color} size={size} strokeWidth={2} />
   );
   TabBarIcon.displayName = `TabBarIcon_${iconName}`;

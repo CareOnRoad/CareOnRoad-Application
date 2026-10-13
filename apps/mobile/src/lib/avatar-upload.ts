@@ -15,6 +15,7 @@
  * upload-to-BE mà không phải đổi signature của `pickAndUploadAvatar`.
  */
 import * as ImagePicker from 'expo-image-picker';
+import { Platform } from 'react-native';
 
 export type PickedAvatar = {
   uri: string;
@@ -30,7 +31,7 @@ export type PickedAvatar = {
  *
  * Lưu ý security/permission:
  *  - iOS: cần `NSPhotoLibraryUsageDescription` trong `app.config.ts`.
- *  - Android: cần `READ_MEDIA_IMAGES` permission.
+ *  - Android: system photo picker grants access to selected photos only.
  *  - Helper này KHÔNG tự request permission vì caller (EditProfileSheet)
  *    sẽ check trước và show banner nếu deny.
  */
@@ -39,7 +40,7 @@ export async function pickAvatarFromLibrary(
 ): Promise<PickedAvatar | null> {
   const quality = options.quality ?? 0.85;
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ['images'],
     allowsEditing: false,
     allowsMultipleSelection: false,
     quality,
@@ -77,7 +78,7 @@ export async function captureAvatarFromCamera(
     throw new Error('Cần cấp quyền camera để chụp ảnh.');
   }
   const result = await ImagePicker.launchCameraAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ['images'],
     allowsEditing: false,
     quality,
     exif: false,
@@ -103,9 +104,11 @@ export async function captureAvatarFromCamera(
  * Convenience: xin permission gallery + mở picker. Throw nếu deny.
  */
 export async function pickAvatar(): Promise<PickedAvatar | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) {
-    throw new Error('Cần cấp quyền truy cập thư viện ảnh để tiếp tục.');
+  if (Platform.OS !== 'android') {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      throw new Error('Cần cấp quyền truy cập thư viện ảnh để tiếp tục.');
+    }
   }
   return pickAvatarFromLibrary();
 }

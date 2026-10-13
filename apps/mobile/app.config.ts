@@ -40,13 +40,6 @@ const config: ExpoConfig = {
   // Supabase OAuth redirect về scheme này sau khi user đăng nhập Google.
   scheme: ['careonroad'],
   icon: './assets/logo.png',
-  splash: {
-    image: './assets/logo.png',
-    resizeMode: 'contain',
-    backgroundColor: '#16202f',
-  },
-  assetBundlePatterns: ['**/*'],
-  newArchEnabled: true,
   ios: {
     supportsTablet: false,
     bundleIdentifier: `${BASE_PACKAGE_ID}${settings.bundleSuffix}`,
@@ -79,7 +72,13 @@ const config: ExpoConfig = {
       'ACCESS_FINE_LOCATION',
       'ACCESS_COARSE_LOCATION',
       'POST_NOTIFICATIONS',
-      'READ_MEDIA_IMAGES',
+    ],
+    blockedPermissions: [
+      'android.permission.READ_MEDIA_IMAGES',
+      'android.permission.READ_MEDIA_VIDEO',
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.WRITE_EXTERNAL_STORAGE',
+      'android.permission.RECORD_AUDIO',
     ],
     // Intent filter để Android nhận deep-link scheme careonroad://
     // (vd: careonroad://auth/callback từ Google OAuth redirect).
@@ -101,9 +100,15 @@ const config: ExpoConfig = {
     bundler: 'metro',
     output: 'single',
   },
-  plugins: ['expo-router', 'expo-font'],
+  plugins: [
+    'expo-router',
+    'expo-font',
+    ['expo-image-picker', { microphonePermission: false }],
+    ['expo-splash-screen', { image: './assets/logo.png', resizeMode: 'contain', backgroundColor: '#16202f' }],
+  ],
   experiments: {
     typedRoutes: true,
+    reactCompiler: false,
   },
   // Extra chứa metadata runtime (chỉ là debug info).
   extra: {
