@@ -6,8 +6,8 @@
 
 ## 1. Tổng quan
 
-- **Stack**: Expo SDK 54, React Native 0.81, React 19, Expo Router (file-based),
-  TypeScript 5.x, NativeWind (Tailwind), `lucide-react-native`, Zod (chỉ dùng
+- **Stack**: Expo SDK 57.0.28, React Native 0.86.3, React 19.2.3, Expo Router (file-based),
+  TypeScript 6.0.3, NativeWind (Tailwind), `lucide-react-native`, Zod (chỉ dùng
   ở BE; FE chỉ consume typing), AsyncStorage cho token + session.
 - **App ID / slug**: `com.careonroad.app`, scheme `careonroad://`
 - **Mục tiêu wire**: Production-ready, BE-first, **không** mock fallback khi
@@ -241,6 +241,13 @@ Quét QR bằng Expo Go. Nếu đổi WiFi/máy → chạy lại `pnpm.cmd start
   - `PAYS_*` cho payOS payment
 
 ## 6. Build / verify
+
+- Mobile dùng pnpm workspace riêng; install bằng frozen lockfile.
+- Android native đã commit; nâng bằng template diff, giữ `com.careonroad.app`.
+- Không chạy clean prebuild. Expo 57 mặc định clean; scripts phải giữ `--no-clean`.
+- `check:native-sync` là gate chỉ đọc source, không xác nhận native build.
+- Xem `SDK-UPGRADE-REPORT.md` cho kết quả kiểm chứng và các bước EAS còn lại.
+
 
 ```powershell
 cd apps/mobile

@@ -1,22 +1,28 @@
 {
   "cli": {
-    "version": ">= 14.0.0",
+    "version": ">=24.12.0",
     "appVersionSource": "remote",
     "requireCommit": false
   },
   "build": {
     "base": {
-      "node": "20.18.0",
+      "node": "22.23.1",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://lwgwprxjyemihlkspgjc.supabase.co",
         "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3000"
+      },
+      "pnpm": "11.22.0",
+      "android": {
+        "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-57"
       }
     },
     "development": {
       "extends": "base",
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true },
+      "ios": {
+        "simulator": true
+      },
       "env": {
         "APP_VARIANT": "development",
         "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3000"
@@ -33,7 +39,9 @@
     "demo": {
       "extends": "base",
       "distribution": "internal",
-      "android": { "buildType": "apk" },
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "APP_VARIANT": "production",
         "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
@@ -53,13 +61,20 @@
       "env": {
         "APP_VARIANT": "production",
         "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
+      },
+      "android": {
+        "buildType": "app-bundle"
       }
     }
   },
   "submit": {
     "production": {
-      "android": { "track": "internal" },
-      "ios": { "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_ID" }
+      "android": {
+        "track": "internal"
+      },
+      "ios": {
+        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_ID"
+      }
     }
   }
 }
