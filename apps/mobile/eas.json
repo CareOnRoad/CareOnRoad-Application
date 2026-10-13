@@ -65,6 +65,17 @@
       "android": {
         "buildType": "app-bundle"
       }
+    },
+    "production-apk": {
+      "extends": "base",
+      "autoIncrement": true,
+      "env": {
+        "APP_VARIANT": "production",
+        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
+      },
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
