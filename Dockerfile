@@ -10,11 +10,13 @@ FROM base AS dependencies
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/package.json
+COPY packages/api-contract/package.json ./packages/api-contract/package.json
 RUN npm install --global "$(node --print 'require("./package.json").packageManager')"
 RUN pnpm --filter @careonroad/api... install --frozen-lockfile
 
 FROM dependencies AS builder
 ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone
+COPY packages/api-contract ./packages/api-contract
 COPY apps/api ./apps/api
 RUN pnpm run build:api
 
