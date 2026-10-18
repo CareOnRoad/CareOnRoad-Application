@@ -92,3 +92,50 @@ Khi đó cần thực hiện:
   Phải trả 204 với `Access-Control-Allow-*` headers.
 
 Đến lúc đó mở task mới trong plan và làm theo spec trên.
+## Docker trên server của người triển khai
+
+`compose.yaml` chạy API; thêm `compose.tunnel.yaml` để chạy connector trong
+cùng mạng Compose mặc định. Connector gọi API bằng `http://api:3000` qua tên
+service `api`. `localhost` trong container connector là chính container đó.
+API lắng nghe `0.0.0.0:3000` trong container; cổng trên host chỉ bind
+`127.0.0.1` để kiểm tra tại server, tránh công khai API trực tiếp qua cổng 3000.
+
+Người triển khai cần repo, cấu hình backend `.env.local` tại thư mục gốc,
+và file riêng `.cloudflare/tunnel.env` chứa biến `TUNNEL_TOKEN`. File token
+đã được chuẩn bị trên máy hiện tại từ `.cloudflare/tunnel-token`; chuyển riêng
+cho người quản lý server bằng kênh bảo mật, không commit hay gửi trong log.
+Không cần mật khẩu Cloudflare để chạy connector; người có quyền dashboard
+vẫn cần chỉnh route. Compose chỉ nạp file token vào service `cloudflared`.
+
+1. Đặt các file trên server, cấp quyền đọc file bí mật chỉ cho người triển khai
+   (`chmod 600 .env.local .cloudflare/tunnel.env` trên Linux). Kiểm tra cấu hình
+   bằng `docker compose -f compose.yaml -f compose.tunnel.yaml config --quiet`.
+   Không dùng `config` không có `--quiet` vì nó có thể in các biến bí mật.
+2. Build và chạy API trước:
+
+   ```sh
+   docker compose -f compose.yaml up -d --build api
+   curl --fail http://127.0.0.1:3000/api/v1/internal/health/live
+   ```
+
+3. Khi API server đã sẵn sàng, phối hợp dừng connector Windows cũ trên máy
+   hiện tại. Không giữ hai connector dùng cùng Tunnel nhưng trỏ tới các đích
+   khác nhau: mọi replica nhận cùng cấu hình route từ Cloudflare.
+4. Trong dashboard, chọn Tunnel `careonroad-api`, chỉnh published application
+   cho hostname `careonroad.dpdns.org`: Type `HTTP`, URL `api:3000`.
+5. Chạy connector và kiểm tra kết nối:
+
+   ```sh
+   docker compose -f compose.yaml -f compose.tunnel.yaml up -d
+   docker compose -f compose.yaml -f compose.tunnel.yaml ps
+   curl --fail https://careonroad.dpdns.org/api/v1/internal/health/live
+   ```
+
+   Dashboard cần báo Tunnel `Healthy`; liveness công khai phải trả 200.
+   Kiểm tra readiness và schema theo checklist trước khi phát hành. Compose
+   này không khởi chạy worker; worker thanh toán/reminder/outbox dùng quy trình
+   hiện có, với cùng `INTERNAL_WORKER_SECRET` của API trên server.
+
+Chưa chuyển route sang `api:3000` khi server chưa chạy: connector Windows
+hiện tại dùng `127.0.0.1:3000`. Sau khi chuyển hoàn tất, API không còn phụ
+thuộc máy cá nhân nhưng vẫn phụ thuộc server và Docker trên server đó.
