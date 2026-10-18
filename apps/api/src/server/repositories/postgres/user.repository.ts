@@ -1,6 +1,7 @@
 import type { TransactionSql } from "postgres";
 
 import type { UserRole, UserStatus } from "@/features/auth/auth.types";
+import type { PlanCode } from "@/features/plans/plan";
 
 import type {
   AdminUserActivityPage,
@@ -24,6 +25,8 @@ type UserRow = {
   phone_masked: string | null;
   address: string | null;
   avatar_url: string | null;
+  plan_code: PlanCode;
+  plan_expires_at: Date | null;
   status: UserStatus;
   created_at: Date;
   updated_at: Date;
@@ -57,7 +60,7 @@ export class PostgresUserRepository implements UserRepository {
   async findById(id: string): Promise<ApplicationUser | undefined> {
     const rows = await this.sql<UserRow[]>`
       select id, display_name, phone, phone_masked, address, avatar_url,
-             status, created_at, updated_at
+             plan_code, plan_expires_at, status, created_at, updated_at
       from app_users
       where id = ${id}
       limit 1
@@ -74,6 +77,8 @@ export class PostgresUserRepository implements UserRepository {
         users.phone_masked,
         users.address,
         users.avatar_url,
+        users.plan_code,
+        users.plan_expires_at,
         users.status,
         users.created_at,
         users.updated_at,
@@ -104,7 +109,7 @@ export class PostgresUserRepository implements UserRepository {
       )
       on conflict (id) do update set id = excluded.id
       returning id, display_name, phone, phone_masked, address, avatar_url,
-                status, created_at, updated_at
+                plan_code, plan_expires_at, status, created_at, updated_at
     `;
     return mapUser(rows[0]!);
   }
@@ -125,7 +130,7 @@ export class PostgresUserRepository implements UserRepository {
         updated_at = ${updatedAt}
       where id = ${id}
       returning id, display_name, phone, phone_masked, address, avatar_url,
-                status, created_at, updated_at
+                plan_code, plan_expires_at, status, created_at, updated_at
     `;
     if (!rows[0]) throw new Error("USER_NOT_FOUND");
     const roleRows = await this.sql<{ role: UserRole }[]>`
@@ -167,7 +172,8 @@ export class PostgresUserRepository implements UserRepository {
     const rows = await this.sql<UserRow[]>`
       select
         users.id, users.display_name, users.phone, users.phone_masked,
-        users.address, users.avatar_url, users.status,
+        users.address, users.avatar_url, users.plan_code, users.plan_expires_at,
+        users.status,
         users.created_at, users.updated_at,
         coalesce(
           array_agg(roles.role::text order by roles.role)
@@ -216,7 +222,7 @@ export class PostgresUserRepository implements UserRepository {
   async findActorForUpdate(id: string): Promise<ApplicationActor | undefined> {
     const rows = await this.sql<UserRow[]>`
       select id, display_name, phone, phone_masked, address, avatar_url,
-             status, created_at, updated_at
+             plan_code, plan_expires_at, status, created_at, updated_at
       from app_users
       where id = ${id}
       for update
@@ -238,7 +244,27 @@ export class PostgresUserRepository implements UserRepository {
       set status = ${status}, updated_at = ${updatedAt}
       where id = ${id}
       returning id, display_name, phone, phone_masked, address, avatar_url,
-                status, created_at, updated_at
+                plan_code, plan_expires_at, status, created_at, updated_at
+    `;
+    if (!rows[0]) throw new Error("USER_NOT_FOUND");
+    const roleRows = await this.sql<{ role: UserRole }[]>`
+      select role from user_roles where user_id = ${id} order by role
+    `;
+    return { ...mapUser(rows[0]), roles: roleRows.map((row) => row.role) };
+  }
+
+  async updatePlan(
+    id: string,
+    planCode: PlanCode,
+    planExpiresAt: Date | undefined,
+    updatedAt: Date
+  ): Promise<ApplicationActor> {
+    const rows = await this.sql<UserRow[]>`
+      update app_users
+      set plan_code = ${planCode}, plan_expires_at = ${planExpiresAt ?? null}, updated_at = ${updatedAt}
+      where id = ${id}
+      returning id, display_name, phone, phone_masked, address, avatar_url,
+                plan_code, plan_expires_at, status, created_at, updated_at
     `;
     if (!rows[0]) throw new Error("USER_NOT_FOUND");
     const roleRows = await this.sql<{ role: UserRole }[]>`
@@ -420,6 +446,8 @@ function mapUser(row: UserRow): ApplicationUser {
     phoneMasked: row.phone_masked ?? undefined,
     address: row.address ?? undefined,
     avatarUrl: row.avatar_url ?? undefined,
+    planCode: row.plan_code,
+    planExpiresAt: row.plan_expires_at ?? undefined,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at

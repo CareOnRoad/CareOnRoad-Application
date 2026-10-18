@@ -1,5 +1,8 @@
 import type { TransactionSql } from "postgres";
 
+import type { ReminderItemCode } from "@/features/reminders/reminder-presets";
+import { dateOnly } from "@/lib/vietnam-date";
+
 import type {
   ClaimDueReminderRulesInput,
   CreateReminderOccurrence,
@@ -20,6 +23,8 @@ type ReminderRuleRow = {
   next_due_at: Date;
   snoozed_until: Date | null;
   enabled: boolean;
+  item_code: string | null;
+  last_done_on: Date | string | null;
   last_completed_at: Date | null;
   lease_owner: string | null;
   lease_expires_at: Date | null;
@@ -91,11 +96,12 @@ export class PostgresReminderRepository implements ReminderRepository {
     const rows = await this.sql<ReminderRuleRow[]>`
       insert into reminder_rules (
         id, rider_id, motorcycle_id, title, interval_days, next_due_at,
-        enabled, created_at, updated_at
+        enabled, item_code, last_done_on, created_at, updated_at
       )
       values (
         ${input.id}, ${input.riderId}, ${input.motorcycleId}, ${input.title},
         ${input.intervalDays ?? null}, ${input.nextDueAt}, ${input.enabled},
+        ${input.itemCode ?? null}, ${input.lastDoneOn ?? null}::date,
         ${input.createdAt}, ${input.updatedAt}
       )
       returning *
@@ -122,6 +128,37 @@ export class PostgresReminderRepository implements ReminderRepository {
   async findRuleByIdForUpdate(id: string): Promise<ReminderRule | undefined> {
     const rows = await this.sql<ReminderRuleRow[]>`
       select * from reminder_rules where id = ${id} for update limit 1
+    `;
+    return rows[0] ? mapRule(rows[0]) : undefined;
+  }
+
+  async findRuleByMotorcycleItem(
+    motorcycleId: string,
+    itemCode: ReminderItemCode
+  ): Promise<ReminderRule | undefined> {
+    const rows = await this.sql<ReminderRuleRow[]>`
+      select * from reminder_rules
+      where motorcycle_id = ${motorcycleId} and item_code = ${itemCode}
+      limit 1
+    `;
+    return rows[0] ? mapRule(rows[0]) : undefined;
+  }
+
+  async markRuleDone(input: {
+    id: string;
+    lastDoneOn: string;
+    nextDueAt: Date;
+    updatedAt: Date;
+  }): Promise<ReminderRule | undefined> {
+    const rows = await this.sql<ReminderRuleRow[]>`
+      update reminder_rules
+      set last_done_on = ${input.lastDoneOn}::date,
+          next_due_at = ${input.nextDueAt},
+          snoozed_until = null,
+          enabled = true,
+          updated_at = ${input.updatedAt}
+      where id = ${input.id}
+      returning *
     `;
     return rows[0] ? mapRule(rows[0]) : undefined;
   }
@@ -300,6 +337,9 @@ function mapRule(row: ReminderRuleRow): ReminderRule {
     nextDueAt: row.next_due_at,
     snoozedUntil: row.snoozed_until ?? undefined,
     enabled: row.enabled,
+    // The DB check constraint limits item_code to the catalog codes.
+    itemCode: (row.item_code as ReminderItemCode | null) ?? undefined,
+    lastDoneOn: row.last_done_on ? dateOnly(row.last_done_on) : undefined,
     lastCompletedAt: row.last_completed_at ?? undefined,
     leaseOwner: row.lease_owner ?? undefined,
     leaseExpiresAt: row.lease_expires_at ?? undefined,

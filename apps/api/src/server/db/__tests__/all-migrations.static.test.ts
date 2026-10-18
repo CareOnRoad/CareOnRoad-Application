@@ -38,7 +38,6 @@ const expectedMigrations = [
   "202606250031_data_retention_worker.sql",
   "202606250032_live_location_tracking.sql",
   "202606250033_rescue_quote_payment_workflow.sql",
-  "202606250033_user_profile_extended.sql",
   "202606250034_maintenance_quote_payment_workflow.sql",
   "202606250035_maintenance_reservations_notification_leases.sql",
   "202606250036_historical_mechanic_ratings.sql",
@@ -51,7 +50,9 @@ const expectedMigrations = [
   "202606250043_admin_delivery_operations.sql",
   "202606250044_admin_reminder_dashboard.sql",
   "202606250045_admin_dispatch_configuration.sql",
-  "202606250046_dispatch_radius_policy_bounds.sql"
+  "202606250046_dispatch_radius_policy_bounds.sql",
+  "202606250047_user_profile_extended.sql",
+  "202606250048_maintenance_presets_and_plans.sql"
 ] as const;
 
 const migrationSql = expectedMigrations
@@ -138,6 +139,11 @@ describe("complete migration set", () => {
     expect(migrationSql).toContain(
       "alter type assignment_status add value if not exists 'recovery_canceled'"
     );
+    expect(migrationSql).toContain("plan_code in ('free', 'advance', 'vip')");
+    expect(migrationSql).toContain(
+      "item_code in ('engine_oil', 'gear_oil', 'brake_fluid', 'coolant', 'insurance_renewal')"
+    );
+    expect(migrationSql).toContain("create unique index reminder_rules_motorcycle_item_uidx");
   });
 
   it("retains required uniqueness, consistency, pagination, and cleanup indexes", () => {

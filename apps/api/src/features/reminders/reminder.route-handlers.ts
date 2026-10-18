@@ -35,6 +35,19 @@ export type ReminderRouteDependencies = {
       identity: VerifiedSupabaseIdentity,
       reminderId: string
     ): Promise<ReminderRuleResponse>;
+    listReminderPresets(
+      identity: VerifiedSupabaseIdentity
+    ): ReturnType<ReminderService["listReminderPresets"]>;
+    applyReminderPresets(
+      identity: VerifiedSupabaseIdentity,
+      motorcycleId: string,
+      input: unknown
+    ): ReturnType<ReminderService["applyReminderPresets"]>;
+    markReminderDone(
+      identity: VerifiedSupabaseIdentity,
+      reminderId: string,
+      input: unknown
+    ): Promise<ReminderRuleResponse>;
   };
   createWorker(authority: WorkerAuthority): {
     processDueReminders(): Promise<ReminderWorkerResult>;
@@ -84,6 +97,45 @@ export function createReminderRouteHandlers(dependencies: ReminderRouteDependenc
         const identity = await dependencies.authenticate(request);
         return NextResponse.json(
           await dependencies.reminderService.snoozeReminderRule(
+            identity,
+            reminderId,
+            await readJson(request)
+          )
+        );
+      } catch (error) {
+        return routeError(error);
+      }
+    },
+
+    async listReminderPresets(request: Request) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        return NextResponse.json(await dependencies.reminderService.listReminderPresets(identity));
+      } catch (error) {
+        return routeError(error);
+      }
+    },
+
+    async applyReminderPresets(request: Request, motorcycleId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        return NextResponse.json(
+          await dependencies.reminderService.applyReminderPresets(
+            identity,
+            motorcycleId,
+            await readJson(request)
+          )
+        );
+      } catch (error) {
+        return routeError(error);
+      }
+    },
+
+    async markReminderDone(request: Request, reminderId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        return NextResponse.json(
+          await dependencies.reminderService.markReminderDone(
             identity,
             reminderId,
             await readJson(request)

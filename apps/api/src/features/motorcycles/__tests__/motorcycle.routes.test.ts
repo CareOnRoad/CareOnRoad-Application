@@ -96,6 +96,38 @@ describe("motorcycle routes", () => {
     expect(archived.status).toBe(204);
   });
 
+  it("routes PATCH details with the id and body, and maps a missing plan to 403 with details", async () => {
+    const free = createHandlers(createMotorcycleUnitOfWork({ withMotorcycle: true }));
+    const denied = await free.updateMotorcycleDetails(
+      request("PATCH", `/api/v1/motorcycles/${motorcycleId}/details`, { color: "Đỏ" }, "rider"),
+      motorcycleId
+    );
+    expect(denied.status).toBe(403);
+    await expect(denied.json()).resolves.toMatchObject({
+      error_code: "FORBIDDEN",
+      details: { reason: "plan_required", required_plan: "vip" }
+    });
+
+    const vip = createHandlers(createMotorcycleUnitOfWork({ withMotorcycle: true, vip: true }));
+    const ok = await vip.updateMotorcycleDetails(
+      request("PATCH", `/api/v1/motorcycles/${motorcycleId}/details`, { frame_number: "RLHJF1234" }, "rider"),
+      motorcycleId
+    );
+    expect(ok.status).toBe(200);
+    await expect(ok.json()).resolves.toMatchObject({ id: motorcycleId, details: { frame_number: "RLHJF1234" } });
+
+    const invalid = await vip.updateMotorcycleDetails(
+      request("PATCH", `/api/v1/motorcycles/${motorcycleId}/details`, {}, "rider"),
+      motorcycleId
+    );
+    expect(invalid.status).toBe(400);
+    const unauthenticated = await vip.updateMotorcycleDetails(
+      request("PATCH", `/api/v1/motorcycles/${motorcycleId}/details`, { color: null }),
+      motorcycleId
+    );
+    expect(unauthenticated.status).toBe(401);
+  });
+
   it("does not require X-Idempotency-Key for motorcycle mutations", async () => {
     const handlers = createHandlers(createMotorcycleUnitOfWork());
     const response = await handlers.createMotorcycle(
@@ -130,14 +162,28 @@ function createHandlers(unitOfWork: InMemoryUnitOfWork) {
   });
 }
 
-function createMotorcycleUnitOfWork() {
+function createMotorcycleUnitOfWork(options: { withMotorcycle?: boolean; vip?: boolean } = {}) {
   return new InMemoryUnitOfWork({
-    users: [activeUser(riderId), activeUser(otherRiderId), activeUser(mechanicId)],
+    users: [
+      {
+        ...activeUser(riderId),
+        ...(options.vip ? { planCode: "vip" as const, planExpiresAt: new Date("2027-01-01T00:00:00Z") } : {})
+      },
+      activeUser(otherRiderId),
+      activeUser(mechanicId)
+    ],
     userRoles: [
       { userId: riderId, role: "rider" },
       { userId: otherRiderId, role: "rider" },
       { userId: mechanicId, role: "mechanic" }
-    ]
+    ],
+    ...(options.withMotorcycle
+      ? {
+          motorcycles: [
+            { id: motorcycleId, riderId, brandText: "Honda", modelText: "Wave", createdAt: now, updatedAt: now }
+          ]
+        }
+      : {})
   });
 }
 

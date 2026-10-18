@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ApiErrorCode } from "@/lib/api-error";
+import { nextPlanExpiry, type PlanCode } from "@/features/plans/plan";
 import { prepareIdempotency } from "@/lib/idempotency";
 import type { VerifiedSupabaseIdentity, UserRole, UserStatus } from "@/features/auth/auth.types";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
@@ -17,6 +18,7 @@ import { loadActiveAdminActor } from "./admin.authorization";
 import {
   adminPaginationSchema,
   adminDateRangeSchema,
+  adminPlanChangeSchema,
   adminReasonSchema,
   adminRoleMutationSchema,
   adminUserListFilterSchema,
@@ -31,6 +33,8 @@ export type AdminUserSummaryResponse = {
   phone_masked?: string;
   status: UserStatus;
   roles: UserRole[];
+  plan_code: PlanCode;
+  plan_expires_at?: string;
   device_summary: {
     total: number;
     enabled: number;
@@ -269,6 +273,73 @@ export class AdminUserManagementService {
         idempotencyKey,
         response,
         "user_device",
+        id,
+        now
+      );
+      return response;
+    });
+  }
+
+  async changeUserPlan(
+    identity: VerifiedSupabaseIdentity,
+    userId: string,
+    input: unknown,
+    idempotencyKey: string
+  ): Promise<AdminUserSummaryResponse> {
+    const id = parseUuid(userId, "User identifier is invalid.");
+    const parsed = adminPlanChangeSchema.safeParse(input);
+    if (!parsed.success) throw invalid("Plan change input is invalid.");
+    const { plan_code: plan, duration, reason } = parsed.data;
+    const scope = "admin.user.plan";
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveAdminActor(identity, repositories.users);
+      const now = this.now();
+      const replay = await this.prepareCommand(
+        repositories,
+        actor.id,
+        scope,
+        idempotencyKey,
+        { user_id: id, plan_code: plan, duration, reason },
+        now
+      );
+      if (replay) return replay as AdminUserSummaryResponse;
+
+      const target = await repositories.users.findActorForUpdate(id);
+      if (!target) throw notFound("User not found.");
+      if (!target.roles.includes("rider") || target.status !== "active") {
+        throw conflict("Plans can only be changed for active riders.");
+      }
+      const expires =
+        plan === "free" || !duration
+          ? undefined
+          : nextPlanExpiry(target, plan, duration, now);
+      const updated = await repositories.users.updatePlan(id, plan, expires, now);
+      const response = toUserResponse(
+        updated,
+        await repositories.users.deviceSummary(id)
+      );
+      await this.recordMutation(repositories, {
+        actorId: actor.id,
+        action: "admin.user.plan_changed",
+        entityType: "app_user",
+        entityId: id,
+        userId: id,
+        reason,
+        metadata: {
+          user_id: id,
+          previous_plan_code: target.planCode ?? "free",
+          plan_code: plan,
+          plan_expires_at: expires?.toISOString() ?? null
+        },
+        now
+      });
+      await completeCommand(
+        repositories,
+        actor.id,
+        scope,
+        idempotencyKey,
+        response,
+        "app_user",
         id,
         now
       );
@@ -617,6 +688,8 @@ function toUserResponse(
     ...(user.phoneMasked ? { phone_masked: user.phoneMasked } : {}),
     status: user.status,
     roles: [...user.roles].sort(),
+    plan_code: user.planCode ?? "free",
+    ...(user.planExpiresAt ? { plan_expires_at: user.planExpiresAt.toISOString() } : {}),
     device_summary: devices,
     created_at: user.createdAt.toISOString(),
     updated_at: user.updatedAt.toISOString()
@@ -645,7 +718,10 @@ function toActivityResponse(activity: AdminUserActivity): AdminUserActivityRespo
     "previous_status",
     "new_status",
     "enabled",
-    "outcome"
+    "outcome",
+    "plan_code",
+    "previous_plan_code",
+    "plan_expires_at"
   ];
   return {
     id: activity.id,

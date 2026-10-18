@@ -4,6 +4,8 @@ import { z } from "zod";
 // `packages/api-contract/src/enums.ts` and its enum-parity test.
 import { serviceTypes } from "@careonroad/api-contract/enums";
 
+import { isIsoDate } from "@/lib/vietnam-date";
+
 export { serviceTypes } from "@careonroad/api-contract/enums";
 export type { ServiceType } from "@careonroad/api-contract/enums";
 
@@ -16,6 +18,28 @@ export const motorcycleInputSchema = z
     notes: z.string().trim().min(1).max(1000).optional()
   })
   .strict();
+
+const detailText = (max: number) => z.string().trim().min(1).max(max).nullable().optional();
+const detailDate = z.string().refine(isIsoDate, "Date must be a real YYYY-MM-DD date.").nullable().optional();
+
+// Partial update: omitted keeps the stored value, null clears it.
+export const motorcycleDetailsPatchSchema = z
+  .object({
+    color: detailText(50),
+    frame_number: detailText(50),
+    engine_number: detailText(50),
+    purchase_date: detailDate,
+    purchase_price_vnd: z.number().int().min(0).max(999_999_999_999).nullable().optional(),
+    insurance_provider: detailText(100),
+    insurance_policy_number: detailText(100),
+    insurance_expires_on: detailDate,
+    warranty_expires_on: detailDate,
+    preferred_service_center: detailText(200)
+  })
+  .strict()
+  .refine((value) => Object.values(value).some((entry) => entry !== undefined), {
+    message: "At least one detail field is required."
+  });
 
 export const mechanicProfileUpdateSchema = z
   .object({
@@ -41,6 +65,7 @@ export const geoPointSchema = z
   .strict();
 
 export type MotorcycleInput = z.infer<typeof motorcycleInputSchema>;
+export type MotorcycleDetailsPatchInput = z.infer<typeof motorcycleDetailsPatchSchema>;
 export type MechanicProfileUpdateInput = z.infer<typeof mechanicProfileUpdateSchema>;
 export type MechanicAvailabilityInput = z.infer<typeof mechanicAvailabilitySchema>;
 export type GeoPointInput = z.infer<typeof geoPointSchema>;

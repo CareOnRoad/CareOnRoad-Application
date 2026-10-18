@@ -101,7 +101,9 @@ describeDatabase("complete migration lifecycle", () => {
   "202606250043_admin_delivery_operations.sql",
   "202606250044_admin_reminder_dashboard.sql",
   "202606250045_admin_dispatch_configuration.sql",
-  "202606250046_dispatch_radius_policy_bounds.sql"
+  "202606250046_dispatch_radius_policy_bounds.sql",
+  "202606250047_user_profile_extended.sql",
+  "202606250048_maintenance_presets_and_plans.sql"
       ]);
 
       const tables = await applicationTables(context.sql, context.schema);

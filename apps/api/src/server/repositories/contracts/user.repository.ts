@@ -1,4 +1,5 @@
 import type { UserRole, UserStatus } from "@/features/auth/auth.types";
+import type { PlanCode } from "@/features/plans/plan";
 import type { JsonObject } from "./idempotency.repository";
 
 export type ApplicationUser = {
@@ -8,6 +9,8 @@ export type ApplicationUser = {
   phoneMasked?: string;
   address?: string;
   avatarUrl?: string;
+  planCode?: PlanCode;
+  planExpiresAt?: Date;
   status: UserStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -127,6 +130,12 @@ export interface UserRepository {
   findActorForUpdate(id: string): Promise<ApplicationActor | undefined>;
   updateDisplayName(id: string, displayName: string, updatedAt: Date): Promise<ApplicationActor>;
   updateStatus(id: string, status: UserStatus, updatedAt: Date): Promise<ApplicationActor>;
+  updatePlan(
+    id: string,
+    planCode: PlanCode,
+    planExpiresAt: Date | undefined,
+    updatedAt: Date,
+  ): Promise<ApplicationActor>;
   listDevicesForAdmin(input: {
     userId: string;
     limit: number;

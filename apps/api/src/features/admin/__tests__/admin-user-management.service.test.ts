@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { UserRole } from "@/features/auth/auth.types";
+import { deliverOutboxEvent } from "@/features/outbox/outbox-consumers";
 import {
   type InMemoryFoundationState,
   InMemoryUnitOfWork
@@ -10,6 +12,8 @@ import { adminIdentity, ADMIN_USER_ID, RIDER_USER_ID } from "./admin-route-test-
 
 const SECOND_ADMIN_ID = "33333333-3333-4333-8333-333333333333";
 const DEVICE_ID = "44444444-4444-4444-8444-444444444444";
+const MECHANIC_USER_ID = "99999999-9999-4999-8999-999999999999";
+const DAY_MS = 24 * 60 * 60 * 1000;
 const now = new Date("2026-07-06T01:00:00.000Z");
 
 describe("AdminUserManagementService", () => {
@@ -138,6 +142,176 @@ describe("AdminUserManagementService", () => {
     expect(JSON.stringify(activity)).not.toContain("device-secret");
   });
 
+  describe("changeUserPlan", () => {
+    const reason = "Customer paid for the plan offline";
+
+    it("grants, extends, and removes a rider plan with one audit per change", async () => {
+      const unitOfWork = createState();
+      const service = createService(unitOfWork);
+
+      const granted = await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        { plan_code: "advance", duration: "month", reason },
+        "plan-key-1"
+      );
+      expect(granted).toMatchObject({
+        id: RIDER_USER_ID,
+        plan_code: "advance",
+        plan_expires_at: new Date(now.getTime() + 30 * DAY_MS).toISOString()
+      });
+      // The emitted outbox topic must be deliverable, or the worker dead-letters it.
+      const [outboxEvent] = unitOfWork.snapshot().outboxEvents;
+      expect(outboxEvent?.topic).toBe("admin.user.plan_changed");
+      await expect(deliverOutboxEvent(outboxEvent!)).resolves.toBeUndefined();
+      const audits = unitOfWork.snapshot().auditLogs;
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: "admin.user.plan_changed",
+        metadata: expect.objectContaining({
+          previous_plan_code: "free",
+          plan_code: "advance"
+        })
+      });
+
+      const extended = await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        { plan_code: "advance", duration: "month", reason },
+        "plan-key-2"
+      );
+      expect(extended.plan_expires_at).toBe(
+        new Date(now.getTime() + 60 * DAY_MS).toISOString()
+      );
+
+      const vip = await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        { plan_code: "vip", duration: "year", reason },
+        "plan-key-3"
+      );
+      expect(vip).toMatchObject({
+        plan_code: "vip",
+        plan_expires_at: new Date(now.getTime() + 365 * DAY_MS).toISOString()
+      });
+
+      const removed = await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        { plan_code: "free", reason },
+        "plan-key-4"
+      );
+      expect(removed.plan_code).toBe("free");
+      expect(removed).not.toHaveProperty("plan_expires_at");
+    });
+
+    it("shows plan code, previous plan and expiry in the user activity read model", async () => {
+      const unitOfWork = createState();
+      const service = createService(unitOfWork);
+
+      await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        { plan_code: "advance", duration: "month", reason },
+        "plan-activity-key"
+      );
+      const activity = await service.listActivity(adminIdentity, RIDER_USER_ID, {
+        limit: "10"
+      });
+      const change = activity.items.find((item) => item.action === "admin.user.plan_changed");
+      expect(change?.metadata).toEqual({
+        user_id: RIDER_USER_ID,
+        previous_plan_code: "free",
+        plan_code: "advance",
+        plan_expires_at: new Date(now.getTime() + 30 * DAY_MS).toISOString()
+      });
+    });
+
+    it("replays the same key and body without a second audit", async () => {
+      const unitOfWork = createState();
+      const service = createService(unitOfWork);
+      const body = { plan_code: "vip", duration: "month", reason };
+
+      const first = await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        body,
+        "plan-replay-key"
+      );
+      const replayed = await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        body,
+        "plan-replay-key"
+      );
+      expect(replayed).toEqual(first);
+      expect(unitOfWork.snapshot().auditLogs).toHaveLength(1);
+    });
+
+    it("rejects the same key with a different body and writes no second audit", async () => {
+      const unitOfWork = createState();
+      const service = createService(unitOfWork);
+
+      await service.changeUserPlan(
+        adminIdentity,
+        RIDER_USER_ID,
+        { plan_code: "advance", duration: "month", reason },
+        "plan-conflict-key"
+      );
+      await expect(
+        service.changeUserPlan(
+          adminIdentity,
+          RIDER_USER_ID,
+          { plan_code: "vip", duration: "year", reason },
+          "plan-conflict-key"
+        )
+      ).rejects.toMatchObject({ errorCode: "CONFLICT", status: 409 });
+      expect(unitOfWork.snapshot().auditLogs).toHaveLength(1);
+    });
+
+    it("rejects a suspended rider and leaves the plan unchanged", async () => {
+      const unitOfWork = createState({ riderStatus: "suspended" });
+      const service = createService(unitOfWork);
+
+      await expect(
+        service.changeUserPlan(
+          adminIdentity,
+          RIDER_USER_ID,
+          { plan_code: "advance", duration: "month", reason },
+          "plan-suspended-key"
+        )
+      ).rejects.toMatchObject({ errorCode: "CONFLICT", status: 409 });
+      const rider = unitOfWork.snapshot().users.find((user) => user.id === RIDER_USER_ID);
+      expect(rider?.planCode).toBeUndefined();
+      expect(rider?.planExpiresAt).toBeUndefined();
+      expect(unitOfWork.snapshot().auditLogs).toHaveLength(0);
+    });
+
+    it("rejects non-rider targets and invalid bodies", async () => {
+      const unitOfWork = createState({ includeMechanic: true });
+      const service = createService(unitOfWork);
+
+      await expect(
+        service.changeUserPlan(
+          adminIdentity,
+          MECHANIC_USER_ID,
+          { plan_code: "advance", duration: "month", reason },
+          "plan-mechanic-key"
+        )
+      ).rejects.toMatchObject({ errorCode: "CONFLICT", status: 409 });
+      for (const [index, body] of [
+        { plan_code: "advance", reason },
+        { plan_code: "free", duration: "month", reason },
+        { plan_code: "advance", duration: "month" }
+      ].entries()) {
+        await expect(
+          service.changeUserPlan(adminIdentity, RIDER_USER_ID, body, `plan-bad-${index}`)
+        ).rejects.toMatchObject({ errorCode: "INVALID_INPUT", status: 400 });
+      }
+      expect(unitOfWork.snapshot().auditLogs).toHaveLength(0);
+    });
+  });
+
   it("protects the last active administrator", async () => {
     const unitOfWork = createState({ includeSecondAdmin: false });
     const service = createService(unitOfWork);
@@ -220,6 +394,8 @@ function createService(unitOfWork: InMemoryUnitOfWork) {
 function createState(
   options: {
     includeSecondAdmin?: boolean;
+    includeMechanic?: boolean;
+    riderStatus?: "active" | "suspended";
     outboxEvents?: InMemoryFoundationState["outboxEvents"];
   } = {}
 ) {
@@ -235,14 +411,14 @@ function createState(
       id: RIDER_USER_ID,
       displayName: "Rider",
       phoneMasked: "***1234",
-      status: "active" as const,
+      status: options.riderStatus ?? ("active" as const),
       createdAt: new Date("2026-07-02T00:00:00Z"),
       updatedAt: new Date("2026-07-04T00:00:00Z")
     }
   ];
-  const userRoles = [
-    { userId: ADMIN_USER_ID, role: "admin" as const },
-    { userId: RIDER_USER_ID, role: "rider" as const }
+  const userRoles: { userId: string; role: UserRole }[] = [
+    { userId: ADMIN_USER_ID, role: "admin" },
+    { userId: RIDER_USER_ID, role: "rider" }
   ];
   if (options.includeSecondAdmin !== false) {
     users.push({
@@ -253,6 +429,16 @@ function createState(
       updatedAt: new Date("2026-07-03T00:00:00Z")
     });
     userRoles.push({ userId: SECOND_ADMIN_ID, role: "admin" });
+  }
+  if (options.includeMechanic) {
+    users.push({
+      id: MECHANIC_USER_ID,
+      displayName: "Mechanic",
+      status: "active",
+      createdAt: new Date("2026-07-03T00:00:00Z"),
+      updatedAt: new Date("2026-07-03T00:00:00Z")
+    });
+    userRoles.push({ userId: MECHANIC_USER_ID, role: "mechanic" });
   }
   return new InMemoryUnitOfWork({
     users,

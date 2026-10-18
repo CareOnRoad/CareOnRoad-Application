@@ -47,6 +47,12 @@ export type AdminUserRouteDependencies = {
       input: unknown,
       idempotencyKey: string
     ): Promise<AdminUserSummaryResponse>;
+    changeUserPlan(
+      identity: VerifiedSupabaseIdentity,
+      userId: string,
+      input: unknown,
+      idempotencyKey: string
+    ): Promise<AdminUserSummaryResponse>;
     listDevices(
       identity: VerifiedSupabaseIdentity,
       userId: string,
@@ -101,6 +107,10 @@ export function createAdminUserRouteHandlers(
     archiveUser: (request: Request, userId: string) =>
       mutationOperation(request, (identity, body, key) =>
         dependencies.service.archiveUser(identity, userId, body, key)
+      ),
+    changeUserPlan: (request: Request, userId: string) =>
+      mutationOperation(request, (identity, body, key) =>
+        dependencies.service.changeUserPlan(identity, userId, body, key)
       ),
     listDevices: (request: Request, userId: string) =>
       readOperation(request, (identity) =>

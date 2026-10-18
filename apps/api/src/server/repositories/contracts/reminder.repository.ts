@@ -1,3 +1,4 @@
+import type { ReminderItemCode } from "@/features/reminders/reminder-presets";
 import type { ListFilter } from "@/lib/list-pagination";
 export type ReminderAdminFilter = ListFilter & { riderId?: string; enabled?: boolean; ruleId?: string; status?: ReminderOccurrenceStatus };
 export type ReminderOccurrenceStatus = "due" | "queued" | "sent" | "dismissed" | "failed";
@@ -11,6 +12,9 @@ export type ReminderRule = {
   nextDueAt: Date;
   snoozedUntil?: Date;
   enabled: boolean;
+  itemCode?: ReminderItemCode;
+  /** `YYYY-MM-DD` */
+  lastDoneOn?: string;
   lastCompletedAt?: Date;
   leaseOwner?: string;
   leaseExpiresAt?: Date;
@@ -71,6 +75,17 @@ export interface ReminderRepository {
   listRulesByRider(riderId: string): Promise<ReminderRule[]>;
   findRuleById(id: string): Promise<ReminderRule | undefined>;
   findRuleByIdForUpdate(id: string): Promise<ReminderRule | undefined>;
+  findRuleByMotorcycleItem(
+    motorcycleId: string,
+    itemCode: ReminderItemCode
+  ): Promise<ReminderRule | undefined>;
+  /** Sets last_done_on and next_due_at, clears the snooze and re-enables the rule. */
+  markRuleDone(input: {
+    id: string;
+    lastDoneOn: string;
+    nextDueAt: Date;
+    updatedAt: Date;
+  }): Promise<ReminderRule | undefined>;
   updateRule(input: UpdateReminderRule): Promise<ReminderRule | undefined>;
   snoozeRule(input: { id: string; snoozedUntil: Date; updatedAt: Date }): Promise<ReminderRule | undefined>;
   disableRule(input: { id: string; updatedAt: Date }): Promise<ReminderRule | undefined>;

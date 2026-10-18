@@ -151,6 +151,16 @@
   routes can persist rider/mechanic profile edits end-to-end.
   `202606250035_maintenance_reservations_notification_leases.sql` must be applied and verified on
   hosted/dev before enabling the corresponding APIs or seeding mock data.
+- Rider plans (`free`/`advance`/`vip`), maintenance reminder presets, and VIP
+  motorcycle details are implemented through migration
+  `202606250048_maintenance_presets_and_plans.sql`; 047 and 048 must be applied
+  and verified on hosted/dev before deploy (readiness requires 048). The effective
+  plan is computed at read time (no worker); an expired or downgraded plan never
+  hides or deletes data. Expiry/downgrade only blocks applying presets, marking
+  done and writing non-null VIP values; clearing VIP values with `null` and
+  patch/snooze/disable of existing reminders stay allowed, and existing reminders
+  keep firing. Admins grant plans manually; there is no plan payment. See
+  `apps/api/VEHICLE-MAINTENANCE-PLANS-DESIGN.md`.
 - Run `pnpm.cmd run preflight:schema` before release. This read-only gate checks
   source migration history and runtime schema objects; readiness also rejects
   missing schema. See `apps/api/SCHEMA-RELEASE-CHECKLIST.md` for test isolation and
@@ -202,11 +212,23 @@
   - `PATCH /auth/profile` updates editable profile fields on the authenticated
     actor; `phone` is also masked and stored in `phone_masked` for admin search.
   - `GET /auth/me` returns `id`, `display_name`, optional `phone`, `address`,
-    `avatar_url`, `roles`, `status`.
+    `avatar_url`, `roles`, `status`, `plan_code` (effective plan), and
+    `plan_expires_at` (stored value, only when set).
 - `GET/POST /api/v1/motorcycles`
   - Rider-owned motorcycle list/create. Motorcycle mutations do not require `X-Idempotency-Key`.
 - `GET/PATCH/DELETE /api/v1/motorcycles/[motorcycleId]`
-  - Rider-owned motorcycle read/update/archive.
+  - Rider-owned motorcycle read/update/archive. The basic PATCH never touches VIP details.
+- `PATCH /api/v1/motorcycles/[motorcycleId]/details`
+  - Rider-owned partial update of VIP details (color, frame/engine number, purchase,
+    insurance, warranty, preferred service center): omitted keeps, `null` clears
+    (always allowed), a value requires the VIP plan (403 otherwise). Values never
+    appear in audit/outbox, only column names. Like the basic PATCH, the response
+    omits `last_maintenance_at`/`next_maintenance_at`; clients should not replace
+    cached maintenance dates from it.
+- `POST /api/v1/motorcycles/[motorcycleId]/reminder-presets`
+  - Rider enables 1-5 catalog items for a motorcycle with `usage_level` and optional
+    `last_done_on`; needs the highest plan among the items. Existing items are kept
+    (`created: false`); new reminders fire at 09:00 Vietnam time.
 - `GET/PATCH /api/v1/mechanics/me/profile`
   - Mechanic profile settings with backend-owned profile status and read-only rating aggregates.
 - `PUT /api/v1/mechanics/me/availability`
@@ -257,6 +279,13 @@
   - Immutable quote versions and latest-pending rider quote decisions.
 - `GET/POST /api/v1/reminders`, `PATCH /api/v1/reminders/[reminderId]`, `POST /api/v1/reminders/[reminderId]/snooze`
   - Rider-owned date/time-based reminder rule list/create/update/snooze/disable.
+- `GET /api/v1/reminder-presets`
+  - Backend-owned preset catalog (`engine_oil`, `gear_oil`, `brake_fluid`, `coolant`
+    need `advance`; `insurance_renewal` needs `vip`) with per-`usage_level` intervals.
+- `POST /api/v1/reminders/[reminderId]/done`
+  - Rider marks a preset reminder done (`done_on`) and the next due date is recomputed.
+    Needs the preset's plan; another rider's reminder or motorcycle returns 403
+    (existing ownership behavior), not 404.
 - `POST /api/v1/payments/orders`, `GET /api/v1/payments/orders/[paymentOrderId]`, `POST /api/v1/payments/orders/[paymentOrderId]/cancel`
   - Rider-owned payOS/VietQR payment order creation/read/cancel for approved
     quotes awaiting payment. Creation requires `X-Idempotency-Key`.
@@ -270,6 +299,12 @@
   - Admin-only backend user list/detail/status, role grant/revoke, device list,
     device revoke, and activity read models. Mutations require
     `X-Idempotency-Key` and reason metadata.
+- `POST /api/v1/admin/users/[userId]/plan`
+  - Admin grants or extends a rider plan (`plan_code` is `free|advance|vip`; `duration`
+    month=30 / year=365 days is required for paid plans and forbidden for `free`,
+    which revokes the plan; plus `reason`); the same active plan extends from its
+    current expiry. Returns 409 if the target is not an active rider. Requires
+    `X-Idempotency-Key`; no payment involved.
 - `/api/v1/admin/mechanics/**`
   - Admin-only backend mechanic list/detail, approve/reject/suspend/ban/reactivate,
     skills, service radius, force-unavailable, work-history, and performance.
@@ -390,6 +425,10 @@
     payment prerequisite.
 - `src/features/reminders/*`
   - Date/time-based reminder rule workflows, snooze/disable/recurrence, and reminder-originated periodic-maintenance request integration.
+  - `reminder-presets.ts` holds the preset catalog constant and the next-due formula.
+- `src/features/plans/plan.ts`
+  - `PlanCode`, plan rank, `effectivePlan`, and `hasPlan`; services throw their own
+    403 `FORBIDDEN` with `details.reason: "plan_required"` and `details.required_plan`.
 - `src/features/notifications/*`, `src/features/outbox/*`
   - Persistent notification inbox, FCM HTTP v1 delivery receipts, deduplicated
     outbox consumption, and protected worker-route orchestration.

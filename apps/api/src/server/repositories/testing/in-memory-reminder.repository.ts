@@ -1,3 +1,4 @@
+import type { ReminderItemCode } from "@/features/reminders/reminder-presets";
 import { filterPage } from "@/lib/list-pagination";
 import type {
   ClaimDueReminderRulesInput,
@@ -64,6 +65,34 @@ export class InMemoryReminderRepository implements ReminderRepository {
 
   async findRuleByIdForUpdate(id: string): Promise<ReminderRule | undefined> {
     return this.findRuleById(id);
+  }
+
+  async findRuleByMotorcycleItem(
+    motorcycleId: string,
+    itemCode: ReminderItemCode
+  ): Promise<ReminderRule | undefined> {
+    const rule = this.rules.find(
+      (candidate) => candidate.motorcycleId === motorcycleId && candidate.itemCode === itemCode
+    );
+    return rule ? cloneRule(rule) : undefined;
+  }
+
+  async markRuleDone(input: {
+    id: string;
+    lastDoneOn: string;
+    nextDueAt: Date;
+    updatedAt: Date;
+  }): Promise<ReminderRule | undefined> {
+    const rule = this.rules.find((candidate) => candidate.id === input.id);
+    if (!rule) {
+      return undefined;
+    }
+    rule.lastDoneOn = input.lastDoneOn;
+    rule.nextDueAt = input.nextDueAt;
+    rule.snoozedUntil = undefined;
+    rule.enabled = true;
+    rule.updatedAt = input.updatedAt;
+    return cloneRule(rule);
   }
 
   async updateRule(input: UpdateReminderRule): Promise<ReminderRule | undefined> {

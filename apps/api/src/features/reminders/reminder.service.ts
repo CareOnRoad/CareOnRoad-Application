@@ -3,11 +3,26 @@ import { randomUUID } from "node:crypto";
 import type { ApiErrorCode } from "@/lib/api-error";
 import { requireActorRole } from "@/features/auth/authorization";
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
+import { hasPlan, planRequiredDetails } from "@/features/plans/plan";
+import { isPastOrTodayVietnam } from "@/lib/vietnam-date";
 import type { Motorcycle } from "@/server/repositories/contracts/motorcycle.repository";
 import type { ReminderRule } from "@/server/repositories/contracts/reminder.repository";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
+import type { ApplicationActor } from "@/server/repositories/contracts/user.repository";
 
 import {
+  MAX_DONE_AGE_DAYS,
+  UNKNOWN_LAST_DONE_DUE_DAYS,
+  computeNextDueAt,
+  findPreset,
+  intervalDaysFor,
+  reminderPresets,
+  toPresetResponse,
+  type ReminderItemCode
+} from "./reminder-presets";
+import {
+  reminderDoneSchema,
+  reminderPresetApplySchema,
   reminderRuleInputSchema,
   reminderSnoozeInputSchema,
   type ReminderRuleInput
@@ -22,6 +37,8 @@ export type ReminderRuleResponse = {
   next_due_at: string;
   snoozed_until?: string;
   enabled: boolean;
+  item_code?: ReminderItemCode;
+  last_done_on?: string;
   last_completed_at?: string;
   last_processed_at?: string;
   created_at: string;
@@ -154,6 +171,141 @@ export class ReminderService {
     });
   }
 
+  listReminderPresets(identity: VerifiedSupabaseIdentity) {
+    return this.unitOfWork.execute(async ({ users }) => {
+      await loadRiderActor(users, identity.subject);
+      return {
+        unknown_last_done_due_days: UNKNOWN_LAST_DONE_DUE_DAYS,
+        items: reminderPresets.map((preset) => toPresetResponse(preset))
+      };
+    });
+  }
+
+  async applyReminderPresets(
+    identity: VerifiedSupabaseIdentity,
+    motorcycleId: string,
+    input: unknown
+  ): Promise<{ items: Array<ReminderRuleResponse & { created: boolean }> }> {
+    const parsed = reminderPresetApplySchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ReminderError("INVALID_INPUT", "Reminder preset input is invalid.", 400, {
+        issues: parsed.error.issues
+      });
+    }
+
+    return this.unitOfWork.execute(async ({ audit, motorcycles, outbox, reminders, users }) => {
+      const actor = await loadRiderActor(users, identity.subject);
+      const motorcycle = await loadOwnedMotorcycle(motorcycles, motorcycleId, actor.id);
+      const now = this.options.now?.() ?? new Date();
+      const createId = this.options.createId ?? randomUUID;
+      const { usage_level: usageLevel, items } = parsed.data;
+
+      const needsVip = items.some((item) => findPreset(item.item_code).requiredPlan === "vip");
+      requirePlan(actor, needsVip ? "vip" : "advance", now);
+      for (const item of items) {
+        if (item.last_done_on !== undefined) {
+          requireDoneDate(item.last_done_on, now);
+        }
+      }
+
+      const results: Array<ReminderRuleResponse & { created: boolean }> = [];
+      for (const item of items) {
+        const existing = await reminders.findRuleByMotorcycleItem(motorcycle.id, item.item_code);
+        if (existing) {
+          results.push({ ...toReminderRuleResponse(existing), created: false });
+          continue;
+        }
+        const preset = findPreset(item.item_code);
+        const intervalDays = intervalDaysFor(preset, usageLevel);
+        const rule = await reminders.createRule({
+          id: createId(),
+          riderId: actor.id,
+          motorcycleId: motorcycle.id,
+          title: preset.title,
+          intervalDays,
+          nextDueAt: computeNextDueAt({
+            lastDoneOn: item.last_done_on,
+            intervalDays,
+            leadDays: preset.leadDays,
+            now
+          }),
+          enabled: true,
+          itemCode: item.item_code,
+          lastDoneOn: item.last_done_on,
+          createdAt: now,
+          updatedAt: now
+        });
+        await appendReminderAuditOutbox({
+          action: "reminder.rule.created",
+          rule,
+          actorId: actor.id,
+          audit,
+          outbox,
+          now,
+          createId
+        });
+        results.push({ ...toReminderRuleResponse(rule), created: true });
+      }
+      return { items: results };
+    });
+  }
+
+  async markReminderDone(
+    identity: VerifiedSupabaseIdentity,
+    reminderId: string,
+    input: unknown
+  ): Promise<ReminderRuleResponse> {
+    const parsed = reminderDoneSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ReminderError("INVALID_INPUT", "Reminder done input is invalid.", 400, {
+        issues: parsed.error.issues
+      });
+    }
+
+    return this.unitOfWork.execute(async ({ audit, motorcycles, outbox, reminders, users }) => {
+      const actor = await loadRiderActor(users, identity.subject);
+      // Lock order must be motorcycle -> rule (as archive, the worker and update do):
+      // read the rule unlocked, lock the motorcycle, then lock the rule. motorcycle_id and item_code never change.
+      const unlocked = await loadOwnedReminderRule(reminders, reminderId, actor.id, false);
+      const itemCode = unlocked.itemCode;
+      if (!itemCode) {
+        throw new ReminderError("INVALID_INPUT", "Only maintenance preset reminders can be marked done.", 400);
+      }
+      // An archived motorcycle makes its rules unreachable (404), so done cannot re-enable them.
+      await loadOwnedMotorcycle(motorcycles, unlocked.motorcycleId, actor.id);
+      const existing = await loadOwnedReminderRule(reminders, reminderId, actor.id);
+      const now = this.options.now?.() ?? new Date();
+      const preset = findPreset(itemCode);
+      requirePlan(actor, preset.requiredPlan, now);
+      requireDoneDate(parsed.data.done_on, now);
+
+      const updated = await reminders.markRuleDone({
+        id: existing.id,
+        lastDoneOn: parsed.data.done_on,
+        nextDueAt: computeNextDueAt({
+          lastDoneOn: parsed.data.done_on,
+          intervalDays: existing.intervalDays ?? intervalDaysFor(preset, "normal"),
+          leadDays: preset.leadDays,
+          now
+        }),
+        updatedAt: now
+      });
+      if (!updated) {
+        throw new ReminderError("NOT_FOUND", "Reminder rule not found.", 404);
+      }
+      await appendReminderAuditOutbox({
+        action: "reminder.rule.updated",
+        rule: updated,
+        actorId: actor.id,
+        audit,
+        outbox,
+        now,
+        createId: this.options.createId ?? randomUUID
+      });
+      return toReminderRuleResponse(updated);
+    });
+  }
+
   disableReminderRule(
     identity: VerifiedSupabaseIdentity,
     reminderId: string
@@ -225,6 +377,22 @@ async function loadRiderActor(
   return actor;
 }
 
+function requirePlan(actor: ApplicationActor, required: "advance" | "vip", now: Date): void {
+  if (!hasPlan(actor, required, now)) {
+    throw new ReminderError("FORBIDDEN", "A higher plan is required.", 403, planRequiredDetails(required));
+  }
+}
+
+function requireDoneDate(value: string, now: Date): void {
+  if (!isPastOrTodayVietnam(value, now, MAX_DONE_AGE_DAYS)) {
+    throw new ReminderError(
+      "INVALID_INPUT",
+      "Date must be a real YYYY-MM-DD date, not in the future and within the last 10 years.",
+      400
+    );
+  }
+}
+
 async function loadOwnedMotorcycle(
   motorcycles: Parameters<Parameters<UnitOfWork["execute"]>[0]>[0]["motorcycles"],
   motorcycleId: string,
@@ -243,9 +411,12 @@ async function loadOwnedMotorcycle(
 async function loadOwnedReminderRule(
   reminders: Parameters<Parameters<UnitOfWork["execute"]>[0]>[0]["reminders"],
   reminderId: string,
-  riderId: string
+  riderId: string,
+  lock = true
 ): Promise<ReminderRule> {
-  const rule = await reminders.findRuleByIdForUpdate(reminderId);
+  const rule = lock
+    ? await reminders.findRuleByIdForUpdate(reminderId)
+    : await reminders.findRuleById(reminderId);
   if (!rule) {
     throw new ReminderError("NOT_FOUND", "Reminder rule not found.", 404);
   }
@@ -303,6 +474,8 @@ export function toReminderRuleResponse(rule: ReminderRule): ReminderRuleResponse
     next_due_at: rule.nextDueAt.toISOString(),
     ...(rule.snoozedUntil ? { snoozed_until: rule.snoozedUntil.toISOString() } : {}),
     enabled: rule.enabled,
+    ...(rule.itemCode ? { item_code: rule.itemCode } : {}),
+    ...(rule.lastDoneOn ? { last_done_on: rule.lastDoneOn } : {}),
     ...(rule.lastCompletedAt ? { last_completed_at: rule.lastCompletedAt.toISOString() } : {}),
     ...(rule.lastCompletedAt ? { last_processed_at: rule.lastCompletedAt.toISOString() } : {}),
     created_at: rule.createdAt.toISOString(),

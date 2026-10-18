@@ -1,3 +1,4 @@
+import type { PlanCode } from "@/features/plans/plan";
 import type { ApiErrorCode } from "@/lib/api-error";
 
 // Enum values live in the contract package so the backend and the admin web
@@ -21,6 +22,8 @@ export type RequestActor = {
   phone?: string;
   address?: string;
   avatar_url?: string;
+  plan_code?: PlanCode;
+  plan_expires_at?: string;
   roles: UserRole[];
   status: UserStatus;
 };

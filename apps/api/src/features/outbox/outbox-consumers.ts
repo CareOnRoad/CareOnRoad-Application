@@ -20,9 +20,9 @@ export type OutboxConsumerDependencies = {
 
 // These events preserve domain history; their notifications are persisted in the source transaction.
 export const domainOnlyTopics = new Set([
-  "user.profile.bootstrapped", "user.device.registered", "user.device.push_token.registered",
+  "user.profile.bootstrapped", "user.profile.updated", "user.device.registered", "user.device.push_token.registered",
   "user.device.push_token.rotated", "user.device.push_token.revoked", "user.device.push_token.invalidated",
-  "motorcycle.created", "motorcycle.updated", "motorcycle.archived",
+  "motorcycle.created", "motorcycle.updated", "motorcycle.details_updated", "motorcycle.archived",
   "mechanic.profile.updated", "mechanic.location.updated", "mechanic.availability.updated",
   "service_request.created", "service_request.canceled", "service_request.media_added", "service_request.media_uploaded", "service_request.appointment_updated",
   "dispatch.round.started", "dispatch.round.expired", "dispatch.candidate.rejected", "dispatch.candidate.expired", "dispatch.request.manual_escalated",
@@ -40,7 +40,7 @@ export const domainOnlyTopics = new Set([
   "admin.configuration.dispatch",
   "reminder.job.generated", "reminder.job.sent", "review.created",
   "chatbot.session.created", "chatbot.session.claimed", "chatbot.message.persisted", "chatbot.diagnosis.persisted",
-  "admin.user.suspended", "admin.user.reactivated", "admin.user.archived", "admin.device.revoked", "admin.user.role.granted", "admin.user.role.revoked",
+  "admin.user.suspended", "admin.user.reactivated", "admin.user.archived", "admin.device.revoked", "admin.user.role.granted", "admin.user.role.revoked", "admin.user.plan_changed",
   "admin.mechanic.approved", "admin.mechanic.rejected", "admin.mechanic.suspended", "admin.mechanic.banned",
   "admin.mechanic.reactivated", "admin.mechanic.skills_updated", "admin.mechanic.radius_updated", "admin.mechanic.forced_unavailable",
   "admin.service_request.canceled", "admin.service_request.manual_escalated", "admin.service_request.note_added", "admin.service_request.cancellation_repaired", "admin.service_request.reservation_repaired"

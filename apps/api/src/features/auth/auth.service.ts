@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { effectivePlan, type PlanHolder } from "@/features/plans/plan";
 import type { FoundationRepositories, UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
 import { INITIAL_MECHANIC_SERVICE_RADIUS_KM } from "@/server/repositories/contracts/mechanic.repository";
 import type { UserDevice } from "@/server/repositories/contracts/user.repository";
@@ -37,7 +38,7 @@ export class AuthService {
       if (!actor) {
         throw new AuthError("NOT_FOUND", "Application profile not found.", 404);
       }
-      const response = toRequestActor(actor);
+      const response = toRequestActor(actor, this.options.now?.() ?? new Date());
       requireActiveActor(response);
       return response;
     });
@@ -476,21 +477,26 @@ function toRegisteredDevice(
   };
 }
 
-function toRequestActor(actor: {
-  id: string;
-  displayName?: string;
-  phone?: string;
-  address?: string;
-  avatarUrl?: string;
-  roles: RequestActor["roles"];
-  status: RequestActor["status"];
-}): RequestActor {
+function toRequestActor(
+  actor: PlanHolder & {
+    id: string;
+    displayName?: string;
+    phone?: string;
+    address?: string;
+    avatarUrl?: string;
+    roles: RequestActor["roles"];
+    status: RequestActor["status"];
+  },
+  now: Date = new Date()
+): RequestActor {
   return {
     id: actor.id,
     ...(actor.displayName ? { display_name: actor.displayName } : {}),
     ...(actor.phone ? { phone: actor.phone } : {}),
     ...(actor.address ? { address: actor.address } : {}),
     ...(actor.avatarUrl ? { avatar_url: actor.avatarUrl } : {}),
+    plan_code: effectivePlan(actor, now),
+    ...(actor.planExpiresAt ? { plan_expires_at: actor.planExpiresAt.toISOString() } : {}),
     roles: actor.roles,
     status: actor.status
   };

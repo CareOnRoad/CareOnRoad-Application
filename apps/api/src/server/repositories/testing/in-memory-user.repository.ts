@@ -1,4 +1,5 @@
 import type { UserRole, UserStatus } from "@/features/auth/auth.types";
+import type { PlanCode } from "@/features/plans/plan";
 
 import type {
   AdminUserActivityPage,
@@ -176,6 +177,20 @@ export class InMemoryUserRepository implements UserRepository {
     const user = this.users.find((item) => item.id === id);
     if (!user) throw new Error("USER_NOT_FOUND");
     user.status = status;
+    user.updatedAt = updatedAt;
+    return this.toActor(user);
+  }
+
+  async updatePlan(
+    id: string,
+    planCode: PlanCode,
+    planExpiresAt: Date | undefined,
+    updatedAt: Date
+  ): Promise<ApplicationActor> {
+    const user = this.users.find((item) => item.id === id);
+    if (!user) throw new Error("USER_NOT_FOUND");
+    user.planCode = planCode;
+    user.planExpiresAt = planExpiresAt;
     user.updatedAt = updatedAt;
     return this.toActor(user);
   }
