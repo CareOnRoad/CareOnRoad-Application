@@ -35,8 +35,10 @@ const navColumns = [
     title: "Hỗ trợ",
     items: [
       { label: "Trung tâm trợ giúp", href: "/tro-giup" },
-      { label: "Chính sách bảo mật", href: "/chinh-sach/bao-mat" },
-      { label: "Điều khoản sử dụng", href: "/chinh-sach/dieu-khoan" },
+      { label: "Chính sách quyền riêng tư", href: "/chinh-sach-quyen-rieng-tu" },
+      { label: "Điều khoản sử dụng", href: "/dieu-khoan-su-dung" },
+      { label: "An toàn dữ liệu", href: "/an-toan-du-lieu" },
+      { label: "Yêu cầu xoá tài khoản", href: "/yeu-cau-xoa-tai-khoan" },
     ],
   },
 ];
@@ -91,7 +93,12 @@ export function Footer() {
             </li>
             <li className="flex items-start gap-2">
               <MailIcon className="mt-0.5 h-4 w-4" aria-hidden />
-              <span>contact@careonroad.vn</span>
+              <a
+                href="mailto:careonroad.work@gmail.com"
+                className="transition-colors hover:text-surface"
+              >
+                careonroad.work@gmail.com
+              </a>
             </li>
             <li className="leading-5">
               TP. Hồ Chí Minh, Việt Nam

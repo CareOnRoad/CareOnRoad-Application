@@ -196,7 +196,7 @@ export const contactChannels: ContactChannel[] = [
   {
     id: "ch-mail",
     label: "Email hỗ trợ",
-    value: "support@careonroad.vn",
+    value: "careonroad.work@gmail.com",
     hint: "Phản hồi trong vòng 4 giờ làm việc",
     iconKey: "mail",
   },
