@@ -23,6 +23,102 @@ coverage/
 .pnpm-store/
 supabase/.temp/
 .DS_Store
+Thumbs.db
+
+# ──────────────────────────────────────────────────────────────
+# Mobile (Expo / React Native / Android) build & runtime output
+# ──────────────────────────────────────────────────────────────
+# dist/ đã có ở trên nhưng các entry cụ thể giúp tránh ignore nhầm folder
+# hợp lệ trong /dist (vd: docs/dist/ — source tài liệu được track).
+apps/mobile/dist-android/
+apps/mobile/dist-ios/
+apps/mobile/dist-test/
+apps/mobile/dist-web/
+apps/mobile/.expo/
+apps/mobile/.expo-shared/
+apps/mobile/web-build/
+# Auto-generated bởi expo prebuild/sync — không cần commit
+apps/mobile/expo-env.d.ts
+# File log/build scratch do local EAS runner ghi ra
+apps/mobile/eas-build-log.txt
+apps/mobile/.eas-build-local/
+# Maestro mobile testing
+apps/mobile/.maestro/
+# Hermes bytecode (*.hbc) và JS bundle output của Metro
+*.hbc
+*.jsbundle
+
+# Android native build artifacts
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/.idea/
+apps/mobile/android/.kotlin/
+apps/mobile/android/.cxx/
+apps/mobile/android/local.properties
+apps/mobile/android/app/release/
+apps/mobile/android/app/.cxx/
+# Keystore không bao giờ commit (release/production). Debug keystore đã được
+# track lịch sử để giữ deterministic cho môi trường dev — whitelist exception.
+# Nếu muốn xoá khỏi tracking, dùng `git rm --cached` rồi commit riêng.
+*.keystore
+!apps/mobile/android/app/debug.keystore
+*.jks
+*.p12
+*.p8
+google-services.json
+GoogleService-Info.plist
+
+# ──────────────────────────────────────────────────────────────
+# Web (Next.js) output
+# ──────────────────────────────────────────────────────────────
+apps/web/.next/
+apps/web/.turbo/
+apps/web/out/
+apps/web/.vercel/
+
+# ──────────────────────────────────────────────────────────────
+# API (Next.js + workers) output
+# ──────────────────────────────────────────────────────────────
+apps/api/.next/
+apps/api/.turbo/
+apps/api/out/
+
+# ──────────────────────────────────────────────────────────────
+# Python cache (nếu có scripts .py)
+# ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ──────────────────────────────────────────────────────────────
+# Editor / IDE
+# ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*.bak
+*.tmp
+*.orig
+*~
+.history/
+
+# ──────────────────────────────────────────────────────────────
+# OS
+# ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ──────────────────────────────────────────────────────────────
+# Cache / diagnostics
+# ──────────────────────────────────────────────────────────────
+.turbo/
+.turbo
+.cache/
 
 # Local acceptance-test output (source runners and case catalogues are tracked)
 /tests/http/reports/
@@ -34,3 +130,15 @@ supabase/.temp/
 /apps/api/audit/schema-evidence.json
 /apps/api/audit/batch-00/
 /.tmp/push-validation-*/
+
+# ──────────────────────────────────────────────────────────────
+# Diagnostics: logs/HAR/local snapshots
+# ──────────────────────────────────────────────────────────────
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.har

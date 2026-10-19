@@ -52,6 +52,8 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@react-native-community/cli": "^20.2.0",
+    "@react-native/metro-config": "0.86.3",
     "@types/react": "~19.2.0",
     "babel-preset-expo": "~57.0.15",
     "eslint": "9.39.1",
@@ -59,8 +61,7 @@
     "expo-dev-client": "~57.0.20",
     "sharp": "^0.35.5",
     "tailwindcss": "^3.4.17",
-    "typescript": "6.0.3",
-    "@react-native/metro-config": "0.86.3"
+    "typescript": "6.0.3"
   },
   "expo": {
     "doctor": {

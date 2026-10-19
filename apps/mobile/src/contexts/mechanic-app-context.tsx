@@ -240,9 +240,22 @@ function mapAssignmentStatus(s: string): MechanicJobStatus {
     case 'diagnosis':
     case 'quoted':
       return 'pending';
-    case 'awaiting_payment':
     case 'in_progress':
+      // BE: "đang thực hiện công việc" (rescue đã approved parts hoặc
+      // standard sau khi rider thanh toán). UI mechanic thấy "Đang sửa"
+      // — phản ánh đúng giai đoạn giữa chừng.
       return 'in_progress';
+    case 'awaiting_payment':
+      // BE: phần việc mechanic đã xong, chờ rider thanh toán. Map về
+      // `'completed'` để:
+      //   - Status pill ổn định sau khi submit checklist (không flicker
+      //     giữa "Hoàn tất" → "Đang xử lý" ở mỗi lần polling).
+      //   - Form giữ field "Phụ tùng đã thay" / "Chi phí cuối" để mechanic
+      //     xem lại hoặc sửa trước khi rider thanh toán.
+      // Để biết BE thật sự đã `completed` (rider thanh toán xong) hay còn
+      // `awaiting_payment` (chưa thanh toán), dùng `assignmentStatusMap`
+      // (BE raw status) — xem "Trạng thái BE" ở detail page.
+      return 'completed';
     case 'completed':
       return 'completed';
     case 'canceled':
@@ -434,6 +447,25 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
     return () => clearInterval(interval);
   }, [reload]);
 
+  /**
+   * Cập nhật status job qua BE (atomic). Cập nhật optimistic local.
+   *
+   * Lưu ý: UI MechanicJobStatus chỉ gồm 5 giá trị (`pending | in_progress
+   * | awaiting_parts | completed | canceled`) — phải map sang BE state
+   * machine 10 trạng thái:
+   *   - `pending`         → `accepted` (giữ nguyên, mechanic chưa bắt đầu thao tác)
+   *   - `awaiting_parts`  → `on_site` (thợ đã tới nơi, đang chờ phụ tùng)
+   *   - `in_progress`     → KHÔNG transition trực tiếp. Phải dùng action riêng
+   *                         `startRepair()` (B.3) vì BE yêu cầu đi qua
+   *                         `accepted → en_route → on_site → diagnosis → quoted`
+   *                         hoặc theo service_type.
+   *   - `completed`       → KHÔNG transition trực tiếp từ mechanic. Việc đóng
+   *                         assignment thuộc về rider (sau thanh toán) hoặc admin.
+   *
+   * UI mechanic chỉ dùng action này cho các bước "Bắt đầu đi" (pending → en_route
+   * mặc dù UI hiển thị `pending`) hoặc "Đã tới nơi" (→ on_site).
+   * Xem thêm `startRepair()` và `markReadyForPayment()`.
+   */
   const updateJobStatus = useCallback(
     async (id: string, status: MechanicJobStatus, notes?: string) => {
       // Lưu local state trước (optimistic)
@@ -444,26 +476,37 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
 
       if (!isBackendConfigured) return;
 
-      // Map UI status → BE assignment status.
-      // UI pending = thợ chưa bắt đầu thao tác; giữ accepted ở BE.
-      // UI awaiting_parts = thợ đang chờ phụ tùng → chuyển sang diagnosis (BE state gần nhất).
-      // UI in_progress = đang sửa → matched với in_progress.
-      // UI completed = hoàn tất → matched với completed.
-      // Guard ke được delegate sang BE error (rollback local khi fail).
+      // Map UI status → BE assignment status. CHỈ những transition mà BE
+      // state machine cho phép mechanic thực hiện từ trạng thái `accepted`/`en_route`.
+      // `accepted` → {quoted, en_route, canceled, recovery_canceled}
+      // `en_route` → {on_site, canceled, recovery_canceled}
+      // `on_site`  → {diagnosis, canceled}
+      // `diagnosis` → {quoted, in_progress, canceled}
+      // `quoted`   → {accepted, diagnosis, awaiting_payment, canceled, recovery_canceled}
+      // `in_progress`/`completed` chỉ được set thông qua helper riêng.
       let beStatus: Parameters<typeof transitionAssignment>[1]['status'];
       switch (status) {
         case 'pending':
-          beStatus = 'accepted';
-          break;
-        case 'in_progress':
-          beStatus = 'in_progress';
+          // "Chờ xử lý" trong UI = mechanic chưa bắt đầu. Map sang `en_route`
+          // để bám sát hành động thực tế: nút "Bắt đầu đi" → en_route.
+          // (Trước đây map `accepted` nhưng đó là trạng thái khởi đầu —
+          // chuyển accepted → accepted sẽ bị BE trả 409 conflict.)
+          beStatus = 'en_route';
           break;
         case 'awaiting_parts':
-          beStatus = 'diagnosis';
+          // UI "Chờ phụ tụng" = thợ đã tới nơi nhưng cần đợi vật tư → on_site.
+          beStatus = 'on_site';
           break;
+        case 'in_progress':
         case 'completed':
-          beStatus = 'completed';
-          break;
+        case 'canceled':
+          // Các action này phải đi qua helper riêng (startRepair / markReadyForPayment
+          // / cancelAssignment). Bỏ qua ở đây để tránh BE 409.
+          setJobs(prevJobs);
+          setError(
+            'Vui lòng dùng nút "Bắt đầu sửa" hoặc "Báo đã sửa xong" để chuyển trạng thái.',
+          );
+          return;
         default:
           return;
       }
@@ -482,6 +525,25 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
     [jobs, isBackendConfigured],
   );
 
+  /**
+   * Hoàn tất 1 phần công việc mechanic-side.
+   *
+   * Lưu ý quan trọng: `completed` (đóng assignment) là hành động thuộc về
+   * rider (sau khi thanh toán) hoặc admin. Mechanic KHÔNG tự transition
+   * assignment sang `completed` — BE sẽ trả 409 vì vi phạm state machine.
+   *
+   * Flow thực tế mechanic-side:
+   *  1. Submit completion checklist (B.3) — BE validate assignment đang
+   *     ở `in_progress` hoặc `awaiting_payment`.
+   *  2. Transition assignment → `awaiting_payment` để rider thanh toán.
+   *  3. Rider thanh toán → BE tự transition sang `in_progress` → `completed`.
+   *
+   * Hàm này làm đúng 2 bước đầu:
+   *  - Submit `submitCompletionChecklist` với safety_checklist đầy đủ.
+   *  - Transition `quoted | diagnosis | in_progress` → `awaiting_payment`.
+   *
+   * Rollback optimistic local nếu bất kỳ bước nào fail.
+   */
   const completeJob = useCallback(
     async (id: string, payload: JobUpdatePayload) => {
       // Optimistic local
@@ -504,9 +566,12 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       if (!isBackendConfigured) return;
 
       try {
-        // Submit checklist trước (BE không có giá trực tiếp → log qua notes)
+        // Bước 1: submit completion checklist. BE cho phép khi assignment
+        // đang ACTIVE (in_progress / awaiting_payment cho maintenance;
+        // accepted / on_site / diagnosis / in_progress cho standard).
         await submitCompletionChecklist(id, {
-          work_summary: payload.notes || `Hoàn tất công việc với chi phí ${payload.price.toLocaleString('vi-VN')}đ`,
+          work_summary:
+            payload.notes || `Hoàn tất công việc với chi phí ${payload.price.toLocaleString('vi-VN')}đ`,
           safety_checklist: {
             test_ride_completed: true,
             tools_removed: true,
@@ -515,8 +580,11 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
             no_fluid_leak: true,
           },
         });
-        // Sau đó chuyển status → completed
-        await transitionAssignment(id, { status: 'completed' });
+        // Bước 2: chuyển sang `awaiting_payment` để rider thanh toán.
+        // BE state machine: `quoted` → `awaiting_payment` OK.
+        // Với `in_progress` (rescue): BE yêu cầu rescue_final approved.
+        // Caller (UI JobUpdateForm) nên gọi helper chuyên biệt cho rescue.
+        await transitionAssignment(id, { status: 'awaiting_payment' });
       } catch (e) {
         setJobs(prevJobs);
         setError(e instanceof Error ? e.message : 'Không thể hoàn tất công việc');

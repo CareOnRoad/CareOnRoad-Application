@@ -8,6 +8,7 @@ import {
   Navigation,
   Receipt,
   RefreshCw,
+  Stethoscope,
   Wrench,
   XCircle,
 } from 'lucide-react-native';
@@ -33,11 +34,15 @@ import {
   formatVnd,
 } from '@/lib/quotes-service';
 import {
+  getCompletionChecklist,
   getLiveLocation,
   getRouteEta,
   listAssignments,
+  listAssignmentDiagnoses,
   normalizeLiveLocation,
+  type AssignmentDiagnosis,
   type AssignmentListItem,
+  type CompletionChecklistResponse,
 } from '@/lib/assignments-service';
 
 /**
@@ -111,6 +116,12 @@ export default function RiderRescueDetailScreen() {
   const [quote, setQuote] = useState<Awaited<ReturnType<typeof getLatestPendingQuote>>>(null);
   const [eta, setEta] = useState<RouteEtaResponse | null>(null);
   const [liveRaw, setLiveRaw] = useState<Awaited<ReturnType<typeof getLiveLocation>>>(null);
+  // (B.5) Diagnosis + completion checklist mechanic đã submit.
+  // Lưu ý: ETA metadata bị ẩn UI theo quyết định user — chỉ giữ route-eta.
+  const [diagnoses, setDiagnoses] = useState<AssignmentDiagnosis[]>([]);
+  const [completionChecklist, setCompletionChecklist] = useState<CompletionChecklistResponse | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -169,9 +180,15 @@ export default function RiderRescueDetailScreen() {
           } catch {
             setLiveRaw(null);
           }
+          // (B.5) Fetch diagnoses + completion checklist.
+          // Mỗi bước độc lập; lỗi 1 bước không chặn các bước sau.
+          setDiagnoses(await listAssignmentDiagnoses(found.id));
+          setCompletionChecklist(await getCompletionChecklist(found.id));
         } else {
           setEta(null);
           setLiveRaw(null);
+          setDiagnoses([]);
+          setCompletionChecklist(null);
         }
 
         // Quote pending (nếu request chờ duyệt).
@@ -224,6 +241,28 @@ export default function RiderRescueDetailScreen() {
         .then(setLiveRaw)
         .catch(() => undefined);
     }, POLL_LIVE_MS);
+    return () => clearInterval(t);
+  }, [assignment, isActiveStatus]);
+
+  // Polling diagnoses mỗi 30s khi có assignment.
+  useEffect(() => {
+    if (!assignment || !isActiveStatus) return;
+    const t = setInterval(() => {
+      void listAssignmentDiagnoses(assignment.id)
+        .then(setDiagnoses)
+        .catch(() => undefined);
+    }, POLL_ETA_MS);
+    return () => clearInterval(t);
+  }, [assignment, isActiveStatus]);
+
+  // Polling completion checklist mỗi 30s khi có assignment.
+  useEffect(() => {
+    if (!assignment || !isActiveStatus) return;
+    const t = setInterval(() => {
+      void getCompletionChecklist(assignment.id)
+        .then(setCompletionChecklist)
+        .catch(() => undefined);
+    }, POLL_ETA_MS);
     return () => clearInterval(t);
   }, [assignment, isActiveStatus]);
 
@@ -420,6 +459,117 @@ export default function RiderRescueDetailScreen() {
             />
           </View>
         )}
+
+        {/* Chẩn đoán từ thợ (B.5) - list các diagnosis versions */}
+        {diagnoses.length > 0 ? (
+          <Card className="mt-4 p-4">
+            <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Chẩn đoán của thợ
+            </Text>
+            <View className="gap-3">
+              {diagnoses.map((d, idx) => (
+                <View
+                  key={d.id}
+                  className={
+                    idx === 0
+                      ? 'rounded-2xl bg-primary/5 p-3'
+                      : 'rounded-2xl border border-border bg-background p-3'
+                  }
+                >
+                  {idx === 0 ? (
+                    <View className="mb-1.5 flex-row items-center gap-1.5">
+                      <Stethoscope size={12} color="#1974f7" />
+                      <Text className="text-[10px] font-bold uppercase text-primary">
+                        Mới nhất
+                      </Text>
+                    </View>
+                  ) : null}
+                  <Text className="text-sm font-semibold text-foreground">
+                    {d.summary}
+                  </Text>
+                  {d.root_cause ? (
+                    <Text className="mt-1 text-xs text-muted-foreground">
+                      Nguyên nhân: {d.root_cause}
+                    </Text>
+                  ) : null}
+                  {d.recommended_action ? (
+                    <Text className="mt-1 text-xs text-muted-foreground">
+                      Xử lý đề xuất: {d.recommended_action}
+                    </Text>
+                  ) : null}
+                  <Text className="mt-1.5 text-[10px] text-muted-foreground">
+                    {new Date(d.created_at).toLocaleString('vi-VN')}
+                    {diagnoses.length > 1 ? ` · v${diagnoses.length - idx}` : ''}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : assignment && isActiveStatus ? (
+          <View className="mt-4">
+            <Banner
+              tone="info"
+              title="Thợ chưa gửi chẩn đoán"
+              description="Chẩn đoán giúp bạn hiểu nguyên nhân trước khi duyệt báo giá."
+            />
+          </View>
+        ) : null}
+
+        {/* Completion checklist (B.5) - hiển thị khi thợ đã submit */}
+        {completionChecklist ? (
+          <Card className="mt-4 p-4">
+            <View className="mb-3 flex-row items-center justify-between">
+              <Text className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Checklist hoàn tất
+              </Text>
+              <View className="rounded-full bg-green/10 px-2 py-0.5">
+                <Text className="text-[10px] font-semibold text-green">
+                  v{completionChecklist.revision}
+                </Text>
+              </View>
+            </View>
+            <Text className="text-sm font-semibold text-foreground">
+              {completionChecklist.work_summary}
+            </Text>
+            <View className="mt-3 gap-1.5">
+              {Object.entries(completionChecklist.safety_checklist).map(([key, value]) => {
+                const labels: Record<string, string> = {
+                  test_ride_completed: 'Đã chạy thử',
+                  tools_removed: 'Đã thu dọn dụng cụ',
+                  area_safe: 'Khu vực an toàn',
+                  rider_briefed: 'Đã bàn giao cho khách',
+                  no_fluid_leak: 'Không rò rỉ dầu / xăng',
+                };
+                return (
+                  <View key={key} className="flex-row items-center gap-2">
+                    {value ? (
+                      <CheckCircle2 size={14} color="#145413" />
+                    ) : (
+                      <XCircle size={14} color="#ed3f3a" />
+                    )}
+                    <Text
+                      className={
+                        value
+                          ? 'flex-1 text-xs text-foreground'
+                          : 'flex-1 text-xs text-muted-foreground line-through'
+                      }
+                    >
+                      {labels[key] ?? key}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            {completionChecklist.notes ? (
+              <Text className="mt-2 text-xs italic text-muted-foreground">
+                Ghi chú: {completionChecklist.notes}
+              </Text>
+            ) : null}
+            <Text className="mt-2 text-[10px] text-muted-foreground">
+              {new Date(completionChecklist.created_at).toLocaleString('vi-VN')}
+            </Text>
+          </Card>
+        ) : null}
 
         {/* Báo giá */}
         {quote ? (

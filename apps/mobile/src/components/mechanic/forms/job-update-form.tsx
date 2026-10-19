@@ -96,7 +96,11 @@ export function JobUpdateForm({
       setEtaMinutes('');
       setDelayReason('');
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Không thể gửi ETA');
+      // Hiển thị message từ server (vd: "ETA must be at least one minute...")
+      // kèm prefix tiếng Việt để user hiểu.
+      const serverMsg =
+        e instanceof Error ? e.message : 'Không thể gửi ETA';
+      setFormError(`Gửi ETA thất bại: ${serverMsg}`);
     } finally {
       setSubmitting(false);
     }
@@ -267,7 +271,9 @@ export function JobUpdateForm({
           <Text
             className={`text-sm font-semibold ${status === 'completed' ? 'text-green' : 'text-primary-foreground'}`}
           >
-            {status === 'completed' ? 'Đánh dấu hoàn tất' : 'Lưu thay đổi'}
+            {status === 'completed'
+              ? 'Gửi checklist & chờ thanh toán'
+              : 'Lưu thay đổi'}
           </Text>
         </ActionButton>
       </View>

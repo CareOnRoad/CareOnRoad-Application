@@ -67,7 +67,7 @@ const config: ExpoConfig = {
     // `android/app/build.gradle`. Giá trị dưới đây vẫn cần khớp để Expo Go
     // (chạy JS-only) hoạt động đúng.
     package: BASE_PACKAGE_ID,
-    versionCode: 1,
+    versionCode: 5,
     permissions: [
       'ACCESS_FINE_LOCATION',
       'ACCESS_COARSE_LOCATION',
@@ -116,7 +116,7 @@ const config: ExpoConfig = {
     eas: {
       // EAS project ID — được generate khi chạy `eas init`.
       // Cần thiết để EAS Build, Submit, Update liên kết với project này.
-      projectId: 'a692153d-e5e8-4b0a-8293-3c846bffcafd',
+      projectId: 'a7a3588d-8b5d-4e94-a8d5-f366695fdfd9',
     },
   },
 };

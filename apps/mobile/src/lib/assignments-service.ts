@@ -121,4 +121,111 @@ export async function ingestLiveLocation(
   return apiPut(`/api/v1/assignments/${encodeURIComponent(assignmentId)}/live-location`, payload);
 }
 
+// =========================================================
+// Completion checklist (rider view) — BE: GET /api/v1/assignments/{id}/completion-checklist
+// =========================================================
+
+export interface CompletionChecklistResponse {
+  id: string;
+  assignment_id: string;
+  request_id: string;
+  mechanic_id: string;
+  revision: number;
+  approved_quote_id?: string;
+  work_summary: string;
+  safety_checklist: {
+    test_ride_completed: boolean;
+    tools_removed: boolean;
+    area_safe: boolean;
+    rider_briefed: boolean;
+    no_fluid_leak: boolean;
+  };
+  notes?: string;
+  created_at: string;
+}
+
+/**
+ * Lấy completion checklist mới nhất của assignment.
+ * Trả về `null` nếu BE trả 404 (chưa có checklist) hoặc lỗi mạng — caller
+ * tự render placeholder "Thợ chưa gửi checklist".
+ */
+export async function getCompletionChecklist(
+  assignmentId: string,
+): Promise<CompletionChecklistResponse | null> {
+  try {
+    return await apiGet<CompletionChecklistResponse>(
+      `/api/v1/assignments/${encodeURIComponent(assignmentId)}/completion-checklist`,
+    );
+  } catch (e) {
+    // 404 → chưa có. Lỗi khác → log warning nhưng vẫn trả null để UI fallback.
+    if (__DEV__ && !(e instanceof Error && e.message.includes('404'))) {
+      // eslint-disable-next-line no-console
+      console.warn('[assignments-service] getCompletionChecklist failed:', e);
+    }
+    return null;
+  }
+}
+
+// =========================================================
+// Diagnoses (rider view) — BE: GET /api/v1/assignments/{id}/diagnoses
+// =========================================================
+
+export interface AssignmentDiagnosis {
+  id: string;
+  assignment_id: string;
+  summary: string;
+  root_cause?: string;
+  recommended_action?: string;
+  created_by: string;
+  created_at: string;
+}
+
+/**
+ * Lấy danh sách diagnosis versions cho assignment (mới nhất trước).
+ * Trả về `[]` nếu chưa có hoặc lỗi.
+ */
+export async function listAssignmentDiagnoses(
+  assignmentId: string,
+): Promise<AssignmentDiagnosis[]> {
+  try {
+    const res = await apiGet<{ items?: AssignmentDiagnosis[] } | AssignmentDiagnosis[]>(
+      `/api/v1/assignments/${encodeURIComponent(assignmentId)}/diagnoses`,
+    );
+    const items = Array.isArray(res) ? res : (res.items ?? []);
+    return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  } catch {
+    return [];
+  }
+}
+
+/** Lấy diagnosis mới nhất (helper). */
+export async function getLatestAssignmentDiagnosis(
+  assignmentId: string,
+): Promise<AssignmentDiagnosis | null> {
+  const items = await listAssignmentDiagnoses(assignmentId);
+  return items[0] ?? null;
+}
+
+// =========================================================
+// ETA metadata (rider view) — wrapper optional
+// =========================================================
+
+/**
+ * Optional wrapper để lấy ETA metadata mới nhất mà mechanic đã submit.
+ *
+ * Hiện tại FE không gọi hàm này (chỉ dùng `route-eta` từ Google Routes theo
+ * quyết định user). Khi BE bổ sung `GET /api/v1/assignments/{id}/eta`, có
+ * thể gọi lại mà không cần đổi signature.
+ *
+ * Trả về `null` cho tất cả lỗi (404 / network) để caller tự fallback.
+ */
+export async function getLatestAssignmentEta(
+  assignmentId: string,
+): Promise<null> {
+  // BE chưa có GET /api/v1/assignments/{id}/eta — chỉ có POST (mechanic submit).
+  // Trả null để caller không phải xử lý error.
+  void assignmentId;
+  return null;
+}
+
 export { newIdempotencyKey };
