@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRightIcon, CloseIcon, MenuIcon } from "@/components/ui/icons";
@@ -24,9 +25,13 @@ export function Header() {
           className="flex items-center gap-3"
           aria-label="CareOnRoad trang chủ"
         >
-          <span className="grid h-12 w-12 place-items-center rounded-xl bg-brand-deep text-surface">
-            <span className="text-lg font-bold">CR</span>
-          </span>
+          <Image
+            src="/images/logos/cor-logo.png"
+            alt="CareOnRoad"
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded-xl object-contain"
+          />
           <span className="flex flex-col leading-tight">
             <span className="text-base font-bold text-ink">CareOnRoad</span>
             <span className="text-xs text-ink-subtle">

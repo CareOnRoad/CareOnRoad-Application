@@ -21,17 +21,16 @@ import {
 export function Hero() {
   return (
     <section className="relative overflow-hidden">
-      {/* Background image placeholder (chờ hình thật) */}
+      {/* Background hero image */}
       <div className="absolute inset-0 h-[640px] w-full">
         <Image
-          src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 640'><rect width='1440' height='640' fill='%23cfe4dc'/><text x='50%25' y='50%25' fill='%23162130' font-family='sans-serif' font-size='24' text-anchor='middle' dominant-baseline='middle'>Ảnh hero — sẽ thêm sau</text></svg>"
+          src="/images/hero/cor-cover.jpg"
           alt=""
           role="presentation"
           fill
           priority
           sizes="100vw"
           className="object-cover"
-          unoptimized
         />
       </div>
 
