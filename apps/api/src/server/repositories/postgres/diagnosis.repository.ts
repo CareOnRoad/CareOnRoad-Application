@@ -67,6 +67,21 @@ export class PostgresDiagnosisRepository implements DiagnosisRepository {
     return rows[0] ? mapDiagnosis(rows[0]) : undefined;
   }
 
+  async listByAssignmentId(
+    assignmentId: string
+  ): Promise<MechanicDiagnosis[]> {
+    // Schema today: UNIQUE(assignment_id) ⇒ at most 1 row.
+    // Order by created_at desc so callers see the newest row first;
+    // today's schema always returns either [] or a single row.
+    const rows = await this.sql<DiagnosisRow[]>`
+      select *
+      from mechanic_diagnoses
+      where assignment_id = ${assignmentId}
+      order by created_at desc
+    `;
+    return rows.map(mapDiagnosis);
+  }
+
   async update(input: UpdateMechanicDiagnosis): Promise<MechanicDiagnosis | undefined> {
     const rows = await this.sql<DiagnosisRow[]>`
       update mechanic_diagnoses

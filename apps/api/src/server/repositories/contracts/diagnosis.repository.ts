@@ -25,5 +25,12 @@ export interface DiagnosisRepository {
   findByAssignmentIdForUpdate(
     assignmentId: string
   ): Promise<MechanicDiagnosis | undefined>;
+  /**
+   * List all diagnosis records for an assignment. The mechanic_diagnoses
+   * table enforces 1 row per assignment (UNIQUE on assignment_id) today,
+   * but the repository returns an array so the service layer can evolve
+   * to multi-version without changing call sites.
+   */
+  listByAssignmentId(assignmentId: string): Promise<MechanicDiagnosis[]>;
   update(input: UpdateMechanicDiagnosis): Promise<MechanicDiagnosis | undefined>;
 }

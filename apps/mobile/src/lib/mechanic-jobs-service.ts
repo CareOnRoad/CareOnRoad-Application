@@ -256,17 +256,17 @@ export async function submitCompletionChecklist(
 // =========================================================
 
 export interface DiagnosisInput {
-  summary: string;
-  root_cause?: string;
-  recommended_action?: string;
+  diagnosis_text: string;
+  recommended_work_text?: string;
+  safety_notes?: string;
 }
 
 export interface DiagnosisRecord {
   id: string;
   assignment_id: string;
-  summary: string;
-  root_cause?: string;
-  recommended_action?: string;
+  diagnosis_text: string;
+  recommended_work_text?: string;
+  safety_notes?: string;
   created_by: string;
   created_at: string;
 }

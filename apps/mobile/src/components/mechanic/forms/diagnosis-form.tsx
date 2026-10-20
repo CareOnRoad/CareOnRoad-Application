@@ -10,16 +10,16 @@ import type { DiagnosisRecord } from '@/lib/mechanic-jobs-service';
 interface DiagnosisFormProps {
   /**
    * Lịch sử diagnosis (mới nhất trước). Khi `length > 0` → hiển thị read-only
-   * latest + nút "Xem các phiên trước" expand list. Backend cho phép nhiều
-   * version, mỗi lần POST = 1 row mới.
+   * latest + nút "Xem các phiên trước" expand list. Backend hiện chỉ giữ 1
+   * row / assignment (upsert) nhưng endpoint trả mảng để tương thích.
    */
   history: DiagnosisRecord[];
   submitting: boolean;
   errorMessage: string | null;
   onSubmit: (input: {
-    summary: string;
-    root_cause?: string;
-    recommended_action?: string;
+    diagnosis_text: string;
+    recommended_work_text?: string;
+    safety_notes?: string;
   }) => Promise<void>;
 }
 
@@ -96,15 +96,15 @@ function HistoryView({
       </View>
 
       <View className="rounded-2xl bg-secondary p-3">
-        <Text className="text-sm font-semibold text-foreground">{latest.summary}</Text>
-        {latest.root_cause ? (
+        <Text className="text-sm font-semibold text-foreground">{latest.diagnosis_text}</Text>
+        {latest.safety_notes ? (
           <Text className="mt-1 text-xs text-muted-foreground">
-            Nguyên nhân: {latest.root_cause}
+            Ghi chú an toàn: {latest.safety_notes}
           </Text>
         ) : null}
-        {latest.recommended_action ? (
+        {latest.recommended_work_text ? (
           <Text className="mt-1 text-xs text-muted-foreground">
-            Xử lý đề xuất: {latest.recommended_action}
+            Xử lý đề xuất: {latest.recommended_work_text}
           </Text>
         ) : null}
         <Text className="mt-1.5 text-[10px] text-muted-foreground">
@@ -138,15 +138,15 @@ function HistoryView({
                   key={rec.id}
                   className="rounded-2xl border border-border bg-background p-3"
                 >
-                  <Text className="text-sm font-medium text-foreground">{rec.summary}</Text>
-                  {rec.root_cause ? (
+                  <Text className="text-sm font-medium text-foreground">{rec.diagnosis_text}</Text>
+                  {rec.safety_notes ? (
                     <Text className="mt-0.5 text-xs text-muted-foreground">
-                      Nguyên nhân: {rec.root_cause}
+                      Ghi chú an toàn: {rec.safety_notes}
                     </Text>
                   ) : null}
-                  {rec.recommended_action ? (
+                  {rec.recommended_work_text ? (
                     <Text className="mt-0.5 text-xs text-muted-foreground">
-                      Xử lý đề xuất: {rec.recommended_action}
+                      Xử lý đề xuất: {rec.recommended_work_text}
                     </Text>
                   ) : null}
                   <Text className="mt-1 text-[10px] text-muted-foreground">
@@ -195,29 +195,29 @@ function CreateView({
   onSubmit: DiagnosisFormProps['onSubmit'];
   onCancel?: () => void;
 }) {
-  const [summary, setSummary] = useState('');
-  const [rootCause, setRootCause] = useState('');
-  const [recommendedAction, setRecommendedAction] = useState('');
+  const [diagnosisText, setDiagnosisText] = useState('');
+  const [safetyNotes, setSafetyNotes] = useState('');
+  const [recommendedWorkText, setRecommendedWorkText] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     setLocalError(null);
-    if (summary.trim().length < 5) {
+    if (diagnosisText.trim().length < 5) {
       setLocalError('Mô tả chẩn đoán tối thiểu 5 ký tự.');
       return;
     }
     await onSubmit({
-      summary: summary.trim(),
-      ...(rootCause.trim() ? { root_cause: rootCause.trim() } : {}),
-      ...(recommendedAction.trim()
-        ? { recommended_action: recommendedAction.trim() }
+      diagnosis_text: diagnosisText.trim(),
+      ...(safetyNotes.trim() ? { safety_notes: safetyNotes.trim() } : {}),
+      ...(recommendedWorkText.trim()
+        ? { recommended_work_text: recommendedWorkText.trim() }
         : {}),
     });
     // Reset form khi submit thành công - parent sẽ unmount component này
     // khi BE trả về record mới, nhưng reset để defensive.
-    setSummary('');
-    setRootCause('');
-    setRecommendedAction('');
+    setDiagnosisText('');
+    setSafetyNotes('');
+    setRecommendedWorkText('');
   };
 
   return (
@@ -233,25 +233,25 @@ function CreateView({
       <Field label="Mô tả chẩn đoán *">
         <FormTextInput
           multiline
-          value={summary}
-          onChangeText={setSummary}
+          value={diagnosisText}
+          onChangeText={setDiagnosisText}
           placeholder="VD: Bình xăng bị tắc do bụi bẩn tích tụ lâu ngày"
           className="min-h-[80px]"
         />
       </Field>
 
-      <Field label="Nguyên nhân (tùy chọn)">
+      <Field label="Ghi chú an toàn (tùy chọn)">
         <FormTextInput
-          value={rootCause}
-          onChangeText={setRootCause}
-          placeholder="VD: Không vệ sinh bình xăng định kỳ"
+          value={safetyNotes}
+          onChangeText={setSafetyNotes}
+          placeholder="VD: Không tự ý tháo ráp khi chưa khoá bình ắc quy"
         />
       </Field>
 
       <Field label="Hướng xử lý đề xuất (tùy chọn)">
         <FormTextInput
-          value={recommendedAction}
-          onChangeText={setRecommendedAction}
+          value={recommendedWorkText}
+          onChangeText={setRecommendedWorkText}
           placeholder="VD: Vệ sinh bình xăng, thay bộ lọc nhiên liệu"
         />
       </Field>

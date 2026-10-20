@@ -21,6 +21,10 @@ export type DiagnosisQuoteRouteDependencies = {
       assignmentId: string,
       input: unknown
     ): Promise<MechanicDiagnosisResponse>;
+    listDiagnoses(
+      identity: VerifiedSupabaseIdentity,
+      assignmentId: string
+    ): Promise<MechanicDiagnosisResponse[]>;
   };
   quoteService: {
     createQuote(
@@ -59,6 +63,19 @@ export function createDiagnosisQuoteRouteHandlers(
           ),
           { status: 201 }
         );
+      } catch (error) {
+        return routeError(error);
+      }
+    },
+
+    async listDiagnoses(request: Request, assignmentId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        const items = await dependencies.diagnosisService.listDiagnoses(
+          identity,
+          assignmentId
+        );
+        return NextResponse.json({ items });
       } catch (error) {
         return routeError(error);
       }

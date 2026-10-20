@@ -173,9 +173,9 @@ export async function getCompletionChecklist(
 export interface AssignmentDiagnosis {
   id: string;
   assignment_id: string;
-  summary: string;
-  root_cause?: string;
-  recommended_action?: string;
+  diagnosis_text: string;
+  safety_notes?: string;
+  recommended_work_text?: string;
   created_by: string;
   created_at: string;
 }
@@ -192,7 +192,7 @@ export async function listAssignmentDiagnoses(
       `/api/v1/assignments/${encodeURIComponent(assignmentId)}/diagnoses`,
     );
     const items = Array.isArray(res) ? res : (res.items ?? []);
-    return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return [...items].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
   } catch {
     return [];
   }

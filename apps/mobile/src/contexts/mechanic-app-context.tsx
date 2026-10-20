@@ -24,6 +24,8 @@ import {
   getJobDetail as fetchJobDetail,
   listAssignments,
   listDiagnoses as fetchDiagnosisHistory,
+  nextAllowedStatuses,
+  statusLabel,
   submitEta,
   submitCompletionChecklist,
   transitionAssignment,
@@ -107,7 +109,7 @@ interface MechanicState {
   /** Tạo diagnosis cho assignment. Optimistic cache local. */
   submitDiagnosisForJob: (
     jobId: string,
-    input: { summary: string; root_cause?: string; recommended_action?: string },
+    input: { diagnosis_text: string; safety_notes?: string; recommended_work_text?: string },
   ) => Promise<DiagnosisRecord | null>;
   /** Lấy diagnosis mới nhất (cached, không reload). */
   getLatestDiagnosisForJob: (jobId: string) => DiagnosisRecord | null;
@@ -337,6 +339,9 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
   const autoHandleRef = useRef<AutoTrackingHandle | null>(null);
   const heartbeatHandleRef = useRef<AvailabilityHeartbeatHandle | null>(null);
   const lastIngestAtRef = useRef<Record<string, number>>({});
+  // Đếm số lần ingestLiveLocation thất bại liên tiếp với 409 để tự stop
+  // auto-tracking sau 3 lần (tránh BE spam 409 log).
+  const consecutiveFailuresRef = useRef<Record<string, number>>({});
 
   /**
    * Load toàn bộ data BE:
@@ -487,14 +492,9 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       let beStatus: Parameters<typeof transitionAssignment>[1]['status'];
       switch (status) {
         case 'pending':
-          // "Chờ xử lý" trong UI = mechanic chưa bắt đầu. Map sang `en_route`
-          // để bám sát hành động thực tế: nút "Bắt đầu đi" → en_route.
-          // (Trước đây map `accepted` nhưng đó là trạng thái khởi đầu —
-          // chuyển accepted → accepted sẽ bị BE trả 409 conflict.)
           beStatus = 'en_route';
           break;
         case 'awaiting_parts':
-          // UI "Chờ phụ tụng" = thợ đã tới nơi nhưng cần đợi vật tư → on_site.
           beStatus = 'on_site';
           break;
         case 'in_progress':
@@ -511,6 +511,39 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
           return;
       }
 
+      // Guard: bỏ qua BE call nếu assignment đã ở đúng trạng thái BE
+      // (tránh `accepted → en_route` lặp lại khi user nhấn "Bắt đầu đi" 2
+      // lần liên tiếp ⇒ BE trả 409 Conflict).
+      const currentBeStatus = assignmentStatusMap[id];
+      if (!currentBeStatus) {
+        // Chưa có cache BE status (vd chưa load list) — không gọi BE,
+        // set error để user biết cần đợi load list xong.
+        setJobs(prevJobs);
+        setError('Chưa tải được trạng thái BE. Vui lòng thử lại sau vài giây.');
+        return;
+      }
+      if (currentBeStatus === beStatus) {
+        // Đã ở đúng trạng thái BE — no-op, giữ optimistic UI.
+        return;
+      }
+      // Verify transition hợp lệ trước khi gọi BE. Dùng cùng helper với
+      // `nextAllowedStatuses` ở `mechanic-jobs-service.ts` để đảm bảo FE
+      // và BE dùng chung 1 state machine mirror.
+      const allowedNext = nextAllowedStatuses(
+        currentBeStatus as Parameters<typeof nextAllowedStatuses>[0],
+      );
+      if (!allowedNext.includes(beStatus)) {
+        setJobs(prevJobs);
+        setError(
+          `Không thể chuyển từ "${statusLabel(
+            currentBeStatus as Parameters<typeof statusLabel>[0],
+          )}" sang "${statusLabel(beStatus)}". Vui lòng làm theo đúng thứ tự: ${allowedNext
+            .map((s) => statusLabel(s))
+            .join(' · ')}.`,
+        );
+        return;
+      }
+
       try {
         await transitionAssignment(id, {
           status: beStatus,
@@ -522,7 +555,7 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
         setError(e instanceof Error ? e.message : 'Không thể cập nhật trạng thái');
       }
     },
-    [jobs, isBackendConfigured],
+    [jobs, assignmentStatusMap, isBackendConfigured],
   );
 
   /**
@@ -565,6 +598,40 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
 
       if (!isBackendConfigured) return;
 
+      // Guard: chỉ chuyển sang `awaiting_payment` khi BE đã có transition
+      // hợp lệ. Xem BE `assignment-state.ts:7-10`:
+      //   `quoted` → {awaiting_payment, ...}
+      //   `in_progress` → {awaiting_payment, completed, canceled}
+      //   `awaiting_payment` → {in_progress, completed, canceled}
+      // Nếu assignment đang ở trạng thái khác (vd `accepted`/`en_route`),
+      // BE sẽ trả 409 Conflict — fail-fast và thông báo rõ ràng thay vì
+      // để BE reject lặp lại nhiều lần.
+      const currentBeStatus = assignmentStatusMap[id];
+      if (!currentBeStatus) {
+        setJobs(prevJobs);
+        setError('Chưa tải được trạng thái BE. Vui lòng thử lại sau vài giây.');
+        return;
+      }
+      const allowedNext = nextAllowedStatuses(
+        currentBeStatus as Parameters<typeof nextAllowedStatuses>[0],
+      );
+      const checklistAllowed = ['in_progress', 'awaiting_payment'].includes(currentBeStatus);
+      if (!checklistAllowed) {
+        setJobs(prevJobs);
+        setError(
+          `Trạng thái hiện tại (${statusLabel(
+            currentBeStatus as Parameters<typeof statusLabel>[0],
+          )}) chưa cho phép gửi checklist hoàn tất. Có thể chuyển: ${allowedNext
+            .map((s) => statusLabel(s))
+            .join(' · ')}.`,
+        );
+        return;
+      }
+      if (!allowedNext.includes('awaiting_payment' as never)) {
+        // Cho phép submit checklist nhưng không transition sang
+        // awaiting_payment từ trạng thái này. Skip bước transition.
+      }
+
       try {
         // Bước 1: submit completion checklist. BE cho phép khi assignment
         // đang ACTIVE (in_progress / awaiting_payment cho maintenance;
@@ -581,16 +648,18 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
           },
         });
         // Bước 2: chuyển sang `awaiting_payment` để rider thanh toán.
-        // BE state machine: `quoted` → `awaiting_payment` OK.
-        // Với `in_progress` (rescue): BE yêu cầu rescue_final approved.
-        // Caller (UI JobUpdateForm) nên gọi helper chuyên biệt cho rescue.
-        await transitionAssignment(id, { status: 'awaiting_payment' });
+        // BE state machine: `quoted` → `awaiting_payment` OK;
+        // `in_progress` → `awaiting_payment` OK;
+        // `awaiting_payment` → KHÔNG transition được (đã ở đó).
+        if (allowedNext.includes('awaiting_payment' as never)) {
+          await transitionAssignment(id, { status: 'awaiting_payment' });
+        }
       } catch (e) {
         setJobs(prevJobs);
         setError(e instanceof Error ? e.message : 'Không thể hoàn tất công việc');
       }
     },
-    [jobs, isBackendConfigured],
+    [jobs, assignmentStatusMap, isBackendConfigured],
   );
 
   const toggleAvailability = useCallback(async () => {
@@ -665,9 +734,33 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
           observed_at: new Date().toISOString(),
           accuracy_meters: loc.accuracy ?? 50,
         });
-      } catch {
-        // Lỗi không dừng vòng watch - chỉ set banner.
-        setSharingError('Không thể gửi vị trí. Kiểm tra kết nối mạng.');
+        // Reset fail counter khi ingest thành công.
+        consecutiveFailuresRef.current[assignmentId] = 0;
+      } catch (e) {
+        // Phân loại lỗi:
+        //  - 409 (BE trả conflict vì assignment rời travel state) → dừng
+        //    auto-tracking sau N lần liên tiếp, hiển thị banner để mechanic
+        //    bật lại thủ công.
+        //  - 4xx khác / 5xx / network → set banner thường, không tự dừng
+        //    (chỉ reset counter thành 0 nếu thành công lại sau đó).
+        const apiErr = e as { status?: number; code?: string };
+        if (typeof apiErr.status === 'number' && apiErr.status === 409) {
+          const count = (consecutiveFailuresRef.current[assignmentId] ?? 0) + 1;
+          consecutiveFailuresRef.current[assignmentId] = count;
+          if (count >= 3) {
+            stopAutoTracking();
+            setSharingError(
+              'Thợ đã rời trạng thái chia sẻ vị trí (BE trả 409 nhiều lần liên tiếp). Vui lòng bật lại thủ công sau khi bước vào travel state mới.',
+            );
+            consecutiveFailuresRef.current[assignmentId] = 0;
+            return;
+          }
+          setSharingError(
+            'Không thể gửi vị trí: assignment không còn ở trạng thái cho phép (409).',
+          );
+        } else {
+          setSharingError('Không thể gửi vị trí. Kiểm tra kết nối mạng.');
+        }
       }
     },
     [assignmentStatusMap],
@@ -1139,17 +1232,17 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
   const submitDiagnosisForJob = useCallback(
     async (
       jobId: string,
-      input: { summary: string; root_cause?: string; recommended_action?: string },
+      input: { diagnosis_text: string; safety_notes?: string; recommended_work_text?: string },
     ): Promise<DiagnosisRecord | null> => {
       if (!isBackendConfigured) return null;
       const previous = latestDiagnosisMap[jobId];
       const optimistic: DiagnosisRecord = {
         id: `optimistic-${Date.now()}`,
         assignment_id: jobId,
-        summary: input.summary,
-        ...(input.root_cause ? { root_cause: input.root_cause } : {}),
-        ...(input.recommended_action
-          ? { recommended_action: input.recommended_action }
+        diagnosis_text: input.diagnosis_text,
+        ...(input.safety_notes ? { safety_notes: input.safety_notes } : {}),
+        ...(input.recommended_work_text
+          ? { recommended_work_text: input.recommended_work_text }
           : {}),
         created_by: authUser?.id ?? '',
         created_at: new Date().toISOString(),
