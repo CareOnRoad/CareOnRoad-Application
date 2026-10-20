@@ -29,7 +29,8 @@ export type GeminiClientOptions = {
 
 const geminiEndpointBase = "https://generativelanguage.googleapis.com/v1beta/models";
 const defaultTimeoutMs = 6_000;
-const maxOutputTokens = 360;
+// Vietnamese with diacritics needs more tokens than ASCII; 512 leaves room without truncating JSON.
+const maxOutputTokens = 512;
 
 export class GeminiClient {
   private readonly env: NodeJS.ProcessEnv;
@@ -167,27 +168,18 @@ function createEndpoint(model: string): string {
 }
 
 function createRequestBody(prompt: CompactDiagnosisPrompt): Record<string, unknown> {
+  const textOf = (role: "system" | "user") =>
+    prompt.messages.filter((message) => message.role === role).map((message) => message.content).join("\n\n");
+
+  // Flash-Lite models think off/minimal by default; a thinking model would spend maxOutputTokens on thoughts.
   return {
-    contents: [
-      {
-        parts: [
-          {
-            text: prompt.messages
-              .map((message) => `${message.role.toUpperCase()}:\n${message.content}`)
-              .join("\n\n")
-          }
-        ]
-      }
-    ],
+    systemInstruction: { parts: [{ text: textOf("system") }] },
+    contents: [{ role: "user", parts: [{ text: textOf("user") }] }],
     generationConfig: {
       temperature: 0.2,
       maxOutputTokens,
-      responseFormat: {
-        text: {
-          mimeType: "application/json",
-          schema: diagnosisJsonSchema
-        }
-      }
+      responseMimeType: "application/json",
+      responseJsonSchema: diagnosisJsonSchema
     }
   };
 }

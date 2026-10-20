@@ -2,6 +2,7 @@ import type { ComponentCode } from "./component-taxonomy";
 import type { RecommendedActionType, RiskLevel } from "./diagnosis.schema";
 import { knowledgeReviewedAt, type KnowledgeSourceId } from "./knowledge-sources";
 import { normalizeVietnameseText } from "./normalize-vi";
+import { defaultPriceByComponent, priceRange, type RepairPriceId } from "./repair-prices";
 
 export type KnowledgeApplicability = {
   brand: "honda" | "suzuki" | "sym" | "piaggio";
@@ -33,14 +34,28 @@ export type KnowledgeEntry = {
   vehicle_scope: "petrol_motorcycles" | "petrol_scooters" | "all_motorcycles";
   applicability?: KnowledgeApplicability;
   followup_questions: string[];
-  price_status: "unverified";
+  // dealer_reference: estimated range from repair-prices.ts; unavailable: no reliable public price.
+  price_status: "dealer_reference" | "unavailable";
 };
 
-function entry(input: Omit<KnowledgeEntry, "normalized_keywords" | "reviewed_at" | "price_status">): KnowledgeEntry {
+type EntryInput = Omit<
+  KnowledgeEntry,
+  "normalized_keywords" | "reviewed_at" | "price_status" | "estimated_cost_min" | "estimated_cost_max"
+> & {
+  // Omitted uses the component's most common repair; null means the fix is unknown or diagnostic only.
+  price?: RepairPriceId | null;
+};
+
+function entry({ price, ...input }: EntryInput): KnowledgeEntry {
+  const priceId = price === undefined ? defaultPriceByComponent[input.component_code] : price;
+  const range = priceRange(input.review_status === "internal_policy" ? null : priceId);
+
   return {
     ...input,
     reviewed_at: input.review_status === "pending" ? null : knowledgeReviewedAt,
-    price_status: "unverified",
+    estimated_cost_min: range.min,
+    estimated_cost_max: range.max,
+    price_status: range.max > 0 ? "dealer_reference" : "unavailable",
     normalized_keywords: input.symptom_keywords.map((keyword) => normalizeVietnameseText(keyword))
   };
 }
@@ -65,13 +80,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cố đề lại có thể làm hỏng động cơ",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Tắt khóa điện, đến vị trí an toàn nếu có thể và gọi hỗ trợ"
   }),
   entry({
     entry_id: "honda-scooter-flood-oil-check",
+    price: "flood_oil_service",
     review_status: "source_checked",
     vehicle_scope: "petrol_scooters",
     applicability: {
@@ -87,13 +101,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Dầu nhiễm nước cần được xử lý trước khi chạy tiếp",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ HEAD hoặc thợ kiểm tra dầu động cơ và dầu láp trước khi chạy tiếp"
   }),
   entry({
     entry_id: "honda-sh150i-mil-warning",
+    price: null,
     review_status: "source_checked",
     vehicle_scope: "petrol_scooters",
     applicability: {
@@ -109,8 +122,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cần kỹ thuật viên kiểm tra để xác định lỗi",
     risk_level: "medium",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ HEAD kiểm tra; không tự suy mã lỗi hoặc thay phụ tùng"
   }),
@@ -132,13 +143,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Chưa đủ căn cứ áp dụng tài liệu đúng xe",
     risk_level: "medium",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "ask_followup",
     recommended_action_label: "Xác nhận đời xe, FI hay bình xăng con và thị trường xe"
   }),
   entry({
     entry_id: "suzuki-ph-raider-fi-mil-warning",
+    price: null,
     review_status: "source_checked",
     vehicle_scope: "petrol_motorcycles",
     applicability: {
@@ -155,8 +165,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Chưa xác định được linh kiện hoặc mã lỗi từ lời kể",
     risk_level: "medium",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ đại lý Suzuki kiểm tra FI; không tự thử tia lửa"
   }),
@@ -178,8 +186,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Nối tắt cầu chì có thể gây hỏng điện hoặc cháy",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ thợ kiểm tra; không nối tắt bằng dây hay giấy bạc"
   }),
@@ -200,8 +206,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể làm giảm hiệu quả vận hành",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ thợ kiểm tra khởi động và bugi, chưa kết luận phải thay"
   }),
@@ -222,8 +226,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Kiểm tra sớm giúp phát hiện vấn đề trước khi nặng hơn",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "ask_followup",
     recommended_action_label: "Mô tả vị trí tiếng kêu và đặt lịch kiểm tra"
   }),
@@ -244,8 +246,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cần kiểm tra để hạn chế hư hỏng phát sinh",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "ask_followup",
     recommended_action_label: "Mô tả triệu chứng và liên hệ nơi bảo dưỡng được Piaggio ủy quyền"
   }),
@@ -266,8 +266,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Chưa có căn cứ đặt chung một chu kỳ cho mọi mẫu",
     risk_level: "low",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "ask_followup",
     recommended_action_label: "Xác nhận mẫu/đời xe rồi đối chiếu sách bảo dưỡng"
   }),
@@ -284,8 +282,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể không khởi động được",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ thợ kiểm tra ắc quy và đầu nối"
   }),
@@ -302,8 +298,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể đốt nhiên liệu không hết và hao xăng",
     risk_level: "low",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra bugi"
   }),
@@ -320,13 +314,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Xe yếu khi tăng tốc",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra hệ thống nhiên liệu, chưa tự chỉnh xăng gió"
   }),
   entry({
     entry_id: "engine-shutdown",
+    price: null,
     review_status: "source_checked",
     vehicle_scope: "petrol_motorcycles",
     source_refs: [{ source_id: "yamaha-shutdown", section: "Mở đầu; 1.1; 1.4; 1.7; 1.9" }],
@@ -341,8 +334,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Dễ mất an toàn giao thông",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Dừng xe và gọi hỗ trợ"
   }),
@@ -359,8 +350,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Máy ì và tốn nhiên liệu",
     risk_level: "low",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra lọc gió đúng loại; không tự rửa bằng xăng"
   }),
@@ -377,8 +366,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cần bảo dưỡng để bảo đảm phanh hoạt động an toàn",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra phanh; dừng xe nếu lực phanh giảm"
   }),
@@ -395,8 +382,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cần xác định tiếng kêu từ bánh, phanh, động cơ hay nồi xe",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "ask_followup",
     recommended_action_label: "Mô tả thêm vị trí và thời điểm phát ra tiếng kêu"
   }),
@@ -413,13 +398,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Xe có thể rung hoặc truyền lực kém nếu để lâu",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ thợ kiểm tra dây đai và ly hợp của xe ga"
   }),
   entry({
     entry_id: "wheel-bearing-or-tire-noise",
+    price: null,
     review_status: "pending",
     vehicle_scope: "all_motorcycles",
     source_refs: [],
@@ -431,8 +415,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể ảnh hưởng độ ổn định nếu bạc đạn hoặc lốp hư",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra bánh, lốp và bạc đạn"
   }),
@@ -449,13 +431,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cần kiểm tra để bảo đảm phanh hoạt động an toàn",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra phanh; dừng xe nếu bánh bó hoặc phanh yếu"
   }),
   entry({
     entry_id: "fuel-leak",
+    price: null,
     review_status: "source_checked",
     vehicle_scope: "petrol_motorcycles",
     source_refs: [{ source_id: "yamaha-fuel-consumption", section: "1. Các dấu hiệu xe máy bị hao xăng" }],
@@ -467,13 +448,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Nguy cơ cháy nổ",
     risk_level: "critical",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Tắt máy, tránh nguồn lửa và gọi hỗ trợ"
   }),
   entry({
     entry_id: "smoke",
+    price: null,
     review_status: "source_checked",
     vehicle_scope: "petrol_motorcycles",
     source_refs: [{ source_id: "yamaha-fuel-consumption", section: "1. Khói thải màu đen hoặc trắng" }],
@@ -485,13 +465,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cần kiểm tra động cơ và hệ thống nạp, chưa kết luận từ màu khói",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Dừng xe và kiểm tra ngay"
   }),
   entry({
     entry_id: "unstable-steering",
+    price: null,
     review_status: "source_checked",
     vehicle_scope: "all_motorcycles",
     source_refs: [{ source_id: "yamaha-tires", section: "Vai trò của lốp; thủng lốp và nguy cơ mất lái" }],
@@ -503,8 +482,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Dễ mất lái",
     risk_level: "critical",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Dừng xe an toàn"
   }),
@@ -521,8 +498,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể ảnh hưởng khả năng điều khiển xe",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Dừng xe kiểm tra lốp trước khi chạy tiếp"
   }),
@@ -550,8 +525,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể mòn nặng hoặc bó máy nếu tiếp tục chạy",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Tắt máy; không mở nắp hệ thống làm mát khi còn nóng"
   }),
@@ -568,8 +541,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Xe hao xăng và dễ tắt máy khi chạy chậm",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Nhờ thợ kiểm tra đánh lửa và nhiên liệu"
   }),
@@ -586,8 +557,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Động cơ đốt không tối ưu và tốn nhiên liệu",
     risk_level: "low",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra hoặc thay lọc gió"
   }),
@@ -615,8 +584,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể chập điện hoặc hư động cơ nếu cố đề liên tục",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Không cố đề; đưa người đến nơi an toàn và gọi hỗ trợ"
   }),
@@ -640,8 +607,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Xe có thể hết điện và không khởi động lại được",
     risk_level: "medium",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra bình, sạc và dây điện"
   }),
@@ -658,13 +623,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Có thể hết điện",
     risk_level: "low",
     can_continue_riding: true,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "book_mobile_repair",
     recommended_action_label: "Kiểm tra ắc quy; chưa kết luận chỉ từ độ sáng đèn"
   }),
   entry({
     entry_id: "oil-contaminated-after-flood",
+    price: "flood_oil_service",
     review_status: "source_checked",
     vehicle_scope: "petrol_motorcycles",
     source_refs: [
@@ -679,13 +643,12 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Khả năng bôi trơn suy giảm, có thể hư động cơ",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Không khởi động lại; nhờ thợ kiểm tra dầu và động cơ"
   }),
   entry({
     entry_id: "scooter-jerk-after-flood",
+    price: null,
     review_status: "source_checked",
     vehicle_scope: "petrol_scooters",
     source_refs: [{ source_id: "yamaha-flood", section: "4.2. Xe ga giật và kêu ở nồi sau sau ngập" }],
@@ -697,8 +660,6 @@ export const knowledgeBase: KnowledgeEntry[] = [
     consequences: "Cần kiểm tra ly hợp, truyền động và ảnh hưởng của ngập nước",
     risk_level: "high",
     can_continue_riding: false,
-    estimated_cost_min: 0,
-    estimated_cost_max: 0,
     recommended_action_type: "emergency_rescue",
     recommended_action_label: "Dừng xe và nhờ thợ kiểm tra sau ngập"
   })

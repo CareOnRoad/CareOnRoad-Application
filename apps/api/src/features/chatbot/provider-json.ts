@@ -1,46 +1,25 @@
+import { componentCodes } from "./component-taxonomy";
+
+// Gemini responseJsonSchema subset: typed enums, no const. Property order is the generation order,
+// so the model names the fault before writing the rider-facing answer.
 export const diagnosisJsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: [
-    "v",
-    "risk",
-    "ride",
-    "part",
-    "issue",
-    "answer",
-    "actions",
-    "questions"
-  ],
+  required: ["issue", "parts", "risk", "ride", "answer", "actions", "questions"],
   properties: {
-    v: { const: 1 },
-    risk: { enum: ["low", "medium", "high", "critical"] },
-    ride: { type: "boolean" },
-    part: {
-      enum: [
-        "SPARK_PLUG",
-        "BATTERY",
-        "AIR_FILTER",
-        "FUEL_SYSTEM",
-        "BRAKE_SYSTEM",
-        "ENGINE_OIL",
-        "DRIVE_BELT",
-        "TIRE",
-        "ELECTRICAL_SYSTEM",
-        "UNKNOWN"
-      ]
-    },
-    issue: { type: "string" },
-    answer: { type: "string" },
-    actions: {
+    issue: { type: "string", description: "Tên lỗi ngắn gọn, tiếng Việt có dấu." },
+    parts: {
       type: "array",
+      minItems: 1,
       maxItems: 2,
-      items: { type: "string" }
+      items: { type: "string", enum: componentCodes },
+      description: "1-2 component_code có khả năng hỏng nhất, xếp giảm dần; chỉ [\"UNKNOWN\"] khi chưa đủ dữ kiện."
     },
-    questions: {
-      type: "array",
-      maxItems: 2,
-      items: { type: "string" }
-    }
+    risk: { type: "string", enum: ["low", "medium", "high", "critical"] },
+    ride: { type: "boolean", description: "true nếu có thể chạy chậm tới tiệm gần nhất an toàn." },
+    answer: { type: "string", description: "Tối đa 2 câu ngắn tiếng Việt có dấu, không nêu giá." },
+    actions: { type: "array", maxItems: 2, items: { type: "string" }, description: "Việc rider nên làm ngay." },
+    questions: { type: "array", maxItems: 2, items: { type: "string" }, description: "Câu hỏi giúp phân biệt nguyên nhân." }
   }
 } as const;
 

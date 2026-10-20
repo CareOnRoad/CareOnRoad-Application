@@ -53,7 +53,7 @@ node tests/http/verify-fixtures.mjs <run-id-trong-reports>
 Mặc định runner chạy API ở `http://127.0.0.1:3100`. Đặt `API_TEST_BASE_URL` nếu muốn
 dùng API test đã chạy; API đó phải kết nối cùng Supabase test với runner. Timeout
 mỗi HTTP request là 45 giây, đổi bằng `API_TEST_TIMEOUT_MS`.
-API local do runner khởi động đặt Gemini/OpenRouter key rỗng trong child process
+API local do runner khởi động đặt Gemini key rỗng trong child process
 để test fallback mà không gọi provider thật; không sửa file env. Với API ngoài,
 người chạy cần đảm bảo provider test đã tắt/cô lập.
 

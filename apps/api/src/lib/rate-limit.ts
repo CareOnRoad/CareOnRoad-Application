@@ -10,7 +10,7 @@ export type RateLimitDecision = {
   limit?: number;
   remaining?: number;
   resetAt?: number;
-  scope?: "session" | "ip" | "voice_session" | "transcription_session";
+  scope?: "session" | "ip" | "ip_daily" | "voice_session" | "transcription_session";
 };
 
 export type RateLimitRequest = {
@@ -29,6 +29,7 @@ export type RateLimiterOptions = {
   windowMs?: number;
   sessionLimit?: number;
   ipLimit?: number;
+  ipDailyLimit?: number;
   voiceSessionLimit?: number;
   transcriptionSessionLimit?: number;
 };
@@ -40,7 +41,9 @@ type Bucket = {
 
 const DEFAULT_WINDOW_MS = 60 * 60 * 1000;
 const DEFAULT_SESSION_LIMIT = 10;
-const DEFAULT_IP_LIMIT = 30;
+export const DEFAULT_IP_LIMIT = 10;
+export const DEFAULT_IP_DAILY_LIMIT = 10;
+export const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_VOICE_SESSION_LIMIT = 5;
 const DEFAULT_TRANSCRIPTION_SESSION_LIMIT = 30;
 
@@ -50,6 +53,7 @@ export class InMemoryRateLimiter {
   private readonly windowMs: number;
   private readonly sessionLimit: number;
   private readonly ipLimit: number;
+  private readonly ipDailyLimit: number;
   private readonly voiceSessionLimit: number;
   private readonly transcriptionSessionLimit: number;
 
@@ -58,6 +62,7 @@ export class InMemoryRateLimiter {
     this.windowMs = options.windowMs ?? DEFAULT_WINDOW_MS;
     this.sessionLimit = options.sessionLimit ?? DEFAULT_SESSION_LIMIT;
     this.ipLimit = options.ipLimit ?? DEFAULT_IP_LIMIT;
+    this.ipDailyLimit = options.ipDailyLimit ?? DEFAULT_IP_DAILY_LIMIT;
     this.voiceSessionLimit = options.voiceSessionLimit ?? DEFAULT_VOICE_SESSION_LIMIT;
     this.transcriptionSessionLimit =
       options.transcriptionSessionLimit ?? DEFAULT_TRANSCRIPTION_SESSION_LIMIT;
@@ -72,6 +77,7 @@ export class InMemoryRateLimiter {
 
     if (request.ip) {
       decisions.push(this.consume(`ip:${request.ip}`, this.ipLimit, "ip"));
+      decisions.push(this.consume(`ip_daily:${request.ip}`, this.ipDailyLimit, "ip_daily", DAY_MS));
     }
 
     if (request.inputMode === "voice" && request.sessionId) {
@@ -114,12 +120,13 @@ export class InMemoryRateLimiter {
   private consume(
     key: string,
     limit: number,
-    scope: NonNullable<RateLimitDecision["scope"]>
+    scope: NonNullable<RateLimitDecision["scope"]>,
+    windowMs = this.windowMs
   ): RateLimitDecision {
     const now = this.now();
     const existing = this.buckets.get(key);
     const bucket =
-      existing && existing.resetAt > now ? existing : { count: 0, resetAt: now + this.windowMs };
+      existing && existing.resetAt > now ? existing : { count: 0, resetAt: now + windowMs };
 
     bucket.count += 1;
     this.buckets.set(key, bucket);
@@ -128,17 +135,9 @@ export class InMemoryRateLimiter {
     const retryAfterSeconds = Math.max(Math.ceil((bucket.resetAt - now) / 1000), 1);
 
     if (bucket.count > limit) {
-      const message =
-        scope === "ip"
-          ? "Too many requests from this IP."
-          : scope === "transcription_session"
-            ? "Too many transcription requests for this session."
-            : "Too many diagnosis requests for this session.";
-
       return {
         allowed: false,
-        code: scope === "ip" ? "RATE_LIMITED" : "AI_SESSION_LIMIT_EXCEEDED",
-        message,
+        ...rateLimitDenial(scope),
         retryAfterSeconds,
         limit,
         remaining: 0,
@@ -166,6 +165,19 @@ export class InMemoryRateLimiter {
       allowed: true,
       remaining
     };
+  }
+}
+
+export function rateLimitDenial(scope: NonNullable<RateLimitDecision["scope"]>): { code: ApiErrorCode; message: string } {
+  switch (scope) {
+    case "ip":
+      return { code: "RATE_LIMITED", message: "Too many requests from this IP." };
+    case "ip_daily":
+      return { code: "AI_DAILY_LIMIT_EXCEEDED", message: "Daily chatbot limit reached. Please try again tomorrow." };
+    case "transcription_session":
+      return { code: "AI_SESSION_LIMIT_EXCEEDED", message: "Too many transcription requests for this session." };
+    default:
+      return { code: "AI_SESSION_LIMIT_EXCEEDED", message: "Too many diagnosis requests for this session." };
   }
 }
 

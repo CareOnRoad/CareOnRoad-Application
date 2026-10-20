@@ -10,7 +10,7 @@
   flows, mechanics handling assigned jobs, admins supervising operations, and
   demo users testing quick advisory chatbot diagnosis.
 - **User skill level:** beginner to intermediate; keep explanations practical and concise.
-- **Stack:** pnpm workspace, Next.js App Router, React 19, TypeScript, Zod, Vitest, local `sherpa-onnx-node`, Gemini/OpenRouter Chat Completions, Supabase hosted PostgreSQL.
+- **Stack:** pnpm workspace, Next.js App Router, React 19, TypeScript, Zod, Vitest, local `sherpa-onnx-node`, Gemini API (Google AI Studio), Supabase hosted PostgreSQL.
 - **Backend location:** `apps/api`; backend-relative paths in this file such as `app/api` and `src/features` are relative to `apps/api` unless stated otherwise.
 - **Runtime:** independent mobile, web, and API applications; rate limits remain in memory, chatbot
   persistence defaults to memory and can use PostgreSQL when
@@ -33,6 +33,19 @@
 - **Seed hosted/dev mock data:** `pnpm.cmd run seed:mock`
 - **Verify hosted/dev mock data:** `pnpm.cmd run seed:mock:verify`
 - Use `pnpm.cmd` on Windows because `pnpm.ps1` may be blocked by execution policy.
+
+## Graphify Knowledge Graph
+
+- The repo knowledge graph lives in `graphify-out/` (`graph.json`, `GRAPH_REPORT.md`,
+  `graph.html`). Agents with the graphify skill should use it before broad code searches.
+- **Answer codebase questions from the graph first:** `/graphify query "<question>"`
+  (add `--budget 1500` to cap tokens, `--dfs` to trace one path). Also available:
+  `/graphify path "A" "B"` and `/graphify explain "Node"`.
+- **Keep it fresh:** run `/graphify . --update` at the start of a work session and after
+  pulling or finishing a batch of code changes. It re-extracts only new/changed files.
+- If `graphify-out/graph.json` is missing, build it once with `/graphify .`.
+- The graph is a map, not the source of truth: always read the real files before
+  editing code, and trust the code when the graph and code disagree.
 
 ## Current Workflows
 
@@ -192,12 +205,13 @@
 - `POST /api/chatbot/sessions/[sessionId]/messages`
   - Accepts `application/json` text messages.
   - Also supports multipart voice messages for route coverage, though the current UI uses the dedicated transcription route first.
-  - Applies route-level rate limiting before diagnosis, ASR, or OpenRouter.
+  - Applies route-level rate limiting (hourly session/IP plus daily IP) before diagnosis, ASR, or Gemini.
+  - Rejects text over 500 characters (400) and off-topic text (422 `OFF_TOPIC`) before calling Gemini.
   - Returns `DiagnosisResult` directly on success.
 - `POST /api/chatbot/sessions/[sessionId]/transcriptions`
   - Accepts multipart WAV upload as `audio_file`.
   - Applies voice transcription rate limiting.
-  - Runs local ASR only; does not call OpenRouter.
+  - Runs local ASR only; does not call Gemini.
   - Returns `{ session_id, transcribed_text }`.
 - `GET /api/chatbot/sessions/[sessionId]/diagnosis`
   - Returns `{ session_id, diagnosis }` for the latest stored diagnosis.
@@ -448,7 +462,7 @@
 
 - `src/features/chatbot/diagnosis.service.ts`
   - Main application service.
-  - Normalizes input, runs safety gate, retrieves local knowledge, builds prompt, calls Gemini/OpenRouter, validates output, post-validates, stores diagnosis, and logs safely.
+  - Normalizes input, runs safety gate, retrieves local knowledge, builds prompt, calls Gemini, validates output, post-validates, stores diagnosis, and logs safely.
 - `src/features/chatbot/normalize-vi.ts`
   - Vietnamese accent-insensitive normalization for matching.
 - `src/features/chatbot/safety-gate.ts`
@@ -461,18 +475,20 @@
 - `src/features/chatbot/prompts.ts`
   - Compact JSON-only provider prompt with few-shot examples.
   - Includes guidance for vague running-noise symptoms to use `UNKNOWN` instead of guessing battery or spark plug.
-- `src/features/chatbot/openrouter.client.ts`
-  - Backend-only OpenRouter client.
+- `src/features/chatbot/topic-filter.ts`
+  - Accent-aware vehicle keyword filter; off-topic text never reaches Gemini.
+- `src/features/chatbot/repair-prices.ts`
+  - Sourced VND repair price ranges per component; the only source of chatbot prices.
   - Reads environment variables, sends low-token JSON-schema chat completion requests, classifies provider errors, logs sanitized metadata, repairs lightly truncated JSON, and supports optional fallback model.
 - `src/features/chatbot/gemini.client.ts`
-  - Backend-only Gemini client used before OpenRouter in the current provider chain.
+  - Backend-only Gemini client (`responseJsonSchema`); the only AI provider.
 - `src/features/chatbot/post-validation.ts`
   - Repairs provider JSON into `DiagnosisResult`.
   - Reconciles model output with safety and retrieved knowledge.
   - Rejects or replaces low-information text such as `true`, `false`, `UNKNOWN`, `chua xac dinh`, and `khong ro`.
   - Caps arrays and confidence.
 - `src/features/chatbot/fallback-diagnosis.ts`
-  - Rule-based local fallback when OpenRouter is missing, slow, invalid, unsafe, or unavailable.
+  - Rule-based local fallback when Gemini is missing, slow, invalid, unsafe, or unavailable.
 - `src/features/chatbot/session.store.ts`
   - In-memory implementation of the chatbot session repository contract.
 - `src/server/repositories/chatbot-session-repository.factory.ts`
@@ -530,13 +546,7 @@
 - `GEMINI_MODEL`
 - `AI_TOTAL_TIMEOUT_MS`
 - `GEMINI_TIMEOUT_MS`
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL`
-- `OPENROUTER_TIMEOUT_MS`
-- `OPENROUTER_SITE_URL`
-- `OPENROUTER_APP_TITLE`
-- `OPENROUTER_ENABLE_MODEL_FALLBACK`
-- `OPENROUTER_FALLBACK_MODEL`
+- `CHATBOT_IP_DAILY_LIMIT` (default 10 diagnoses per client IP per 24 hours; hourly IP limit is also 10)
 - `DATABASE_URL`
 - `TEST_DATABASE_URL`
 - `TEST_DATABASE_CONFIRMED` (only for a separate hosted test project)
@@ -585,16 +595,17 @@
 - `PAYOS_CANCEL_URL`
 - ASR model variables are handled in `src/features/asr/sherpa-onnx.client.ts`; keep local model files under `models/`.
 
-Never expose `GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
+Never expose `GEMINI_API_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, `SEED_USER_PASSWORD`, database URLs, or raw
 `.env.local` values in logs, frontend code, test output, or documentation.
 
-## OpenRouter Notes
+## Gemini Notes
 
-- Free OpenRouter models are unstable for strict JSON.
-- `openrouter/free` can route to different providers across requests.
-- Some free models return HTTP 200 without `choices[0].message.content`.
-- Some free models return incomplete or malformed JSON.
+- OpenRouter was removed; Gemini via a Google AI Studio key is the only provider.
+- Use a Flash-Lite model (`gemini-3.5-flash-lite`): thinking models use the output token budget and return empty or truncated JSON.
+- Gemini 2.5 models are only available to projects that used them before.
+- Free-tier quotas are per Google Cloud project, not per key; check them in AI Studio.
+- The model returns a compact JSON (`issue`, `parts`, `risk`, `ride`, `answer`, `actions`, `questions`); prices and provenance are added by the backend.
 - The current design treats AI as primary when usable, then applies backend guardrails and local fallback for safety and UX.
 - Do not remove local fallback. It is required for demo reliability.
 
@@ -611,7 +622,7 @@ Never expose `GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
   DB suite can take many minutes. Long-running integration tests may need
   explicit per-test timeouts; for example assignment acceptance rollback
   coverage currently allows 90 seconds for the slowest hosted-DB case.
-- Tests must not call real OpenRouter.
+- Tests must not call real Gemini.
 - Normal tests must not run real ONNX ASR.
 - Add focused tests when adding knowledge-base entries, prompt behavior, post-validation rules, route behavior, or UI view-model behavior.
 
@@ -634,8 +645,8 @@ Never expose `GEMINI_API_KEY`, `OPENROUTER_API_KEY`,
 - Do not delete or overwrite files without confirming.
 - Do not hardcode secrets, API keys, or credentials.
 - Do not run the mock-data seed against production.
-- Do not put OpenRouter calls or keys in frontend code.
-- Do not send raw audio to OpenRouter.
+- Do not put Gemini calls or keys in frontend code.
+- Do not send raw audio to Gemini.
 - Do not add motorcycle selector, brand dropdown, model dropdown, booking,
   payment, settlement, inventory, **rider GPS autofill UI beyond what's already
   wired in `app/rider/(tabs)/rescue.tsx` (1-shot capture + refresh button)**,

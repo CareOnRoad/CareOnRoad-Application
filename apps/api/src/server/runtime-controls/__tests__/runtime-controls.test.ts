@@ -33,7 +33,7 @@ describe("distributed runtime controls", () => {
     const fallback = new InMemoryProviderCircuitBreaker({ failureThreshold: 1 });
     const failedStore = { consumeRateBucket: store.consumeRateBucket.bind(store), isCircuitOpen: async () => { throw new Error("down"); }, recordCircuitSuccess: store.recordCircuitSuccess.bind(store), recordCircuitFailure: async () => { throw new Error("down"); }, cleanupExpired: store.cleanupExpired.bind(store) };
     const failed = new SharedProviderCircuitBreaker(failedStore, { fallback });
-    await failed.recordFailure("openrouter"); await expect(failed.isOpen("openrouter")).resolves.toBe(true);
+    await failed.recordFailure("gemini"); await expect(failed.isOpen("gemini")).resolves.toBe(true);
   });
 
   it("keeps memory as default factory mode", () => { expect(createRateLimiter({ NODE_ENV: "test" })).toBeInstanceOf(InMemoryRateLimiter); });

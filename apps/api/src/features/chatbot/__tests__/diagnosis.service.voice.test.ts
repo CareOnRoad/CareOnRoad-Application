@@ -5,14 +5,14 @@ import type { LogEvent } from "@/lib/server-logger";
 
 import { DiagnosisService } from "../diagnosis.service";
 import type { DiagnosisResult } from "../diagnosis.schema";
-import type { OpenRouterResult } from "../openrouter.client";
+import type { AiProviderResult } from "../ai-provider.types";
 import { InMemorySessionStore } from "../session.store";
 
 describe("DiagnosisService voice orchestration", () => {
   it("calls ASR, uses transcribed text, and runs the diagnosis pipeline", async () => {
-    const { service, store, asr, openRouter } = setup({
+    const { service, store, asr, aiProvider } = setup({
       asrResult: { success: true, text: "xe kho de va den yeu" },
-      openRouterResult: {
+      aiResult: {
         success: true,
         json: { ...modelDiagnosis(), transcribed_text: "xe kho de va den yeu" },
         apiHttpStatus: "200"
@@ -31,7 +31,7 @@ describe("DiagnosisService voice orchestration", () => {
     });
 
     expect(asr.transcribe).toHaveBeenCalledOnce();
-    expect(openRouter.createDiagnosisJson).toHaveBeenCalledOnce();
+    expect(aiProvider.createDiagnosisJson).toHaveBeenCalledOnce();
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.diagnosis.transcribed_text).toBe("xe kho de va den yeu");
@@ -43,10 +43,10 @@ describe("DiagnosisService voice orchestration", () => {
     });
   });
 
-  it("returns controlled error for empty ASR transcription and does not call OpenRouter", async () => {
-    const { service, store, openRouter } = setup({
+  it("returns controlled error for empty ASR transcription and does not call the AI provider", async () => {
+    const { service, store, aiProvider } = setup({
       asrResult: { success: true, text: "   " },
-      openRouterResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
+      aiResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
     });
     const session = store.createSession();
 
@@ -60,17 +60,17 @@ describe("DiagnosisService voice orchestration", () => {
       success: false,
       errorCode: "ASR_EMPTY_TRANSCRIPTION"
     });
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
+    expect(aiProvider.createDiagnosisJson).not.toHaveBeenCalled();
   });
 
-  it("returns controlled ASR failure and does not call OpenRouter", async () => {
-    const { service, store, openRouter } = setup({
+  it("returns controlled ASR failure and does not call the AI provider", async () => {
+    const { service, store, aiProvider } = setup({
       asrResult: {
         success: false,
         errorCode: "ASR_NOT_AVAILABLE",
         message: "ASR unavailable"
       },
-      openRouterResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
+      aiResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
     });
     const session = store.createSession();
 
@@ -84,13 +84,13 @@ describe("DiagnosisService voice orchestration", () => {
       success: false,
       errorCode: "ASR_NOT_AVAILABLE"
     });
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
+    expect(aiProvider.createDiagnosisJson).not.toHaveBeenCalled();
   });
 
   it("does not log raw audio bytes", async () => {
     const { service, store, records } = setup({
       asrResult: { success: true, text: "xe kho de" },
-      openRouterResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
+      aiResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
     });
     const session = store.createSession();
 
@@ -106,19 +106,19 @@ describe("DiagnosisService voice orchestration", () => {
   });
 });
 
-function setup(options: { asrResult: AsrResult; openRouterResult: OpenRouterResult }) {
+function setup(options: { asrResult: AsrResult; aiResult: AiProviderResult }) {
   const store = new InMemorySessionStore();
   const records: LogEvent[] = [];
   const asr = {
     transcribe: vi.fn(async () => options.asrResult)
   };
-  const openRouter = {
-    createDiagnosisJson: vi.fn(async () => options.openRouterResult)
+  const aiProvider = {
+    createDiagnosisJson: vi.fn(async () => options.aiResult)
   };
   const service = new DiagnosisService({
     sessionStore: store,
     asr,
-    openRouter,
+    aiProvider,
     logger: {
       info: (payload) => records.push(payload),
       warn: (payload) => records.push(payload),
@@ -127,7 +127,7 @@ function setup(options: { asrResult: AsrResult; openRouterResult: OpenRouterResu
     now: () => 1000
   });
 
-  return { service, store, records, asr, openRouter };
+  return { service, store, records, asr, aiProvider };
 }
 
 function modelDiagnosis(): DiagnosisResult {

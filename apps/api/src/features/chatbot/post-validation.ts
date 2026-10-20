@@ -1,7 +1,8 @@
-import { isComponentCode } from "./component-taxonomy";
+import { type ComponentCode, getComponentLabel, isComponentCode } from "./component-taxonomy";
 import type { DiagnosisResult, RecommendedActionType, RiskLevel } from "./diagnosis.schema";
 import { diagnosisSchema } from "./diagnosis.schema";
 import { normalizeVietnameseText } from "./normalize-vi";
+import { defaultPriceByComponent, estimateTotal, priceRange } from "./repair-prices";
 import type { RetrievedKnowledgeEntry } from "./retrieval";
 import type { SafetyGateResult } from "./safety-gate";
 
@@ -46,16 +47,17 @@ export function postValidateDiagnosis(
     safety,
     primaryKnowledge
   );
-  const topHypotheses = repairHypotheses(raw.top_hypotheses, raw, primaryKnowledge);
+  const topHypotheses = repairHypotheses(raw.top_hypotheses, raw, options.retrievedKnowledge ?? []);
+  const estimatedTotal = estimateTotal(topHypotheses);
   const overallConfidence = repairOverallConfidence(raw.overall_confidence, topHypotheses, primaryKnowledge);
   const repaired = {
-    short_answer: repairShortAnswer(repairShortAnswerSeed(raw, primaryKnowledge)),
+    short_answer: repairShortAnswer(repairShortAnswerSeed(raw, primaryKnowledge), estimatedTotal.max > 0),
     overall_confidence: needsClarification ? Math.min(overallConfidence, 0.35) : overallConfidence,
     risk_level: riskLevel,
     can_continue_riding: canContinueRiding,
     top_hypotheses: topHypotheses,
-    // The curated corpus has no verified repair prices. Ignore provider numbers.
-    estimated_total: { currency: "VND", min: 0, max: 0 },
+    // Prices come only from the backend catalog; provider numbers are ignored.
+    estimated_total: estimatedTotal,
     recommended_next_actions: needsClarification
       ? repairActions(undefined, {}, riskLevel, safety, primaryKnowledge)
       : repairActions(raw.recommended_next_actions, raw, riskLevel, safety, primaryKnowledge),
@@ -82,8 +84,9 @@ export function postValidateDiagnosis(
 function repairHypotheses(
   value: unknown,
   raw: Record<string, unknown>,
-  primaryKnowledge?: RetrievedKnowledgeEntry
+  retrievedKnowledge: RetrievedKnowledgeEntry[]
 ): DiagnosisResult["top_hypotheses"] {
+  const primaryKnowledge = retrievedKnowledge[0];
   // A request to identify the vehicle cannot be turned into a technical diagnosis.
   if (primaryKnowledge?.review_status === "internal_policy" && primaryKnowledge.component_code === "UNKNOWN") {
     return [{
@@ -104,19 +107,37 @@ function repairHypotheses(
       return [];
     }
 
-    const componentCode = primaryKnowledge?.component_code ?? firstString(raw.likely_component_code, raw.part);
-    const validComponentCode = isComponentCode(componentCode);
+    const modelParts = [
+      ...new Set((Array.isArray(raw.parts) ? raw.parts : [raw.likely_component_code, raw.part]).filter(isComponentCode))
+    ];
+    const firstCode = primaryKnowledge?.component_code ?? modelParts[0] ?? "UNKNOWN";
+    const confidence = clampNumber(raw.overall_confidence) || 0.45;
+    const first = {
+      rank: 1 as const,
+      component_code: firstCode,
+      cause: shortIssue,
+      symptoms: asMeaningfulString(raw.symptoms, primaryKnowledge?.symptoms ?? shortIssue),
+      consequences: asMeaningfulString(raw.consequences, primaryKnowledge?.consequences ?? "Cần kiểm tra thêm"),
+      confidence,
+      ...costFor(firstCode, retrievedKnowledge)
+    };
+    const secondCode = [...modelParts, ...retrievedKnowledge.map((entry) => entry.component_code)]
+      .find((code) => code !== firstCode && code !== "UNKNOWN");
+    if (!secondCode) {
+      return [first];
+    }
 
+    const secondKnowledge = retrievedKnowledge.find((entry) => entry.component_code === secondCode);
     return [
+      first,
       {
-        rank: 1,
-        component_code: validComponentCode ? componentCode : "UNKNOWN",
-        cause: shortIssue,
-        symptoms: asMeaningfulString(raw.symptoms, primaryKnowledge?.symptoms ?? shortIssue),
-        consequences: asMeaningfulString(raw.consequences, primaryKnowledge?.consequences ?? "Can kiem tra them"),
-        confidence: clampNumber(raw.overall_confidence) || 0.45,
-        estimated_cost_min: 0,
-        estimated_cost_max: 0
+        rank: 2,
+        component_code: secondCode,
+        cause: secondKnowledge?.cause ?? `Có thể liên quan ${getComponentLabel(secondCode).toLowerCase()}`,
+        symptoms: secondKnowledge?.symptoms ?? first.symptoms,
+        consequences: secondKnowledge?.consequences ?? "Cần thợ kiểm tra để xác nhận",
+        confidence: Math.min(confidence, 0.35),
+        ...costFor(secondCode, retrievedKnowledge)
       }
     ];
   }
@@ -127,21 +148,30 @@ function repairHypotheses(
     .map((item, index) => {
       const componentCode = index === 0 && primaryKnowledge ? primaryKnowledge.component_code : asString(item.component_code);
       const validComponentCode = isComponentCode(componentCode);
+      const code: ComponentCode = validComponentCode ? componentCode : "UNKNOWN";
       const confidence = clampNumber(item.confidence);
 
       return {
         rank: index === 0 ? (1 as const) : (2 as const),
-        component_code: validComponentCode ? componentCode : "UNKNOWN",
-        cause: asMeaningfulString(item.cause, primaryKnowledge?.cause ?? "Chua xac dinh"),
-        symptoms: asMeaningfulString(item.symptoms, primaryKnowledge?.symptoms ?? "Trieu chung chua ro"),
-        consequences: asMeaningfulString(item.consequences, primaryKnowledge?.consequences ?? "Can kiem tra them"),
+        component_code: code,
+        cause: asMeaningfulString(item.cause, primaryKnowledge?.cause ?? "Chưa xác định"),
+        symptoms: asMeaningfulString(item.symptoms, primaryKnowledge?.symptoms ?? "Triệu chứng chưa rõ"),
+        consequences: asMeaningfulString(item.consequences, primaryKnowledge?.consequences ?? "Cần kiểm tra thêm"),
         confidence: validComponentCode ? confidence : Math.min(confidence, 0.35),
-        estimated_cost_min: 0,
-        estimated_cost_max: 0
+        ...costFor(code, retrievedKnowledge)
       };
     });
 
   return repaired;
+}
+
+// A retrieved entry decides the price for its component (null-priced entries stay unpriced).
+function costFor(code: ComponentCode, retrievedKnowledge: RetrievedKnowledgeEntry[]) {
+  const entry = retrievedKnowledge.find((item) => item.component_code === code);
+  const range = entry
+    ? { min: entry.estimated_cost_min, max: entry.estimated_cost_max }
+    : priceRange(defaultPriceByComponent[code]);
+  return { estimated_cost_min: range.min, estimated_cost_max: range.max };
 }
 
 function repairActions(
@@ -174,7 +204,7 @@ function repairActions(
         continue;
       }
 
-      add(type as RecommendedActionType, asNonEmptyString(action.label, "Kiem tra them"));
+      add(type as RecommendedActionType, asNonEmptyString(action.label, "Kiểm tra thêm"));
     }
   }
 
@@ -199,16 +229,12 @@ function repairFollowupQuestions(value: unknown, primaryKnowledge?: RetrievedKno
   return questions.length > 0 ? questions : primaryKnowledge?.followup_questions.slice(0, 2) ?? [];
 }
 
-function repairShortAnswer(value: string): string {
-  const sentences = splitSentences(value).slice(0, 3);
-  const compact = sentences.length > 0 ? sentences.join(" ") : "Can kiem tra them.";
+export const priceNote = "Chi phí bên dưới chỉ là ước tính tham khảo, thợ sẽ báo giá chính xác.";
+export const noPriceNote = "Chưa có ước tính chi phí, cần thợ kiểm tra.";
 
-  if (normalizeVietnameseText(compact).includes("chua co uoc tinh chi phi")) {
-    return compact;
-  }
-
-  const withRoom = splitSentences(compact).slice(0, 2);
-  return [...withRoom, "Chua co uoc tinh chi phi; can tho kiem tra."].join(" ");
+function repairShortAnswer(value: string, hasPrice: boolean): string {
+  const sentences = splitSentences(value).slice(0, 2);
+  return [...(sentences.length > 0 ? sentences : ["Cần kiểm tra thêm."]), hasPrice ? priceNote : noPriceNote].join(" ");
 }
 
 function applySafetyOverride(value: Record<string, unknown>, safety: SafetyGateResult): Record<string, unknown> {
@@ -222,13 +248,13 @@ function applySafetyOverride(value: Record<string, unknown>, safety: SafetyGateR
 
   return {
     ...value,
-    short_answer: "Dung xe ngay va goi ho tro. Chua co uoc tinh chi phi; can tho kiem tra.",
+    short_answer: `Dừng xe ngay và gọi hỗ trợ. ${(value.estimated_total as { max: number }).max > 0 ? priceNote : noPriceNote}`,
     risk_level: safety.risk_level ?? "high",
     can_continue_riding: false,
     recommended_next_actions: [
       {
         type: "emergency_rescue",
-        label: "Dung xe va goi ho tro"
+        label: "Dừng xe và gọi hỗ trợ"
       },
       ...withoutEmergency
     ].slice(0, 2)
@@ -368,16 +394,6 @@ function asString(value: unknown): string {
 
 function firstDefined(...values: unknown[]): unknown {
   return values.find((value) => value !== undefined);
-}
-
-function firstString(...values: unknown[]): string {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-
-  return "";
 }
 
 function firstMeaningfulString(...values: unknown[]): string {

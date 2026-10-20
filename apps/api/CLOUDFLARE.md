@@ -32,7 +32,7 @@ bỏ qua; không chia sẻ hoặc commit token. Tải binary từ
 ## Môi trường và kiểm tra
 
 Backend hiện đọc `.env.local` tại thư mục gốc qua `next.config.ts`.
-Các biến `OPENROUTER_SITE_URL`, `PAYOS_RETURN_URL`, `PAYOS_CANCEL_URL` dùng tên
+Các biến `PAYOS_RETURN_URL`, `PAYOS_CANCEL_URL` dùng tên
 miền mới. URL quay lại/hủy thanh toán hiện dùng endpoint health như cấu hình demo
 cũ; endpoint này chỉ trả trạng thái server, không xác nhận thanh toán.
 `WORKER_API_BASE_URL` vẫn dùng localhost khi worker chạy cùng máy.

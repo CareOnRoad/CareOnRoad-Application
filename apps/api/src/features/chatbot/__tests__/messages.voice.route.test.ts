@@ -6,9 +6,9 @@ import { createVoiceRequest, modelDiagnosis, responseJson, setupDiagnosisRoute }
 describe("POST /api/chatbot/sessions/[sessionId]/messages voice", () => {
   it("uses mocked ASR and returns transcribed_text", async () => {
     const transcribedText = "xe kho de va den yeu";
-    const { store, service, asr, openRouter } = setupDiagnosisRoute({
+    const { store, service, asr, aiProvider } = setupDiagnosisRoute({
       asrResult: { success: true, text: transcribedText },
-      openRouterResult: {
+      aiResult: {
         success: true,
         json: modelDiagnosis({ transcribed_text: transcribedText }),
         apiHttpStatus: "200"
@@ -22,12 +22,12 @@ describe("POST /api/chatbot/sessions/[sessionId]/messages voice", () => {
 
     expect(response.status).toBe(200);
     expect(asr.transcribe).toHaveBeenCalledOnce();
-    expect(openRouter.createDiagnosisJson).toHaveBeenCalledOnce();
+    expect(aiProvider.createDiagnosisJson).toHaveBeenCalledOnce();
     expect(body.transcribed_text).toBe(transcribedText);
   });
 
   it("returns 400 for missing voice audio", async () => {
-    const { store, service, asr, openRouter } = setupDiagnosisRoute({});
+    const { store, service, asr, aiProvider } = setupDiagnosisRoute({});
     const session = store.createSession();
     const response = await createMessageResponse(
       createVoiceRequest({ includeAudio: false }),
@@ -39,6 +39,6 @@ describe("POST /api/chatbot/sessions/[sessionId]/messages voice", () => {
     expect(response.status).toBe(400);
     expect(body.error_code).toBe("INVALID_INPUT");
     expect(asr.transcribe).not.toHaveBeenCalled();
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
+    expect(aiProvider.createDiagnosisJson).not.toHaveBeenCalled();
   });
 });

@@ -57,20 +57,22 @@ Required for local AI-provider diagnosis:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-3.5-flash-lite
 AI_TOTAL_TIMEOUT_MS=10000
 GEMINI_TIMEOUT_MS=6000
-OPENROUTER_TIMEOUT_MS=4000
-OPENROUTER_API_KEY=your_openrouter_api_key
-OPENROUTER_MODEL=openai/gpt-oss-20b:free
-OPENROUTER_ENABLE_MODEL_FALLBACK=true
-OPENROUTER_FALLBACK_MODEL=openrouter/free
+CHATBOT_IP_DAILY_LIMIT=10
 ```
 
-Gemini is the primary AI provider. OpenRouter is used only after Gemini fails,
-times out, or is temporarily circuit-open. If all remote providers fail, the API
-uses the local fallback diagnosis and returns `fallback_used=true` instead of
-crashing. The total remote AI wait budget defaults to 10 seconds.
+Gemini (Google AI Studio key) is the only AI provider. Use a Flash-Lite model:
+thinking models spend the 512-token output budget on thoughts and return empty JSON.
+If Gemini fails, times out, or is circuit-open, the API uses the local fallback
+diagnosis and returns `fallback_used=true` instead of crashing.
+
+Chatbot abuse guards: text messages are capped at 500 characters; off-topic text
+(no vehicle keyword, knowledge match or danger signal) returns `422 OFF_TOPIC`
+without calling Gemini; each client IP (`cf-connecting-ip` behind Cloudflare) gets
+`CHATBOT_IP_DAILY_LIMIT` diagnoses per 24 hours on top of the hourly limits.
+Repair price ranges come from `src/features/chatbot/repair-prices.ts`, never from the model.
 
 Required for the hosted Supabase backend:
 
@@ -135,7 +137,7 @@ SHERPA_ONNX_TOKENS=tokens.txt
 ## Local ASR Setup
 
 Voice transcription runs locally through `sherpa-onnx-node`. Raw audio stays on
-the local backend and is not sent to OpenRouter or any remote provider.
+the local backend and is not sent to Gemini or any remote provider.
 
 The Vietnamese 2026-02-09 model is included under:
 

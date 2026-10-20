@@ -1,6 +1,6 @@
 import type { CompactDiagnosisPrompt } from "./prompts";
 
-export type AiProviderName = "gemini" | "openrouter";
+export type AiProviderName = "gemini";
 
 export type AiProviderSuccessResult = {
   success: true;
@@ -16,8 +16,6 @@ export type AiProviderFailureResult = {
   message: string;
   apiHttpStatus?: string;
   retryAfterSeconds?: number;
-  openRouterErrorCode?: string;
-  openRouterErrorType?: string;
   provider?: AiProviderName;
   providerName?: string;
   providerModel?: string;

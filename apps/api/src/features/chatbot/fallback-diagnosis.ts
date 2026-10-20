@@ -2,6 +2,7 @@ import type { DiagnosisResult, RecommendedActionType, RiskLevel } from "./diagno
 import { diagnosisSchema } from "./diagnosis.schema";
 import type { KnowledgeEntry } from "./knowledge-base";
 import { knowledgeReviewedAt } from "./knowledge-sources";
+import { estimateTotal } from "./repair-prices";
 import { retrieveKnowledge } from "./retrieval";
 import { runSafetyGate } from "./safety-gate";
 
@@ -33,20 +34,15 @@ export function createFallbackDiagnosis(
   const canContinueRiding = safety.is_dangerous
     ? false
     : entries.every((entry) => entry.can_continue_riding);
-  const totalMin = Math.min(...hypotheses.map((hypothesis) => hypothesis.estimated_cost_min));
-  const totalMax = Math.max(...hypotheses.map((hypothesis) => hypothesis.estimated_cost_max));
+  const estimatedTotal = estimateTotal(hypotheses);
 
   const diagnosis: DiagnosisResult = {
-    short_answer: buildShortAnswer(safety.is_dangerous, retrieved.length > 0),
+    short_answer: buildShortAnswer(safety.is_dangerous, retrieved.length > 0, estimatedTotal.max > 0),
     overall_confidence: entries[0].component_code === "UNKNOWN" ? 0.25 : 0.62,
     risk_level: riskLevel,
     can_continue_riding: canContinueRiding,
     top_hypotheses: hypotheses,
-    estimated_total: {
-      currency: "VND",
-      min: totalMin,
-      max: totalMax
-    },
+    estimated_total: estimatedTotal,
     recommended_next_actions: buildActions(
       safety.is_dangerous,
       entries.map((entry) => ({
@@ -69,7 +65,7 @@ function unknownEntry(): KnowledgeEntry {
     reviewed_at: knowledgeReviewedAt,
     source_refs: [],
     vehicle_scope: "all_motorcycles",
-    price_status: "unverified",
+    price_status: "unavailable",
     followup_questions: ["Bạn dùng mẫu xe nào và triệu chứng xảy ra khi nào?"],
     symptom_keywords: [],
     normalized_keywords: [],
@@ -120,7 +116,7 @@ function buildActions(
     .map(([type, label]) => ({ type, label }));
 }
 
-function buildShortAnswer(isDangerous: boolean, hasKnowledge: boolean): string {
+function buildShortAnswer(isDangerous: boolean, hasKnowledge: boolean, hasPrice: boolean): string {
   if (isDangerous) {
     return "Dừng xe ngay và không tiếp tục chạy. Chưa có ước tính chi phí, cần thợ kiểm tra.";
   }
@@ -129,5 +125,7 @@ function buildShortAnswer(isDangerous: boolean, hasKnowledge: boolean): string {
     return "Chưa đủ dữ liệu để xác định lỗi. Chưa có ước tính chi phí, cần mô tả thêm.";
   }
 
-  return "Các khả năng bên dưới cần được kiểm tra trực tiếp. Chưa có ước tính chi phí sửa chữa.";
+  return hasPrice
+    ? "Các khả năng bên dưới cần được kiểm tra trực tiếp. Chi phí chỉ là ước tính tham khảo, thợ sẽ báo giá chính xác."
+    : "Các khả năng bên dưới cần được kiểm tra trực tiếp. Chưa có ước tính chi phí sửa chữa.";
 }

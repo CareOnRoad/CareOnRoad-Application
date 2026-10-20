@@ -5,13 +5,13 @@ import type { LogEvent } from "@/lib/server-logger";
 import { DiagnosisService } from "../diagnosis.service";
 import type { DiagnosisResult } from "../diagnosis.schema";
 import { knowledgeReviewedAt, knowledgeVersion } from "../knowledge-sources";
-import type { OpenRouterResult } from "../openrouter.client";
+import type { AiProviderResult } from "../ai-provider.types";
 import { InMemorySessionStore } from "../session.store";
 
 describe("DiagnosisService text orchestration", () => {
   it.each([false, true])("persists the PH manual source only for an applicable Raider FI, fallback %s", async (fallback) => {
-    const { service, store } = setup({ openRouterResult: fallback
-      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+    const { service, store } = setup({ aiResult: fallback
+      ? { success: false, errorCode: "GEMINI_TIMEOUT", message: "timeout" }
       : { success: true, json: modelDiagnosis(), apiHttpStatus: "200" } });
     const session = store.createSession();
     const result = await service.diagnose({ sessionId: session.session_id,
@@ -27,8 +27,8 @@ describe("DiagnosisService text orchestration", () => {
   });
 
   it.each([false, true])("asks for the Raider variant instead of adopting a provider's component guess, fallback %s", async (fallback) => {
-    const { service, store } = setup({ openRouterResult: fallback
-      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+    const { service, store } = setup({ aiResult: fallback
+      ? { success: false, errorCode: "GEMINI_TIMEOUT", message: "timeout" }
       : { success: true, json: {
           ...modelDiagnosis(),
           recommended_next_actions: [{ type: "book_mobile_repair", label: "Thay binh ac quy" }],
@@ -51,8 +51,8 @@ describe("DiagnosisService text orchestration", () => {
   });
 
   it.each([false, true])("stores backend knowledge provenance when provider fallback is %s", async (fallback) => {
-    const { service, store } = setup({ openRouterResult: fallback
-      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+    const { service, store } = setup({ aiResult: fallback
+      ? { success: false, errorCode: "GEMINI_TIMEOUT", message: "timeout" }
       : { success: true, json: {
           ...modelDiagnosis(),
           knowledge_provenance: { version: "provider-invented", reviewed_at: "2000-01-01", entry_ids: [], source_ids: [] }
@@ -70,8 +70,8 @@ describe("DiagnosisService text orchestration", () => {
   });
 
   it.each([false, true])("keeps shutdown safety override when provider fallback is %s", async (fallback) => {
-    const { service, store } = setup({ openRouterResult: fallback
-      ? { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" }
+    const { service, store } = setup({ aiResult: fallback
+      ? { success: false, errorCode: "GEMINI_TIMEOUT", message: "timeout" }
       : { success: true, json: { ...modelDiagnosis(), risk_level: "low", can_continue_riding: true }, apiHttpStatus: "200" } });
     const session = store.createSession();
     const result = await service.diagnose({ sessionId: session.session_id,
@@ -84,7 +84,7 @@ describe("DiagnosisService text orchestration", () => {
   });
   it("returns valid compact diagnosis for normal text input and stores latest diagnosis", async () => {
     const { service, store } = setup({
-      openRouterResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
+      aiResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
     });
     const session = store.createSession(new Date("2026-06-16T00:00:00.000Z"));
 
@@ -107,7 +107,7 @@ describe("DiagnosisService text orchestration", () => {
 
   it("overrides dangerous text input over a low-risk model response", async () => {
     const { service, store } = setup({
-      openRouterResult: {
+      aiResult: {
         success: true,
         json: {
           ...modelDiagnosis(),
@@ -130,14 +130,14 @@ describe("DiagnosisService text orchestration", () => {
     expect(["high", "critical"]).toContain(result.diagnosis.risk_level);
     expect(result.diagnosis.can_continue_riding).toBe(false);
     expect(result.diagnosis.recommended_next_actions[0]?.type).toBe("emergency_rescue");
-    expect(result.diagnosis.short_answer).toContain("Dung xe");
+    expect(result.diagnosis.short_answer).toContain("Dừng xe");
   });
 
-  it("uses fallback diagnosis when OpenRouter is missing API key or fails", async () => {
+  it("uses fallback diagnosis when Gemini is missing API key or fails", async () => {
     const { service, store } = setup({
-      openRouterResult: {
+      aiResult: {
         success: false,
-        errorCode: "OPENROUTER_MISSING_API_KEY",
+        errorCode: "GEMINI_MISSING_API_KEY",
         message: "missing"
       }
     });
@@ -154,13 +154,13 @@ describe("DiagnosisService text orchestration", () => {
   });
 
   it("uses fallback diagnosis for timeout, invalid provider content, schema-invalid output, and unsafe post-validation", async () => {
-    for (const openRouterResult of [
-      { success: false, errorCode: "OPENROUTER_TIMEOUT", message: "timeout" } satisfies OpenRouterResult,
-      { success: false, errorCode: "OPENROUTER_INVALID_RESPONSE", message: "invalid" } satisfies OpenRouterResult,
-      { success: true, json: { short_answer: "bad" }, apiHttpStatus: "200" } satisfies OpenRouterResult,
-      { success: true, json: null, apiHttpStatus: "200" } satisfies OpenRouterResult
+    for (const aiResult of [
+      { success: false, errorCode: "GEMINI_TIMEOUT", message: "timeout" } satisfies AiProviderResult,
+      { success: false, errorCode: "GEMINI_INVALID_PROVIDER_RESPONSE", message: "invalid" } satisfies AiProviderResult,
+      { success: true, json: { short_answer: "bad" }, apiHttpStatus: "200" } satisfies AiProviderResult,
+      { success: true, json: null, apiHttpStatus: "200" } satisfies AiProviderResult
     ]) {
-      const { service, store } = setup({ openRouterResult });
+      const { service, store } = setup({ aiResult });
       const session = store.createSession();
 
       const result = await service.diagnose({
@@ -176,7 +176,7 @@ describe("DiagnosisService text orchestration", () => {
 
   it("logs diagnosis completion metadata without full symptom text or API key", async () => {
     const { service, store, records } = setup({
-      openRouterResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
+      aiResult: { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
     });
     const session = store.createSession();
     const fullText = "xe kho de va den yeu full symptom text";
@@ -200,15 +200,15 @@ describe("DiagnosisService text orchestration", () => {
   });
 });
 
-function setup(options: { openRouterResult: OpenRouterResult }) {
+function setup(options: { aiResult: AiProviderResult }) {
   const store = new InMemorySessionStore();
   const records: LogEvent[] = [];
-  const openRouter = {
-    createDiagnosisJson: vi.fn(async () => options.openRouterResult)
+  const aiProvider = {
+    createDiagnosisJson: vi.fn(async () => options.aiResult)
   };
   const service = new DiagnosisService({
     sessionStore: store,
-    openRouter,
+    aiProvider,
     asr: {
       transcribe: vi.fn()
     },
@@ -220,7 +220,7 @@ function setup(options: { openRouterResult: OpenRouterResult }) {
     now: () => 1000
   });
 
-  return { service, store, records, openRouter };
+  return { service, store, records, aiProvider };
 }
 
 function modelDiagnosis(): DiagnosisResult {

@@ -237,7 +237,7 @@ Quét QR bằng Expo Go. Nếu đổi WiFi/máy → chạy lại `pnpm.cmd start
     `SUPABASE_JWKS_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   - `DATABASE_URL`
   - `INTERNAL_WORKER_SECRET`
-  - `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`
+  - `GEMINI_API_KEY`, `GEMINI_MODEL`
   - `PAYS_*` cho payOS payment
 
 ## 6. Build / verify
@@ -270,7 +270,7 @@ pnpm.cmd run lint          # eslint
 - **Không** thêm motorcycle selector UI, brand/model dropdown, booking UI mới
   ngoài những gì đã có (theo `AGENTS.md` Don't section).
 - **Không** wire thêm push notifications (FCM) — để phase sau.
-- **Không** gọi OpenRouter hoặc thanh toán trực tiếp từ FE — luôn qua BE.
+- **Không** gọi Gemini hoặc thanh toán trực tiếp từ FE — luôn qua BE.
 
 ## 8. Roadmap phases tiếp theo
 

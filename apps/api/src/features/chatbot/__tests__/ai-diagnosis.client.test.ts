@@ -19,112 +19,55 @@ const prompt = {
 };
 
 describe("AiDiagnosisClient", () => {
-  it("uses Gemini first and does not call OpenRouter when Gemini succeeds", async () => {
+  it("returns the Gemini result within the configured timeout", async () => {
     const geminiResult: AiProviderResult = {
       success: true,
       provider: "gemini",
-      providerModel: "gemini-2.5-flash-lite",
+      providerModel: "gemini-3.5-flash-lite",
       apiHttpStatus: "200",
       json: { short_answer: "Gemini ok." }
     };
-    const { client, gemini, openRouter } = createClient({
-      geminiResult
-    });
+    const { client, gemini } = createClient({ geminiResult });
 
     const result = await client.createDiagnosisJson(prompt);
 
     expect(result).toEqual(geminiResult);
-    expect(gemini.createDiagnosisJson).toHaveBeenCalledOnce();
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
-  });
-
-  it("falls back to OpenRouter within the remaining total timeout budget", async () => {
-    const { client, gemini, openRouter } = createClient({
-      geminiResult: {
-        success: false,
-        provider: "gemini",
-        errorCode: "GEMINI_TIMEOUT",
-        message: "timeout"
-      },
-      openRouterResult: {
-        success: true,
-        provider: "openrouter",
-        apiHttpStatus: "200",
-        json: { short_answer: "OpenRouter ok." }
-      }
-    });
-
-    const result = await client.createDiagnosisJson(prompt);
-
-    expect(result).toMatchObject({
-      success: true,
-      provider: "openrouter"
-    });
     expect(gemini.createDiagnosisJson).toHaveBeenCalledWith(
       prompt,
-      expect.objectContaining({
-        retryWithRetryAfter: false,
-        timeoutMs: 6000
-      })
-    );
-    expect(openRouter.createDiagnosisJson).toHaveBeenCalledWith(
-      prompt,
-      expect.objectContaining({
-        retryWithRetryAfter: false,
-        timeoutMs: 4000
-      })
+      expect.objectContaining({ retryWithRetryAfter: false, timeoutMs: 6000 })
     );
   });
 
-  it("does not call OpenRouter after Gemini exhausts the total timeout", async () => {
-    let currentTime = 1000;
-    const { client, openRouter } = createClient({
-      now: () => currentTime,
+  it("returns the Gemini failure so the service can use the local fallback", async () => {
+    const { client } = createClient({
       geminiResult: {
         success: false,
         provider: "gemini",
         errorCode: "GEMINI_TIMEOUT",
         message: "timeout"
-      },
-      afterGemini: () => {
-        currentTime = 11_001;
       }
     });
 
-    const result = await client.createDiagnosisJson(prompt);
-
-    expect(result).toMatchObject({
+    await expect(client.createDiagnosisJson(prompt)).resolves.toMatchObject({
       success: false,
-      errorCode: "GEMINI_TIMEOUT"
+      errorCode: "GEMINI_TIMEOUT",
+      provider: "gemini"
     });
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
   });
 
-  it("skips a circuit-open provider and tries the next provider", async () => {
+  it("skips Gemini while its circuit is open", async () => {
     const circuitBreaker = new ProviderCircuitBreaker({
       failureThreshold: 1,
       cooldownMs: 60_000,
       now: () => 1000
     });
     circuitBreaker.recordFailure("gemini");
-    const { client, gemini, openRouter, records } = createClient({
-      circuitBreaker,
-      openRouterResult: {
-        success: true,
-        provider: "openrouter",
-        apiHttpStatus: "200",
-        json: { short_answer: "OpenRouter ok." }
-      }
-    });
+    const { client, gemini, records } = createClient({ circuitBreaker });
 
     const result = await client.createDiagnosisJson(prompt);
 
-    expect(result).toMatchObject({
-      success: true,
-      provider: "openrouter"
-    });
+    expect(result).toMatchObject({ success: false, errorCode: "AI_PROVIDER_CIRCUIT_OPEN" });
     expect(gemini.createDiagnosisJson).not.toHaveBeenCalled();
-    expect(openRouter.createDiagnosisJson).toHaveBeenCalledOnce();
     expect(records).toContainEqual(
       expect.objectContaining({
         event: "chatbot.ai_provider.skipped",
@@ -137,34 +80,17 @@ describe("AiDiagnosisClient", () => {
 
 function createClient(options: {
   geminiResult?: AiProviderResult;
-  openRouterResult?: AiProviderResult;
-  now?: () => number;
-  afterGemini?: () => void;
   circuitBreaker?: ProviderCircuitBreaker;
 } = {}) {
   const records: LogEvent[] = [];
   const gemini = {
-    createDiagnosisJson: vi.fn(async () => {
-      const result =
+    createDiagnosisJson: vi.fn(
+      async () =>
         options.geminiResult ??
         ({
           success: false,
           provider: "gemini",
           errorCode: "GEMINI_PROVIDER_ERROR",
-          message: "provider error"
-        } satisfies AiProviderResult);
-      options.afterGemini?.();
-      return result;
-    })
-  };
-  const openRouter = {
-    createDiagnosisJson: vi.fn(
-      async () =>
-        options.openRouterResult ??
-        ({
-          success: false,
-          provider: "openrouter",
-          errorCode: "OPENROUTER_PROVIDER_ERROR",
           message: "provider error"
         } satisfies AiProviderResult)
     )
@@ -173,22 +99,19 @@ function createClient(options: {
   return {
     records,
     gemini,
-    openRouter,
     client: new AiDiagnosisClient({
       env: {
         NODE_ENV: "test",
         AI_TOTAL_TIMEOUT_MS: "10000",
-        GEMINI_TIMEOUT_MS: "6000",
-        OPENROUTER_TIMEOUT_MS: "4000"
+        GEMINI_TIMEOUT_MS: "6000"
       },
       gemini,
-      openRouter,
       logger: {
         info: (payload) => records.push(payload),
         warn: (payload) => records.push(payload),
         error: (payload) => records.push(payload)
       },
-      now: options.now ?? (() => 1000),
+      now: () => 1000,
       circuitBreaker: options.circuitBreaker
     })
   };

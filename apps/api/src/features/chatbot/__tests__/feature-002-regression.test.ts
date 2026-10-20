@@ -21,7 +21,7 @@ describe("Feature 002 chatbot non-regression", () => {
     expect(result).not.toHaveProperty("booking_id");
   });
 
-  it("preserves dangerous-symptom override and Gemini-to-OpenRouter order", async () => {
+  it("preserves dangerous-symptom override and calls Gemini as the only provider", async () => {
     expect(runSafetyGate("mất phanh khi đang chạy")).toMatchObject({
       is_dangerous: true,
       can_continue_riding: false,
@@ -33,20 +33,10 @@ describe("Feature 002 chatbot non-regression", () => {
         createDiagnosisJson: vi.fn(async () => {
           calls.push("gemini");
           return {
-            success: false as const,
-            errorCode: "GEMINI_TIMEOUT",
-            message: "timeout"
-          };
-        })
-      },
-      openRouter: {
-        createDiagnosisJson: vi.fn(async () => {
-          calls.push("openrouter");
-          return {
             success: true as const,
             json: modelDiagnosis(),
             apiHttpStatus: "200",
-            provider: "openrouter" as const
+            provider: "gemini" as const
           };
         })
       },
@@ -59,7 +49,7 @@ describe("Feature 002 chatbot non-regression", () => {
         { role: "user", content: "xe khó đề" }
       ]
     });
-    expect(calls).toEqual(["gemini", "openrouter"]);
+    expect(calls).toEqual(["gemini"]);
   });
 
   it("keeps provider-failure and invalid-JSON fallback behavior", async () => {

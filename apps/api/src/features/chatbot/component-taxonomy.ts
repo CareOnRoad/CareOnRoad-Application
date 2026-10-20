@@ -1,14 +1,14 @@
 export const componentTaxonomy = {
   SPARK_PLUG: "Bugi",
-  BATTERY: "Binh ac quy",
-  AIR_FILTER: "Loc gio",
-  FUEL_SYSTEM: "He thong xang",
-  BRAKE_SYSTEM: "He thong phanh",
-  ENGINE_OIL: "Dau may",
-  DRIVE_BELT: "Day curoa",
-  TIRE: "Lop xe",
-  ELECTRICAL_SYSTEM: "He thong dien",
-  UNKNOWN: "Chua xac dinh"
+  BATTERY: "Bình ắc quy",
+  AIR_FILTER: "Lọc gió",
+  FUEL_SYSTEM: "Hệ thống xăng",
+  BRAKE_SYSTEM: "Hệ thống phanh",
+  ENGINE_OIL: "Dầu máy",
+  DRIVE_BELT: "Dây curoa",
+  TIRE: "Lốp xe",
+  ELECTRICAL_SYSTEM: "Hệ thống điện",
+  UNKNOWN: "Chưa xác định"
 } as const;
 
 export const componentCodes = Object.keys(componentTaxonomy) as [

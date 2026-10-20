@@ -6,7 +6,7 @@ import { createJsonRequest, modelDiagnosis, responseJson, setupDiagnosisRoute } 
 
 describe("POST /api/chatbot/sessions/[sessionId]/messages text", () => {
   it("returns valid compact diagnosis for text input", async () => {
-    const { store, service, openRouter } = setupDiagnosisRoute({});
+    const { store, service, aiProvider } = setupDiagnosisRoute({});
     const session = store.createSession();
     const response = await createMessageResponse(
       createJsonRequest({ input_mode: "text", content_text: "xe kho de va den yeu" }),
@@ -21,13 +21,13 @@ describe("POST /api/chatbot/sessions/[sessionId]/messages text", () => {
       risk_level: "medium",
       can_continue_riding: true
     });
-    expect(openRouter.createDiagnosisJson).toHaveBeenCalledOnce();
-    expect(JSON.stringify(body)).not.toContain("secret-openrouter-key");
+    expect(aiProvider.createDiagnosisJson).toHaveBeenCalledOnce();
+    expect(JSON.stringify(body)).not.toContain("secret-gemini-key");
   });
 
   it("returns high-risk output for dangerous text input", async () => {
     const { store, service } = setupDiagnosisRoute({
-      openRouterResult: {
+      aiResult: {
         success: true,
         json: modelDiagnosis({
           risk_level: "low",
