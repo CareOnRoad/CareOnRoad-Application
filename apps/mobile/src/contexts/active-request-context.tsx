@@ -27,7 +27,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  *    hình chi tiết của request đang chạy.
  */
 
-const STORAGE_KEY = '@careonroad/rider/active_request_id';
+export const ACTIVE_REQUEST_STORAGE_KEY = '@careonroad/rider/active_request_id';
 
 interface ActiveRequestState {
   /** Request id đang theo dõi, `null` nếu không có. */
@@ -51,7 +51,7 @@ export function ActiveRequestProvider({ children }: { children: React.ReactNode 
     let cancelled = false;
     void (async () => {
       try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        const stored = await AsyncStorage.getItem(ACTIVE_REQUEST_STORAGE_KEY);
         if (!cancelled && stored && stored.length > 0) setActiveRequestIdState(stored);
       } catch {
         // AsyncStorage lỗi → coi như không có active request, app vẫn chạy.
@@ -68,8 +68,8 @@ export function ActiveRequestProvider({ children }: { children: React.ReactNode 
     setActiveRequestIdState(requestId);
     void (async () => {
       try {
-        if (requestId) await AsyncStorage.setItem(STORAGE_KEY, requestId);
-        else await AsyncStorage.removeItem(STORAGE_KEY);
+        if (requestId) await AsyncStorage.setItem(ACTIVE_REQUEST_STORAGE_KEY, requestId);
+        else await AsyncStorage.removeItem(ACTIVE_REQUEST_STORAGE_KEY);
       } catch {
         // Best-effort: state trong memory vẫn đúng, chỉ mất persist.
       }

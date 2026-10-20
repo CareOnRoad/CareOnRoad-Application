@@ -1,5 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 
+import { AdminSignOutButton } from "@/app/admin/forbidden/sign-out-button";
+
 /**
  * Admin dashboard layout chrome — theo figma Section `256:15205`.
  *
@@ -172,6 +174,7 @@ export function AdminLayout({
             >
               {initialsOf(userName)}
             </span>
+            <AdminSignOutButton />
           </div>
         </header>
 

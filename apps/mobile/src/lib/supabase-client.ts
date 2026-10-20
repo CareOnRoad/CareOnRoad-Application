@@ -73,6 +73,10 @@ export function getSupabase(): ReturnType<typeof createClient> | null {
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
+      // Google OAuth redirect về `careonroad://auth/callback?code=...` để
+      // completeGoogleSignIn đổi code lấy session. Mặc định 'implicit' trả token
+      // trong fragment (#access_token) nên callback không có code và luôn lỗi.
+      flowType: 'pkce',
     },
   });
   return clientInstance;

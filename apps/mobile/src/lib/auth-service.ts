@@ -85,51 +85,52 @@ function pickPrimaryRole(actor: AppActor): AuthRole {
   return 'rider';
 }
 
-/** Đảm bảo user có role mong muốn khi đăng ký bằng cách bootstrap profile. */
-async function ensureProfileWithRole(
-  session: Session,
-  desiredRole: AuthRole,
-  profilePayload: { displayName?: string; phone?: string; address?: string; avatarUrl?: string },
-): Promise<AppActor> {
-  // Bootstrapping: backend tạo app_user nếu chưa có (default role = rider).
-  // Truyền `account_type` để backend gán role mechanic ngay từ lúc tạo profile
-  // (xem POST /api/v1/auth/profile → auth.service.ts → bootstrapProfile).
+/** Cùng regex với backend (auth.schemas.ts) để chặn số sai trước khi tạo tài khoản Supabase. */
+const PHONE_REGEX = /^\+?[0-9 .\-()]{9,20}$/;
+
+function metadataString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Lấy actor từ backend; nếu chưa có hồ sơ app (404) thì bootstrap ngay.
+ *
+ * 404 xảy ra khi: đăng ký cần xác nhận email (chưa có session lúc signUp),
+ * bootstrap lần trước lỗi, hoặc Google OAuth lần đầu. Không bootstrap ở đây thì
+ * tài khoản bị kẹt: đăng ký lại báo "email đã dùng", đăng nhập báo "chưa có hồ sơ".
+ * Role lấy từ `desiredRole`, nếu không có thì từ `user_metadata.account_type`
+ * (ghi lúc signUp). Backend chỉ nhận rider|mechanic, mechanic ở trạng thái pending.
+ */
+async function loadOrBootstrapActor(session: Session, desiredRole?: AuthRole): Promise<AppActor> {
   try {
-    await apiPost<AppActor>(
-      '/api/v1/auth/profile',
-      {
-        display_name: profilePayload.displayName ?? '',
-        account_type: desiredRole,
-        ...(profilePayload.phone ? { phone: profilePayload.phone } : {}),
-        ...(profilePayload.address ? { address: profilePayload.address } : {}),
-        ...(profilePayload.avatarUrl ? { avatar_url: profilePayload.avatarUrl } : {}),
-      },
-      { timeoutMs: 10000 },
-    );
+    return await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 20000 });
   } catch (err) {
-    // Nếu profile đã tồn tại (vd qua Google OAuth trước đó), vẫn OK.
-    if (err instanceof ApiError && err.status !== 409 && err.status !== 400) {
-      throw err;
-    }
+    if (!(err instanceof ApiError && err.status === 404)) throw err;
   }
+  const meta = (session.user.user_metadata ?? {}) as Record<string, unknown>;
+  const role = desiredRole ?? (meta.account_type === 'mechanic' ? 'mechanic' : 'rider');
+  const displayName = metadataString(meta.full_name) ?? metadataString(meta.name);
+  const phone = metadataString(meta.phone);
+  const avatarUrl = metadataString(meta.avatar_url) ?? metadataString(meta.picture);
+  // POST /auth/profile idempotent: profile đã tồn tại thì trả actor hiện có.
+  return apiPost<AppActor>(
+    '/api/v1/auth/profile',
+    {
+      account_type: role,
+      ...(displayName ? { display_name: displayName.slice(0, 120) } : {}),
+      ...(phone && PHONE_REGEX.test(phone) ? { phone } : {}),
+      ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+    },
+    { timeoutMs: 15000 },
+  );
+}
 
-  // Lấy actor sau khi bootstrap.
-  const actor = await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 10000 });
-
-  // desiredRole đã được backend xử lý trong POST /api/v1/auth/profile
-  // (xem auth.service.ts → bootstrapProfile với input.account_type).
-  // Backend đã tự gán role + tạo mechanic_profiles.pending nếu chọn 'mechanic'.
-  // Tại client: chỉ cần đọc role thật từ actor và trả về cho AuthContext.
-  if (desiredRole === 'mechanic' && !actor.roles.includes('mechanic')) {
-    if (__DEV__) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        '[auth-service] Backend chưa gán role mechanic. Kiểm tra account_type trong payload.',
-      );
-    }
+/** Message tiếng Việt cho lỗi backend khi tải hồ sơ sau đăng nhập. */
+function mapActorError(err: unknown): Error {
+  if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+    return new Error('Tài khoản đang bị khóa hoặc không còn hoạt động. Vui lòng liên hệ hỗ trợ.');
   }
-  void session; // reserved
-  return actor;
+  return err instanceof Error ? err : new Error('Không tải được hồ sơ tài khoản');
 }
 
 /** Convert AppActor → PublicAuthUser để store trong client state. */
@@ -162,11 +163,10 @@ export interface SignUpInput {
   role: AuthRole;
 }
 
-export interface SignUpResult {
-  session: Session;
-  actor: AppActor;
-  user: PublicAuthUser;
-}
+/** `needsEmailConfirmation`: Supabase bật "Confirm email" nên signUp chưa trả session. */
+export type SignUpResult =
+  | { needsEmailConfirmation: true }
+  | { needsEmailConfirmation: false; session: Session; actor: AppActor; user: PublicAuthUser };
 
 /**
  * Đăng nhập bằng Supabase Auth → lấy profile từ backend.
@@ -191,19 +191,17 @@ export async function signIn(email: string, password: string): Promise<SignInRes
 
   try {
     setAccessTokenProvider(() => client.auth.getSession().then((s) => s.data.session?.access_token ?? null));
-    const actor = await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 10000 });
+    const actor = await loadOrBootstrapActor(data.session);
     const user: PublicAuthUser = {
       ...actorToPublicUser(actor),
       email: cleanEmail,
     };
     return { session: data.session, actor, user };
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      throw new Error(
-        'Tài khoản chưa có hồ sơ ứng dụng. Vui lòng đăng ký trước.',
-      );
-    }
-    throw err;
+    // Không để lại session Supabase "nửa đăng nhập": lần mở app sau hydrate
+    // sẽ coi là đã đăng nhập dù backend từ chối (vd tài khoản bị khóa).
+    await signOut().catch(() => undefined);
+    throw mapActorError(err);
   }
 }
 
@@ -223,49 +221,39 @@ export async function signUp(input: SignUpInput): Promise<SignUpResult> {
   }
   const cleanEmail = ensureEmail(input.email);
   const cleanPassword = ensurePassword(input.password);
-  if (!input.name.trim()) throw new Error('Vui lòng nhập họ và tên');
+  const name = input.name.trim();
+  if (!name) throw new Error('Vui lòng nhập họ và tên');
+  if (name.length > 120) throw new Error('Họ và tên tối đa 120 ký tự');
+  const phone = input.phone?.trim() || undefined;
+  if (phone && !PHONE_REGEX.test(phone)) throw new Error('Số điện thoại không hợp lệ');
 
   const { data, error } = await client.auth.signUp({
     email: cleanEmail,
     password: cleanPassword,
     options: {
-      data: {
-        full_name: input.name,
-        phone: input.phone,
-      },
+      // account_type để bootstrap đúng role ở lần đăng nhập đầu sau khi xác nhận email.
+      data: { full_name: name, phone, account_type: input.role },
     },
   });
-  if (error || !data.session) {
+  if (error) {
     throw mapSupabaseError(error);
+  }
+  if (!data.session) {
+    return { needsEmailConfirmation: true };
   }
 
   try {
     setAccessTokenProvider(() => client.auth.getSession().then((s) => s.data.session?.access_token ?? null));
-    const actor = await ensureProfileWithRole(
-      data.session,
-      input.role,
-      {
-        displayName: input.name,
-        ...(input.phone ? { phone: input.phone } : {}),
-      },
-    );
+    const actor = await loadOrBootstrapActor(data.session, input.role);
     const user: PublicAuthUser = {
       ...actorToPublicUser(actor),
       email: cleanEmail,
-      name: input.name,
-      phone: input.phone ?? '',
     };
-    return { session: data.session, actor, user };
+    return { needsEmailConfirmation: false, session: data.session, actor, user };
   } catch (err) {
-    // Nếu backend fail (vd do CORS hoặc DB lỗi), vẫn giữ Supabase session
-    // để người dùng không bị đăng xuất. AuthContext sẽ show warning.
-    if (err instanceof Error) {
-      if (__DEV__) {
-        // eslint-disable-next-line no-console
-        console.warn('[auth-service] Bootstrap profile thất bại:', err.message);
-      }
-    }
-    throw err;
+    // Tài khoản Supabase đã tạo; đăng nhập lại sẽ tự bootstrap hồ sơ.
+    await signOut().catch(() => undefined);
+    throw mapActorError(err);
   }
 }
 
@@ -432,33 +420,16 @@ export async function completeGoogleSignIn(
     client.auth.getSession().then((s) => s.data.session?.access_token ?? null)
   );
 
-  // Lấy actor (sẽ tự bootstrap nếu chưa có nhờ POST /api/v1/auth/profile bên dưới).
   try {
-    const actor = await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 10000 });
-
+    const actor = await loadOrBootstrapActor(session, desiredRole);
     const user: PublicAuthUser = {
       ...actorToPublicUser(actor),
       email: session.user.email ?? '',
     };
     return { session, actor, user };
   } catch (err) {
-    // 404 → user mới qua Google OAuth, cần bootstrap profile trước.
-    if (err instanceof ApiError && err.status === 404) {
-      const actor = await ensureProfileWithRole(session, desiredRole, {
-        displayName:
-          (session.user.user_metadata?.full_name as string | undefined) ??
-          (session.user.user_metadata?.name as string | undefined),
-        avatarUrl:
-          (session.user.user_metadata?.avatar_url as string | undefined) ??
-          (session.user.user_metadata?.picture as string | undefined),
-      });
-      const user: PublicAuthUser = {
-        ...actorToPublicUser(actor),
-        email: session.user.email ?? '',
-      };
-      return { session, actor, user };
-    }
-    throw err;
+    await signOut().catch(() => undefined);
+    throw mapActorError(err);
   }
 }
 
@@ -473,9 +444,8 @@ export async function getCurrentSession(): Promise<Session | null> {
 }
 
 /**
- * Lấy actor hiện tại từ backend.
- *
- * Timeout 20s (lớn hơn default 15s) để chờ BE compile lần đầu / mạng LAN chậm.
+ * Lấy actor hiện tại từ backend (bootstrap hồ sơ nếu chưa có). Trả null khi
+ * không có session. Timeout 20s để chờ BE compile lần đầu / mạng LAN chậm.
  */
 export async function fetchCurrentActor(): Promise<AppActor | null> {
   const client = getSupabase();
@@ -485,14 +455,7 @@ export async function fetchCurrentActor(): Promise<AppActor | null> {
   setAccessTokenProvider(() =>
     client.auth.getSession().then((s) => s.data.session?.access_token ?? null),
   );
-  try {
-    return await apiGet<AppActor>('/api/v1/auth/me', { timeoutMs: 20000 });
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
-      return null;
-    }
-    throw err;
-  }
+  return loadOrBootstrapActor(data.session);
 }
 
 /**

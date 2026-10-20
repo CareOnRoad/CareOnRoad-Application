@@ -28,7 +28,8 @@ import {
 import { isAuthConfigured } from '@/lib/config';
 import type { AuthRole, PublicAuthUser } from '@/lib/auth-types';
 import { getSupabase } from '@/lib/supabase-client';
-import { setAccessTokenProvider } from '@/lib/api';
+import { ApiError, setAccessTokenProvider } from '@/lib/api';
+import { ACTIVE_REQUEST_STORAGE_KEY } from '@/contexts/active-request-context';
 import { requestLocationPermissionOnce } from '@/lib/location-service';
 
 type AuthStatus = 'loading' | 'unauthenticated' | 'authenticated';
@@ -54,7 +55,8 @@ interface AuthState {
   isBackendConfigured: boolean;
   /** Trả về PublicAuthUser để caller navigate theo role chính xác (không stale). */
   login: (input: LoginInput) => Promise<PublicAuthUser>;
-  register: (input: RegisterInput) => Promise<void>;
+  /** `needsEmailConfirmation`: phải xác nhận email rồi mới đăng nhập được. */
+  register: (input: RegisterInput) => Promise<{ needsEmailConfirmation: boolean }>;
   logout: () => Promise<void>;
   /**
    * Cập nhật các trường profile editable. Khi backend đã cấu hình sẽ gọi
@@ -242,7 +244,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 return;
               }
             } catch (err) {
-              // BE fail: vẫn giữ Supabase session, dùng fallback minimal actor
+              // BE từ chối token/tài khoản (khóa, lưu trữ) → đăng xuất, không
+              // cho vào app bằng actor giả.
+              if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+                await authSignOut().catch(() => undefined);
+                if (!cancelled) setStatus('unauthenticated');
+                return;
+              }
+              // BE fail (mạng/5xx): vẫn giữ Supabase session, dùng fallback minimal actor
               // để user không bị buộc login lại khi mạng chập chờn.
               if (__DEV__) {
                 // eslint-disable-next-line no-console
@@ -283,6 +292,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) setStatus('unauthenticated');
         return;
       }
+      // Thiếu cấu hình Supabase: vẫn hiện màn login (login() sẽ báo lỗi rõ ràng)
+      // thay vì kẹt ở 'loading' → màn hình trắng.
+      setStatus('unauthenticated');
     }
 
     hydrate();
@@ -379,16 +391,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           'Backend chưa được cấu hình. Vui lòng liên hệ quản trị viên.',
         );
       }
-      const { user: pub } = await authSignUp({
+      const result = await authSignUp({
         role: r,
         name,
         email,
         phone,
         password,
       });
-      setUser(pub);
-      setRole(pub.role);
+      if (result.needsEmailConfirmation) {
+        return { needsEmailConfirmation: true };
+      }
+      setUser(result.user);
+      setRole(result.user.role);
       setStatus('authenticated');
+      return { needsEmailConfirmation: false };
     },
     [backendReady],
   );
@@ -445,6 +461,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     let warning: string | null = null;
     try {
+      // Không để yêu cầu cứu hộ đang theo dõi của user cũ lọt sang tài khoản kế tiếp.
+      await AsyncStorage.removeItem(ACTIVE_REQUEST_STORAGE_KEY).catch(() => undefined);
       await authSignOut();
     } catch (err) {
       // Logout vẫn thành công về mặt UX — session local đã bị xoá.

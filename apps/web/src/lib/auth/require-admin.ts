@@ -77,6 +77,14 @@ async function fetchAdminActor(accessToken: string): Promise<RequestActor> {
       signal: controller.signal
     });
 
+    // Token hết hạn/không hợp lệ → đăng nhập lại; tài khoản bị khóa (403) hoặc
+    // chưa có hồ sơ app (404) → trang "Không đủ quyền" thay vì trang lỗi 500.
+    if (response.status === 401) {
+      redirect("/admin/login");
+    }
+    if (response.status === 403 || response.status === 404) {
+      redirect("/admin/forbidden");
+    }
     if (!response.ok) {
       throw new Error(`Failed to load the admin actor. Status: ${response.status}.`);
     }
