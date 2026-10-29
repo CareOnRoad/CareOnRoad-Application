@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { iconRegistry } from "@/components/ui/icons";
+import { ArrowRightIcon, iconRegistry } from "@/components/ui/icons";
+import {
+  JOIN_BETA_LABEL,
+  PLAY_STORE_BETA_URL,
+} from "@/lib/play-store";
 import type { ServiceCategory } from "@/types";
 
 const formatVnd = (n: number) =>
@@ -62,12 +66,15 @@ export function ServicesGrid({ services, showHeader = true }: Props) {
               </div>
               <div className="mt-auto flex items-center justify-between border-t border-border-soft pt-4 text-sm">
                 <span className="text-ink-subtle">Từ {formatVnd(service.basePriceVnd)}</span>
-                <Link
-                  href={`/yeu-cau?service=${service.slug}`}
-                  className="font-semibold text-brand-deep hover:underline"
+                <a
+                  href={PLAY_STORE_BETA_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-semibold text-brand-deep hover:underline"
                 >
-                  Đặt ngay
-                </Link>
+                  {JOIN_BETA_LABEL}
+                  <ArrowRightIcon className="h-3 w-3" />
+                </a>
               </div>
             </li>
           );

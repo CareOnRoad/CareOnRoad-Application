@@ -9,6 +9,7 @@
       "node": "22.23.1",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://lwgwprxjyemihlkspgjc.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_cJYGJMZR6ETtZcKuWP7uww_1KYSXFgd",
         "EXPO_PUBLIC_API_BASE_URL": "http://localhost:3000"
       },
       "pnpm": "11.22.0",
@@ -60,7 +61,9 @@
       "autoIncrement": true,
       "env": {
         "APP_VARIANT": "production",
-        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
+        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://lwgwprxjyemihlkspgjc.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_cJYGJMZR6ETtZcKuWP7uww_1KYSXFgd"
       },
       "android": {
         "buildType": "app-bundle"
@@ -71,7 +74,9 @@
       "autoIncrement": true,
       "env": {
         "APP_VARIANT": "production",
-        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org"
+        "EXPO_PUBLIC_API_BASE_URL": "https://careonroad.dpdns.org",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://lwgwprxjyemihlkspgjc.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_cJYGJMZR6ETtZcKuWP7uww_1KYSXFgd"
       },
       "android": {
         "buildType": "apk"

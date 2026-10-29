@@ -77,13 +77,12 @@ export function FeaturedBlog() {
             >
               <div className="relative h-[222px] w-full">
                 <Image
-                  src={`data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 340'><rect width='600' height='340' fill='%23d8e3db'/><text x='50%25' y='50%25' fill='%23162130' font-family='sans-serif' font-size='20' text-anchor='middle' dominant-baseline='middle'>${a.tag}</text></svg>`}
+                  src="/images/logos/cor-logo.png"
                   alt=""
                   role="presentation"
                   fill
                   sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
                   className="object-cover"
-                  unoptimized
                 />
                 <span
                   className="absolute left-4 top-4 inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold tracking-wider text-surface"

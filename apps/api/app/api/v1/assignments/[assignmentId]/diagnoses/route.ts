@@ -9,3 +9,11 @@ export async function POST(
   const { assignmentId } = await context.params;
   return createDefaultDiagnosisQuoteRouteHandlers().upsertDiagnosis(request, assignmentId);
 }
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ assignmentId: string }> }
+) {
+  const { assignmentId } = await context.params;
+  return createDefaultDiagnosisQuoteRouteHandlers().listDiagnoses(request, assignmentId);
+}

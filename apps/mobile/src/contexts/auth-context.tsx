@@ -217,7 +217,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Lưu ý: Nếu có Supabase session nhưng BE /auth/me fail (timeout/mạng),
   // vẫn coi là authenticated dùng minimal actor fallback — tránh xoá session
   // của user chỉ vì BE tạm thời không phản hồi.
+  //
+  // Timeout guard: Nếu `getCurrentSession()` hoặc `fetchCurrentActor()` kẹt
+  // (mạng chậm, Supabase treo) thì vẫn phải thoát `loading` trong tối đa
+  // HYDRATE_TIMEOUT_MS để UI splash không bao giờ trắng vô thời hạn.
   // =========================================================
+  const HYDRATE_TIMEOUT_MS = 8000;
+
+  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`${label} timeout after ${ms}ms`)),
+        ms,
+      );
+      promise
+        .then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -225,11 +249,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Backend ready → dùng Supabase + backend
       if (backendReady) {
         try {
-          const session = await getCurrentSession();
+          const session = await withTimeout(
+            getCurrentSession(),
+            HYDRATE_TIMEOUT_MS,
+            'getCurrentSession',
+          );
           if (cancelled) return;
           if (session) {
             try {
-              const actor = await fetchCurrentActor();
+              const actor = await withTimeout(
+                fetchCurrentActor(),
+                HYDRATE_TIMEOUT_MS,
+                'fetchCurrentActor',
+              );
               if (cancelled) return;
               if (actor) {
                 setUser(actorToPublic(actor, session.user.email ?? ''));
@@ -253,9 +285,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
               // BE fail (mạng/5xx): vẫn giữ Supabase session, dùng fallback minimal actor
               // để user không bị buộc login lại khi mạng chập chờn.
+              // console.error chạy được cả trong release (Hermes không strip),
+              // giúp truy vết qua `adb logcat -s ReactNativeJS`.
+              // eslint-disable-next-line no-console
+              console.error(
+                '[auth] Hydrate BE failed, fallback to cached session:',
+                err,
+              );
               if (__DEV__) {
                 // eslint-disable-next-line no-console
-                console.warn('[auth] Hydrate BE failed, fallback to cached session:', err);
+                console.warn(
+                  '[auth] Hydrate BE failed, fallback to cached session:',
+                  err,
+                );
               }
             }
             // Fallback: dùng email từ Supabase session, role mặc định 'rider'
@@ -284,6 +326,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return;
           }
         } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[auth] Hydrate Supabase failed:', err);
           if (__DEV__) {
             // eslint-disable-next-line no-console
             console.warn('[auth] Hydrate Supabase failed:', err);

@@ -33,6 +33,15 @@ export class InMemoryDiagnosisRepository implements DiagnosisRepository {
     return this.findByAssignmentId(assignmentId);
   }
 
+  async listByAssignmentId(
+    assignmentId: string
+  ): Promise<MechanicDiagnosis[]> {
+    const items = this.diagnoses
+      .filter((item) => item.assignmentId === assignmentId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return items.map(cloneDiagnosis);
+  }
+
   async update(input: UpdateMechanicDiagnosis): Promise<MechanicDiagnosis | undefined> {
     const diagnosis = this.diagnoses.find((item) => item.id === input.id);
     if (!diagnosis) {

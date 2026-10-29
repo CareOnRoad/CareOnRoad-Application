@@ -169,7 +169,7 @@ describe("rescue labor agreement and payment workflow", () => {
     const { quotes, payments, uow } = setup();
     const labor = await quotes.createQuote(identity(mechanic), request, laborInput);
     const authenticate = async () => identity(rider);
-    const handlers = createDiagnosisQuoteRouteHandlers({ authenticate, quoteService: quotes, diagnosisService: { async upsertDiagnosis() { throw new Error("unused"); } } });
+    const handlers = createDiagnosisQuoteRouteHandlers({ authenticate, quoteService: quotes, diagnosisService: { async upsertDiagnosis() { throw new Error("unused"); }, async listDiagnoses() { return []; } } });
     const approved = await handlers.approveQuote(new Request("http://localhost/approve", { method: "POST", body: JSON.stringify({ payment_timing: "after_repair" }) }), labor.id);
     expect(approved.status).toBe(200);
     const paymentHandlers = createPaymentRouteHandlers({ authenticate, authenticateWorker: () => ({ workerId: "test" }), paymentService: payments });

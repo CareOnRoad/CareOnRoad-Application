@@ -8,6 +8,7 @@ import {
   Navigation,
   Receipt,
   RefreshCw,
+  Stethoscope,
   Wrench,
   XCircle,
 } from 'lucide-react-native';
@@ -19,6 +20,7 @@ import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { cn } from '@/lib/utils';
 import { useServiceRequests } from '@/hooks/use-service-requests';
 import {
   getServiceRequest,
@@ -29,15 +31,21 @@ import {
 import {
   approveQuote,
   getLatestPendingQuote,
+  listQuotesForRequest,
   rejectQuote,
   formatVnd,
+  type Quote,
 } from '@/lib/quotes-service';
 import {
+  getCompletionChecklist,
   getLiveLocation,
   getRouteEta,
   listAssignments,
+  listAssignmentDiagnoses,
   normalizeLiveLocation,
+  type AssignmentDiagnosis,
   type AssignmentListItem,
+  type CompletionChecklistResponse,
 } from '@/lib/assignments-service';
 
 /**
@@ -93,14 +101,37 @@ const PHASE_BY_STATUS: Record<string, { label: string; tone: 'blue' | 'amber' | 
 };
 
 /**
- * `freezeOnBlur: false` — xem giải thích ở `mechanic/jobs/detail.tsx`.
- * Màn hình này có `RefreshControl` + polling nên bị freeze sẽ mất cây view
- * khi quay lại, gây warning navigation context và UI trắng.
+ * Map phase tone sang màu pill header (tránh phụ thuộc UI Badge ở runtime
+ * nơi padding/chevron khác card, giữ cho dãy pill ngang đều nhau).
  */
-export const unstable_settings = {
-  freezeOnBlur: false,
-  detachPreviousScreen: false,
-};
+function pillToneBg(tone: 'blue' | 'amber' | 'green' | 'red'): string {
+  switch (tone) {
+    case 'blue':
+      return 'bg-primary/10';
+    case 'amber':
+      return 'bg-amber-500/15';
+    case 'green':
+      return 'bg-green/10';
+    case 'red':
+      return 'bg-destructive/10';
+    default:
+      return 'bg-secondary';
+  }
+}
+function pillToneFg(tone: 'blue' | 'amber' | 'green' | 'red'): string {
+  switch (tone) {
+    case 'blue':
+      return '#1974f7';
+    case 'amber':
+      return '#d97706';
+    case 'green':
+      return '#145413';
+    case 'red':
+      return '#ed3f3a';
+    default:
+      return '#64748b';
+  }
+}
 
 export default function RiderRescueDetailScreen() {
   const { requestId } = useLocalSearchParams<{ requestId: string }>();
@@ -109,8 +140,18 @@ export default function RiderRescueDetailScreen() {
   const [request, setRequest] = useState<ServiceRequestResponse | null>(null);
   const [assignment, setAssignment] = useState<AssignmentListItem | null>(null);
   const [quote, setQuote] = useState<Awaited<ReturnType<typeof getLatestPendingQuote>>>(null);
+  // Báo giá đã được rider duyệt (status = approved) — hiển thị riêng ở các
+  // phase `awaiting_payment`/`in_service`/`completed` để rider thấy tổng tiền
+  // đã chốt ngay cả khi BE không còn quote pending.
+  const [approvedQuote, setApprovedQuote] = useState<Quote | null>(null);
   const [eta, setEta] = useState<RouteEtaResponse | null>(null);
   const [liveRaw, setLiveRaw] = useState<Awaited<ReturnType<typeof getLiveLocation>>>(null);
+  // (B.5) Diagnosis + completion checklist mechanic đã submit.
+  // Lưu ý: ETA metadata bị ẩn UI theo quyết định user — chỉ giữ route-eta.
+  const [diagnoses, setDiagnoses] = useState<AssignmentDiagnosis[]>([]);
+  const [completionChecklist, setCompletionChecklist] = useState<CompletionChecklistResponse | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -169,9 +210,15 @@ export default function RiderRescueDetailScreen() {
           } catch {
             setLiveRaw(null);
           }
+          // (B.5) Fetch diagnoses + completion checklist.
+          // Mỗi bước độc lập; lỗi 1 bước không chặn các bước sau.
+          setDiagnoses(await listAssignmentDiagnoses(found.id));
+          setCompletionChecklist(await getCompletionChecklist(found.id));
         } else {
           setEta(null);
           setLiveRaw(null);
+          setDiagnoses([]);
+          setCompletionChecklist(null);
         }
 
         // Quote pending (nếu request chờ duyệt).
@@ -179,6 +226,19 @@ export default function RiderRescueDetailScreen() {
           setQuote(await getLatestPendingQuote(requestId));
         } catch {
           setQuote(null);
+        }
+
+        // Báo giá đã duyệt — luôn load (kể cả khi chưa có pending),
+        // dùng để hiển thị tổng tiền ở các phase awaiting_payment /
+        // in_service / completed.
+        try {
+          const all = await listQuotesForRequest(requestId);
+          const approved = all
+            .filter((q) => q.status === 'approved')
+            .sort((a, b) => b.version - a.version);
+          setApprovedQuote(approved[0] ?? null);
+        } catch {
+          setApprovedQuote(null);
         }
 
         setError(null);
@@ -224,6 +284,28 @@ export default function RiderRescueDetailScreen() {
         .then(setLiveRaw)
         .catch(() => undefined);
     }, POLL_LIVE_MS);
+    return () => clearInterval(t);
+  }, [assignment, isActiveStatus]);
+
+  // Polling diagnoses mỗi 30s khi có assignment.
+  useEffect(() => {
+    if (!assignment || !isActiveStatus) return;
+    const t = setInterval(() => {
+      void listAssignmentDiagnoses(assignment.id)
+        .then(setDiagnoses)
+        .catch(() => undefined);
+    }, POLL_ETA_MS);
+    return () => clearInterval(t);
+  }, [assignment, isActiveStatus]);
+
+  // Polling completion checklist mỗi 30s khi có assignment.
+  useEffect(() => {
+    if (!assignment || !isActiveStatus) return;
+    const t = setInterval(() => {
+      void getCompletionChecklist(assignment.id)
+        .then(setCompletionChecklist)
+        .catch(() => undefined);
+    }, POLL_ETA_MS);
     return () => clearInterval(t);
   }, [assignment, isActiveStatus]);
 
@@ -335,6 +417,56 @@ export default function RiderRescueDetailScreen() {
           </View>
         )}
 
+        {/* Header pills - tóm tắt nhanh các khung đã/đang hiển thị bên dưới
+            giúp rider biết trang này có gì mà không cần scroll từng card. */}
+        <View className="mb-4 flex-row flex-wrap gap-2">
+          {phase ? (
+            <View className={cn('rounded-full px-2.5 py-1', pillToneBg(phase.tone))}>
+              <Text className="text-xs font-semibold" style={{ color: pillToneFg(phase.tone) }}>
+                {phase.label}
+              </Text>
+            </View>
+          ) : null}
+          {assignment ? (
+            <View className="rounded-full bg-secondary px-2.5 py-1">
+              <Text className="text-xs font-semibold text-secondary-foreground">
+                Thợ đã nhận
+              </Text>
+            </View>
+          ) : (
+            <View className="rounded-full bg-secondary px-2.5 py-1">
+              <Text className="text-xs font-semibold text-secondary-foreground">
+                Chưa có thợ
+              </Text>
+            </View>
+          )}
+          {diagnoses.length > 0 ? (
+            <View className="rounded-full bg-primary/10 px-2.5 py-1">
+              <Text className="text-xs font-semibold text-primary">
+                Có chẩn đoán
+              </Text>
+            </View>
+          ) : null}
+          {completionChecklist ? (
+            <View className="rounded-full bg-green/10 px-2.5 py-1">
+              <Text className="text-xs font-semibold text-green">Đã gửi checklist</Text>
+            </View>
+          ) : null}
+          {quote ? (
+            <View className="rounded-full bg-amber-500/15 px-2.5 py-1">
+              <Text className="text-xs font-semibold text-amber-700">
+                Có báo giá chờ duyệt
+              </Text>
+            </View>
+          ) : approvedQuote ? (
+            <View className="rounded-full bg-green/10 px-2.5 py-1">
+              <Text className="text-xs font-semibold text-green">
+                Đã duyệt báo giá
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
         {/* Trạng thái */}
         <Card className="p-4">
           <View className="flex-row items-center justify-between">
@@ -421,6 +553,117 @@ export default function RiderRescueDetailScreen() {
           </View>
         )}
 
+        {/* Chẩn đoán từ thợ (B.5) - list các diagnosis versions */}
+        {diagnoses.length > 0 ? (
+          <Card className="mt-4 p-4">
+            <Text className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Chẩn đoán của thợ
+            </Text>
+            <View className="gap-3">
+              {diagnoses.map((d, idx) => (
+                <View
+                  key={d.id}
+                  className={
+                    idx === 0
+                      ? 'rounded-2xl bg-primary/5 p-3'
+                      : 'rounded-2xl border border-border bg-background p-3'
+                  }
+                >
+                  {idx === 0 ? (
+                    <View className="mb-1.5 flex-row items-center gap-1.5">
+                      <Stethoscope size={12} color="#1974f7" />
+                      <Text className="text-[10px] font-bold uppercase text-primary">
+                        Mới nhất
+                      </Text>
+                    </View>
+                  ) : null}
+                  <Text className="text-sm font-semibold text-foreground">
+                    {d.diagnosis_text}
+                  </Text>
+                  {d.safety_notes ? (
+                    <Text className="mt-1 text-xs text-muted-foreground">
+                      Ghi chú an toàn: {d.safety_notes}
+                    </Text>
+                  ) : null}
+                  {d.recommended_work_text ? (
+                    <Text className="mt-1 text-xs text-muted-foreground">
+                      Xử lý đề xuất: {d.recommended_work_text}
+                    </Text>
+                  ) : null}
+                  <Text className="mt-1.5 text-[10px] text-muted-foreground">
+                    {new Date(d.created_at).toLocaleString('vi-VN')}
+                    {diagnoses.length > 1 ? ` · v${diagnoses.length - idx}` : ''}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : assignment && isActiveStatus ? (
+          <View className="mt-4">
+            <Banner
+              tone="info"
+              title="Thợ chưa gửi chẩn đoán"
+              description="Chẩn đoán giúp bạn hiểu nguyên nhân trước khi duyệt báo giá."
+            />
+          </View>
+        ) : null}
+
+        {/* Completion checklist (B.5) - hiển thị khi thợ đã submit */}
+        {completionChecklist ? (
+          <Card className="mt-4 p-4">
+            <View className="mb-3 flex-row items-center justify-between">
+              <Text className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Checklist hoàn tất
+              </Text>
+              <View className="rounded-full bg-green/10 px-2 py-0.5">
+                <Text className="text-[10px] font-semibold text-green">
+                  v{completionChecklist.revision}
+                </Text>
+              </View>
+            </View>
+            <Text className="text-sm font-semibold text-foreground">
+              {completionChecklist.work_summary}
+            </Text>
+            <View className="mt-3 gap-1.5">
+              {Object.entries(completionChecklist.safety_checklist).map(([key, value]) => {
+                const labels: Record<string, string> = {
+                  test_ride_completed: 'Đã chạy thử',
+                  tools_removed: 'Đã thu dọn dụng cụ',
+                  area_safe: 'Khu vực an toàn',
+                  rider_briefed: 'Đã bàn giao cho khách',
+                  no_fluid_leak: 'Không rò rỉ dầu / xăng',
+                };
+                return (
+                  <View key={key} className="flex-row items-center gap-2">
+                    {value ? (
+                      <CheckCircle2 size={14} color="#145413" />
+                    ) : (
+                      <XCircle size={14} color="#ed3f3a" />
+                    )}
+                    <Text
+                      className={
+                        value
+                          ? 'flex-1 text-xs text-foreground'
+                          : 'flex-1 text-xs text-muted-foreground line-through'
+                      }
+                    >
+                      {labels[key] ?? key}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            {completionChecklist.notes ? (
+              <Text className="mt-2 text-xs italic text-muted-foreground">
+                Ghi chú: {completionChecklist.notes}
+              </Text>
+            ) : null}
+            <Text className="mt-2 text-[10px] text-muted-foreground">
+              {new Date(completionChecklist.created_at).toLocaleString('vi-VN')}
+            </Text>
+          </Card>
+        ) : null}
+
         {/* Báo giá */}
         {quote ? (
           <Card className="mt-4 p-4">
@@ -473,6 +716,57 @@ export default function RiderRescueDetailScreen() {
                 </ActionButton>
               </View>
             ) : null}
+          </Card>
+        ) : null}
+
+        {/* Báo giá đã duyệt - hiển thị khi không còn pending quote nhưng rider
+            vẫn cần thấy tổng tiền đã chốt (vd phase awaiting_payment → rider
+            cần nhớ số tiền thanh toán; phase completed → tổng kết chi phí). */}
+        {!quote && approvedQuote ? (
+          <Card className="mt-4 p-4">
+            <View className="mb-3 flex-row items-center justify-between">
+              <Text className="flex-row items-center gap-2 text-sm font-bold text-foreground">
+                <Receipt size={16} color="#145413" />
+                Báo giá đã duyệt v{approvedQuote.version}
+              </Text>
+              <Badge tone="green">
+                <Text className="text-xs font-semibold text-green">Đã duyệt</Text>
+              </Badge>
+            </View>
+            <View className="gap-1.5">
+              {approvedQuote.lines.map((line) => (
+                <View key={line.id} className="flex-row items-center justify-between">
+                  <Text className="flex-1 text-sm text-foreground">
+                    {line.description}{' '}
+                    <Text className="text-xs text-muted-foreground">× {line.quantity}</Text>
+                  </Text>
+                  <Text className="text-sm font-semibold text-foreground">
+                    {formatVnd(line.line_total_amount)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <View className="mt-3 border-t border-border pt-2">
+              {approvedQuote.discount_amount > 0 ? (
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-sm text-muted-foreground">Giảm giá</Text>
+                  <Text className="text-sm text-foreground">
+                    -{formatVnd(approvedQuote.discount_amount)}
+                  </Text>
+                </View>
+              ) : null}
+              <View className="mt-1 flex-row items-center justify-between">
+                <Text className="text-base font-bold text-foreground">Tổng đã chốt</Text>
+                <Text className="text-base font-bold text-primary">
+                  {formatVnd(approvedQuote.total_amount)}
+                </Text>
+              </View>
+              {approvedQuote.responded_at ? (
+                <Text className="mt-1 text-[10px] text-muted-foreground">
+                  Duyệt lúc {new Date(approvedQuote.responded_at).toLocaleString('vi-VN')}
+                </Text>
+              ) : null}
+            </View>
           </Card>
         ) : null}
 

@@ -1,5 +1,8 @@
-import Link from "next/link";
 import { ArrowRightIcon, BoltIcon } from "@/components/ui/icons";
+import {
+  JOIN_BETA_LABEL,
+  PLAY_STORE_BETA_URL,
+} from "@/lib/play-store";
 
 export function EmergencyBanner() {
   return (
@@ -26,18 +29,21 @@ export function EmergencyBanner() {
                 Xe không khởi động, tai nạn, hoặc sự cố giữa đường?
               </h2>
               <p className="max-w-xl text-surface/85">
-                Nhấn nút dưới đây để hệ thống ưu tiên điều phối kỹ thuật viên
-                tới vị trí của bạn trong thời gian nhanh nhất.
+                CareOnRoad đang trong giai đoạn thử nghiệm closed beta. Tải app
+                ngay để trải nghiệm sớm nhất khi hệ thống điều phối chính thức
+                ra mắt.
               </p>
             </div>
           </div>
-          <Link
-            href="/yeu-cau?priority=emergency"
+          <a
+            href={PLAY_STORE_BETA_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex w-fit items-center gap-2 rounded-full bg-surface px-6 py-3 text-sm font-bold text-accent transition-transform hover:-translate-y-0.5"
           >
-            Yêu cầu khẩn cấp
+            {JOIN_BETA_LABEL}
             <ArrowRightIcon className="h-4 w-4" />
-          </Link>
+          </a>
         </div>
       </div>
     </section>

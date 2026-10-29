@@ -1,6 +1,6 @@
 import { Stack, Redirect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useColorScheme } from 'react-native';
+import { ActivityIndicator, useColorScheme, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { enableFreeze } from 'react-native-screens';
@@ -23,9 +23,16 @@ enableFreeze(false);
 function RootNavigator() {
   const { status, role } = useAuth();
 
-  // Khi session chưa hydrate xong, không điều hướng để tránh flash trang sai
+  // Khi session chưa hydrate xong, hiển thị splash inline (spinner navy) thay vì
+  // return null. Tránh màn trắng vô thời hạn nếu hydrate chậm / kẹt vì mạng /
+  // Supabase. Timeout guard ở AuthProvider đảm bảo status thoát khỏi loading
+  // trong tối đa ~8s.
   if (status === 'loading') {
-    return null;
+    return (
+      <View className="flex-1 items-center justify-center bg-navy">
+        <ActivityIndicator color="#ffffff" />
+      </View>
+    );
   }
 
   // Chưa đăng nhập → chỉ cho phép nhóm auth

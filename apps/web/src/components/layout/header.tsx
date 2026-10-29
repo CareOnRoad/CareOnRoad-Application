@@ -1,15 +1,16 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRightIcon, CloseIcon, MenuIcon } from "@/components/ui/icons";
+import { JOIN_BETA_LABEL, PLAY_STORE_BETA_URL } from "@/lib/play-store";
 import { cn } from "@/lib/cn";
 
 const navItems = [
   { href: "/", label: "Trang chủ" },
   { href: "/dich-vu", label: "Dịch vụ" },
   { href: "/tin-tuc", label: "Tin tức" },
-  { href: "/dat-lich", label: "Đặt lịch" },
   { href: "/lien-he", label: "Liên hệ hỗ trợ" },
 ];
 
@@ -24,9 +25,13 @@ export function Header() {
           className="flex items-center gap-3"
           aria-label="CareOnRoad trang chủ"
         >
-          <span className="grid h-12 w-12 place-items-center rounded-xl bg-brand-deep text-surface">
-            <span className="text-lg font-bold">CR</span>
-          </span>
+          <Image
+            src="/images/logos/cor-logo.png"
+            alt="CareOnRoad"
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded-xl object-contain"
+          />
           <span className="flex flex-col leading-tight">
             <span className="text-base font-bold text-ink">CareOnRoad</span>
             <span className="text-xs text-ink-subtle">
@@ -48,19 +53,15 @@ export function Header() {
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
-          <Link
-            href="/dang-nhap"
-            className="rounded-full px-4 py-2 text-sm font-medium text-ink-muted transition-colors hover:text-ink"
+          <a
+            href={PLAY_STORE_BETA_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-surface shadow-pop transition-transform hover:-translate-y-0.5"
           >
-            Đăng nhập
-          </Link>
-          <Link
-            href="/dang-ky"
-            className="inline-flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-surface transition-colors hover:bg-brand-deep"
-          >
-            Đăng ký
+            {JOIN_BETA_LABEL}
             <ArrowRightIcon className="h-4 w-4" />
-          </Link>
+          </a>
         </div>
 
         <button
@@ -100,21 +101,17 @@ export function Header() {
               {item.label}
             </Link>
           ))}
-          <div className="mt-3 flex gap-2">
-            <Link
-              href="/dang-nhap"
+          <div className="mt-3">
+            <a
+              href={PLAY_STORE_BETA_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={() => setOpen(false)}
-              className="flex-1 rounded-full border border-border px-4 py-2 text-center text-sm font-medium text-ink"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-3 text-center text-sm font-semibold text-surface shadow-pop"
             >
-              Đăng nhập
-            </Link>
-            <Link
-              href="/dang-ky"
-              onClick={() => setOpen(false)}
-              className="flex-1 rounded-full bg-ink px-4 py-2 text-center text-sm font-semibold text-surface"
-            >
-              Đăng ký
-            </Link>
+              {JOIN_BETA_LABEL}
+              <ArrowRightIcon className="h-4 w-4" />
+            </a>
           </div>
         </nav>
       </div>

@@ -139,6 +139,43 @@ export class MechanicDiagnosisService {
       return toMechanicDiagnosisResponse(diagnosis);
     });
   }
+
+  /**
+   * List mechanic diagnosis records for an assignment. Authorization:
+   * the calling actor must be the assigned mechanic, an admin, or the
+   * rider who owns the related service request.
+   *
+   * Returns the rows ordered by `created_at desc` (newest first).
+   */
+  async listDiagnoses(
+    identity: VerifiedSupabaseIdentity,
+    assignmentId: string
+  ): Promise<MechanicDiagnosisResponse[]> {
+    return this.unitOfWork.execute(async (repositories) => {
+      const actor = await loadActiveActor(repositories, identity.subject);
+      const assignment = await repositories.assignments.findById(assignmentId);
+      if (!assignment) {
+        throw new MechanicDiagnosisError("NOT_FOUND", "Assignment not found.", 404);
+      }
+      const request = await repositories.serviceRequests.findById(assignment.requestId);
+      if (!request) {
+        throw new MechanicDiagnosisError("NOT_FOUND", "Service request not found.", 404);
+      }
+      const canRead =
+        actor.roles.includes("admin") ||
+        (actor.roles.includes("mechanic") && assignment.mechanicId === actor.id) ||
+        (actor.roles.includes("rider") && request.riderId === actor.id);
+      if (!canRead) {
+        throw new MechanicDiagnosisError(
+          "FORBIDDEN",
+          "Diagnosis access is not allowed.",
+          403
+        );
+      }
+      const rows = await repositories.diagnoses.listByAssignmentId(assignmentId);
+      return rows.map(toMechanicDiagnosisResponse);
+    });
+  }
 }
 
 export class MechanicDiagnosisError extends Error {

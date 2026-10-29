@@ -1,6 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ClockIcon, LocationIcon } from "@/components/ui/icons";
+import {
+  JOIN_BETA_LABEL,
+  PLAY_STORE_BETA_URL,
+} from "@/lib/play-store";
 
 /**
  * Hero — theo đúng frame figma "trang chủ" (node 38:1029 / 38:1035 / 38:1037 / 38:1038 / 38:1045).
@@ -9,24 +13,24 @@ import { ClockIcon, LocationIcon } from "@/components/ui/icons";
  *  - Eyebrow chip "ĐỘI NGŨ PHẢN ỨNG NHANH" (mint, viền xanh lá, text xanh lá đậm)
  *  - H1 "Người Bảo Vệ Chuyên Nghiệp / Trên Mọi Cung Đường"
  *  - Body mô tả dịch vụ
- *  - 2 buttons: Primary đỏ CTA "CỨU HỘ KHẨP CẤP 24/7" + Secondary mint outline "Xem Bảng Giá Dịch Vụ"
+ *  - 2 buttons: Primary đỏ CTA "Tham gia thử nghiệm ngay!" (mở Play Store
+ *    closed beta) + Secondary mint outline "Xem Bảng Giá Dịch Vụ"
  *  - Quick stats floating: 2 chip glass (Phản hồi < 15 Phút / Hỗ trợ Toàn Thành Phố)
  *  - Background: ảnh hero (placeholder) + gradient mint overlay
  */
 export function Hero() {
   return (
     <section className="relative overflow-hidden">
-      {/* Background image placeholder (chờ hình thật) */}
+      {/* Background hero image */}
       <div className="absolute inset-0 h-[640px] w-full">
         <Image
-          src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 640'><rect width='1440' height='640' fill='%23cfe4dc'/><text x='50%25' y='50%25' fill='%23162130' font-family='sans-serif' font-size='24' text-anchor='middle' dominant-baseline='middle'>Ảnh hero — sẽ thêm sau</text></svg>"
+          src="/images/hero/cor-cover.jpg"
           alt=""
           role="presentation"
           fill
           priority
           sizes="100vw"
           className="object-cover"
-          unoptimized
         />
       </div>
 
@@ -62,13 +66,15 @@ export function Hero() {
 
         {/* CTA buttons */}
         <div className="flex flex-wrap items-center gap-3 pt-2">
-          <Link
-            href="/yeu-cau"
+          <a
+            href={PLAY_STORE_BETA_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex h-[60px] items-center gap-3 rounded-full px-8 text-base font-bold tracking-wide text-surface transition-transform hover:-translate-y-0.5"
             style={{ backgroundColor: "#fc555f" }}
           >
-            CỨU HỘ KHẨP CẤP 24/7
-          </Link>
+            {JOIN_BETA_LABEL}!
+          </a>
           <Link
             href="/dich-vu/bang-gia"
             className="inline-flex h-[60px] items-center rounded-full border-2 border-brand-deep px-6 text-base font-bold transition-colors"

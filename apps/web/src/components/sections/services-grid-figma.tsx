@@ -1,11 +1,14 @@
 import Link from "next/link";
 import {
-  BatteryIcon,
   EngineIcon,
   OilIcon,
   PhoneIcon,
   WrenchIcon,
 } from "@/components/ui/icons";
+import {
+  JOIN_BETA_LABEL,
+  PLAY_STORE_BETA_URL,
+} from "@/lib/play-store";
 
 /**
  * Services Grid — theo frame figma node 38:1092 + 38:1138.
@@ -49,9 +52,10 @@ const services = [
     icon: PhoneIcon,
     name: "Cứu hộ khẩn cấp",
     desc: "Hỗ trợ nhanh các sự cố thủng lốp, hết bình, chết máy giữa đường 24/7.",
-    cta: "GỌI NGAY",
-    href: "/yeu-cau",
+    cta: JOIN_BETA_LABEL,
+    href: PLAY_STORE_BETA_URL,
     highlight: true,
+    external: true,
   },
 ];
 
@@ -113,13 +117,25 @@ export function ServicesGrid() {
                 >
                   {s.desc}
                 </p>
-                <Link
-                  href={s.href}
-                  className="mt-auto inline-flex items-center gap-1 text-sm font-semibold"
-                  style={{ color: s.highlight ? "#fff" : "#00a23a" }}
-                >
-                  {s.cta} →
-                </Link>
+                {s.external ? (
+                  <a
+                    href={s.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-auto inline-flex items-center gap-1 text-sm font-semibold"
+                    style={{ color: s.highlight ? "#fff" : "#00a23a" }}
+                  >
+                    {s.cta} →
+                  </a>
+                ) : (
+                  <Link
+                    href={s.href}
+                    className="mt-auto inline-flex items-center gap-1 text-sm font-semibold"
+                    style={{ color: s.highlight ? "#fff" : "#00a23a" }}
+                  >
+                    {s.cta} →
+                  </Link>
+                )}
               </article>
             );
           })}

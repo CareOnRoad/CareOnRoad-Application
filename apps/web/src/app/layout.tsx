@@ -8,6 +8,9 @@ export const metadata: Metadata = {
   title: "CareOnRoad — Cứu hộ xe máy 24/7",
   description:
     "Nền tảng kết nối kỹ thuật viên cứu hộ xe máy trên toàn quốc — nhanh chóng, minh bạch, an toàn.",
+  icons: {
+    icon: "/images/logos/cor-logo.png",
+  },
 };
 
 export default async function RootLayout({

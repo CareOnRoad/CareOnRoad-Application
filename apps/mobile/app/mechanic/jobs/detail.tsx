@@ -78,18 +78,13 @@ const toneBg: Record<MechanicJobTone, string> = {
 /**
  * Job detail của mechanic.
  *
- * `freezeOnBlur: false` — màn hình này render `RefreshControl` + nhiều form
- * submit. Với `freezeOnBlur` mặc định (react-native-screens), khi user quay
- * lại tab trước rồi vào lại, screen bị detach rồi re-attach ở trạng thái
- * "unmounted" trong khi `NavigationStateContext` của react-navigation đã bị
- * dispose → warning "Couldn't find a navigation context" và UI trắng.
- * Tắt freeze cho phép screen giữ nguyên cây view nên không gặp lỗi này.
+ * Lưu ý navigation context:
+ * Root layout (`apps/mobile/app/_layout.tsx`) đã gọi `enableFreeze(false)`
+ * ở top-level để tránh warning "Couldn't find a navigation context" trên
+ * react-native-screens 4.5.0 + NativeWind CssInterop. Màn hình này render
+ * `RefreshControl` + nhiều form submit và watcher vị trí thời gian thực —
+ * để root policy làm gốc thay vì override ở file.
  */
-export const unstable_settings = {
-  freezeOnBlur: false,
-  detachPreviousScreen: false,
-};
-
 export default function MechanicJobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
@@ -110,6 +105,7 @@ export default function MechanicJobDetailScreen() {
     locationPermissionGranted,
     autoTrackingEnabled,
     toggleLiveSharing,
+    error: providerError,
   } = useMechanicApp();
   const job = id ? getJob(id) : undefined;
   const detail = id ? jobDetail(id) : null;
@@ -167,6 +163,11 @@ export default function MechanicJobDetailScreen() {
         onBack={() => router.back()}
       />
       <ScreenScroll>
+        {providerError ? (
+          <View className="mb-4">
+            <Banner tone="error" title="Không thể cập nhật" description={providerError} />
+          </View>
+        ) : null}
         <View className="mb-4 flex-row items-center gap-2">
           <View className={cn('rounded-full px-2.5 py-1', toneBg[tone])}>
             <Text

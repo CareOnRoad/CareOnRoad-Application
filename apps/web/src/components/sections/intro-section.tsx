@@ -14,17 +14,15 @@ export function IntroSection() {
   return (
     <section className="bg-surface py-16 md:py-20">
       <div className="container-page grid gap-10 md:grid-cols-2 md:items-center md:gap-12">
-        {/* Image column (placeholder) */}
+        {/* Image column */}
         <div className="relative">
           <div className="relative h-[420px] w-full overflow-hidden rounded-3xl border border-border-soft bg-surface-muted shadow-figma md:h-[520px]">
             <Image
-              src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 520'><rect width='600' height='520' fill='%23eaeef2'/><text x='50%25' y='50%25' fill='%23162130' font-family='sans-serif' font-size='22' text-anchor='middle' dominant-baseline='middle'>Ảnh — sẽ thêm sau</text></svg>"
-              alt=""
-              role="presentation"
+              src="/images/hero/cor-cover.jpg"
+              alt="CareOnRoad - Cứu hộ xe máy chuyên nghiệp"
               fill
               sizes="(min-width: 768px) 50vw, 100vw"
               className="object-cover"
-              unoptimized
             />
           </div>
           {/* Decorative overlay corner */}
