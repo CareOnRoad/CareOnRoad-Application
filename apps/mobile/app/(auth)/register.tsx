@@ -52,9 +52,11 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const onSubmit = async () => {
     setError(null);
+    setNotice(null);
 
     if (!name.trim()) {
       setError('Vui lòng nhập họ và tên');
@@ -79,13 +81,19 @@ export default function RegisterScreen() {
 
     setSubmitting(true);
     try {
-      await register({
+      const result = await register({
         role,
         name: name.trim(),
         email: email.trim(),
         phone: phone.trim(),
         password,
       });
+      // Thành công có session → (auth)/_layout tự chuyển sang app theo role.
+      if (result.needsEmailConfirmation) {
+        setNotice(
+          `Đã gửi email xác nhận tới ${email.trim()}. Vui lòng mở email, xác nhận tài khoản rồi đăng nhập.`,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Đăng ký thất bại');
     } finally {
@@ -153,6 +161,12 @@ export default function RegisterScreen() {
           {error && (
             <View className="mt-5">
               <Banner tone="error" description={error} />
+            </View>
+          )}
+
+          {notice && (
+            <View className="mt-5">
+              <Banner tone="success" title="Đăng ký thành công" description={notice} />
             </View>
           )}
 

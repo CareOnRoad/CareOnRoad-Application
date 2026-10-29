@@ -5,7 +5,7 @@ import type { LogEvent } from "@/lib/server-logger";
 
 import { DiagnosisService } from "../diagnosis.service";
 import type { DiagnosisResult } from "../diagnosis.schema";
-import type { OpenRouterResult } from "../openrouter.client";
+import type { AiProviderResult } from "../ai-provider.types";
 import { InMemorySessionStore } from "../session.store";
 
 export function createJsonRequest(body: unknown, headers: Record<string, string> = {}) {
@@ -50,23 +50,23 @@ export async function responseJson<T = Record<string, unknown>>(response: Respon
 
 export function setupDiagnosisRoute(options: {
   asrResult?: AsrResult;
-  openRouterResult?: OpenRouterResult;
+  aiResult?: AiProviderResult;
 }) {
   const store = new InMemorySessionStore();
   const records: LogEvent[] = [];
   const asr = {
     transcribe: vi.fn(async (): Promise<AsrResult> => options.asrResult ?? { success: true, text: "xe kho de va den yeu" })
   };
-  const openRouter = {
+  const aiProvider = {
     createDiagnosisJson: vi.fn(
-      async (): Promise<OpenRouterResult> =>
-        options.openRouterResult ?? { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
+      async (): Promise<AiProviderResult> =>
+        options.aiResult ?? { success: true, json: modelDiagnosis(), apiHttpStatus: "200" }
     )
   };
   const service = new DiagnosisService({
     sessionStore: store,
     asr,
-    openRouter,
+    aiProvider,
     logger: {
       info: (payload) => records.push(payload),
       warn: (payload) => records.push(payload),
@@ -75,7 +75,7 @@ export function setupDiagnosisRoute(options: {
     now: () => 1000
   });
 
-  return { store, records, asr, openRouter, service };
+  return { store, records, asr, aiProvider, service };
 }
 
 export function modelDiagnosis(overrides: Partial<DiagnosisResult> = {}): DiagnosisResult {

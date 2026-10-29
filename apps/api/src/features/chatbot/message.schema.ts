@@ -2,10 +2,13 @@ import { z } from "zod";
 
 const safetyAnswersSchema = z.record(z.unknown()).optional();
 
+// Symptom descriptions are short; the cap bounds prompt tokens per request.
+export const maxMessageChars = 500;
+
 export const textMessageRequestSchema = z
   .object({
     input_mode: z.literal("text"),
-    content_text: z.string().trim().min(1),
+    content_text: z.string().trim().min(1).max(maxMessageChars),
     safety_answers: safetyAnswersSchema
   })
   .strict();

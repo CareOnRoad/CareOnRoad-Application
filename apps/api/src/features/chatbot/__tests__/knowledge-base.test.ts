@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { knowledgeBase } from "../knowledge-base";
+import { repairPrices } from "../repair-prices";
 import { knowledgeReviewedAt, knowledgeSources } from "../knowledge-sources";
 
 const officialHosts = {
@@ -55,11 +56,19 @@ describe("curated knowledge integrity", () => {
     expect(knowledgeSources["suzuki-ph-raider-fi-manual"].published_at).toBeNull();
   });
 
-  it("does not present unsourced repair prices as available", () => {
+  it("only shows prices that come from the sourced price catalog", () => {
+    const catalogRanges = Object.values(repairPrices).map((price) => `${price.min}-${price.max}`);
+    for (const price of Object.values(repairPrices)) {
+      expect(price.min).toBeGreaterThan(0);
+      expect(price.min).toBeLessThan(price.max);
+      expect(price.sources.length).toBeGreaterThan(0);
+      expect(price.sources.every((url) => url.startsWith("https://"))).toBe(true);
+    }
     for (const entry of knowledgeBase) {
-      expect(entry.price_status).toBe("unverified");
-      expect(entry.estimated_cost_min).toBe(0);
-      expect(entry.estimated_cost_max).toBe(0);
+      const priced = entry.estimated_cost_max > 0;
+      expect(entry.price_status).toBe(priced ? "dealer_reference" : "unavailable");
+      if (priced) expect(catalogRanges).toContain(`${entry.estimated_cost_min}-${entry.estimated_cost_max}`);
+      if (entry.component_code === "UNKNOWN" || entry.review_status === "internal_policy") expect(priced).toBe(false);
     }
   });
 });

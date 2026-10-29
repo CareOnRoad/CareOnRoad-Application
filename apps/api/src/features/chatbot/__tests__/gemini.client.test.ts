@@ -76,12 +76,11 @@ describe("GeminiClient", () => {
       generationConfig: {
         temperature: 0.2,
         maxOutputTokens: expect.any(Number),
-        responseFormat: {
-          text: {
-            mimeType: "application/json"
-          }
-        }
-      }
+        responseMimeType: "application/json",
+        responseJsonSchema: expect.objectContaining({ type: "object" })
+      },
+      systemInstruction: { parts: [{ text: expect.any(String) }] },
+      contents: [{ role: "user", parts: [{ text: expect.any(String) }] }]
     });
     expect(requestBody.generationConfig.maxOutputTokens).toBeLessThanOrEqual(650);
   });

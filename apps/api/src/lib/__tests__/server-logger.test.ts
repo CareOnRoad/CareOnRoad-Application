@@ -57,8 +57,8 @@ describe("server logger", () => {
 
   it("does not include API keys, tokens, raw audio, phone, email, or payment fields", () => {
     const payload = sanitizeLogPayload({
-      event: "chatbot.openrouter.started",
-      openrouter_api_key: "sk-secret",
+      event: "chatbot.gemini.started",
+      gemini_api_key: "sk-secret",
       token: "token-secret",
       raw_audio: new Uint8Array([1, 2, 3]),
       phone: "0909123456",
@@ -77,7 +77,7 @@ describe("server logger", () => {
     expect(serialized).not.toContain("rider@example.com");
     expect(serialized).not.toContain("4111111111111111");
     expect(payload).not.toHaveProperty("raw_audio");
-    expect(payload).not.toHaveProperty("openrouter_api_key");
+    expect(payload).not.toHaveProperty("gemini_api_key");
     expect(payload).not.toHaveProperty("payment_card");
     expect(payload.nested).toEqual({});
   });

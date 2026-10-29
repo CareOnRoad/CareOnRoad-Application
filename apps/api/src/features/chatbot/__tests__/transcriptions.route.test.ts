@@ -8,7 +8,7 @@ import { createVoiceRequest, responseJson, setupDiagnosisRoute } from "./api-rou
 describe("POST /api/chatbot/sessions/[sessionId]/transcriptions", () => {
   it("uses ASR only and returns transcribed text", async () => {
     const transcribedText = "xe kho de va den yeu";
-    const { store, asr, openRouter } = setupDiagnosisRoute({
+    const { store, asr, aiProvider } = setupDiagnosisRoute({
       asrResult: { success: true, text: transcribedText }
     });
     const session = store.createSession();
@@ -21,12 +21,12 @@ describe("POST /api/chatbot/sessions/[sessionId]/transcriptions", () => {
 
     expect(response.status).toBe(200);
     expect(asr.transcribe).toHaveBeenCalledOnce();
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
+    expect(aiProvider.createDiagnosisJson).not.toHaveBeenCalled();
     expect(body.transcribed_text).toBe(transcribedText);
   });
 
   it("returns 400 for missing audio", async () => {
-    const { store, asr, openRouter } = setupDiagnosisRoute({});
+    const { store, asr, aiProvider } = setupDiagnosisRoute({});
     const session = store.createSession();
 
     const response = await createTranscriptionResponse(
@@ -39,7 +39,7 @@ describe("POST /api/chatbot/sessions/[sessionId]/transcriptions", () => {
     expect(response.status).toBe(400);
     expect(body.error_code).toBe("INVALID_INPUT");
     expect(asr.transcribe).not.toHaveBeenCalled();
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
+    expect(aiProvider.createDiagnosisJson).not.toHaveBeenCalled();
   });
 
   it("uses the transcription rate limit instead of the voice diagnosis limit", async () => {

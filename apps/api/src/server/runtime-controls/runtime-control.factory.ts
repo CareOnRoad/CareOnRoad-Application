@@ -14,8 +14,9 @@ export function getProviderCircuitControl(env: NodeJS.ProcessEnv = process.env):
   circuit ??= createCircuit(env); return circuit;
 }
 export function createRateLimiter(env: NodeJS.ProcessEnv): RateLimiter {
-  const fallback = new InMemoryRateLimiter();
-  return mode(env) === "postgres" ? new SharedRateLimiter(new PostgresRuntimeControlStore(getPostgresClient()), { fallback, timeoutMs: timeout(env) }) : fallback;
+  const limits = { ipDailyLimit: positiveInt(env.CHATBOT_IP_DAILY_LIMIT) };
+  const fallback = new InMemoryRateLimiter(limits);
+  return mode(env) === "postgres" ? new SharedRateLimiter(new PostgresRuntimeControlStore(getPostgresClient()), { ...limits, fallback, timeoutMs: timeout(env) }) : fallback;
 }
 export function createCircuit(env: NodeJS.ProcessEnv): ProviderCircuitControl {
   const fallback = new InMemoryProviderCircuitBreaker();
@@ -23,3 +24,4 @@ export function createCircuit(env: NodeJS.ProcessEnv): ProviderCircuitControl {
 }
 function mode(env: NodeJS.ProcessEnv) { return env.RUNTIME_CONTROLS_MODE?.trim().toLowerCase() === "postgres" ? "postgres" : "memory"; }
 function timeout(env: NodeJS.ProcessEnv) { const value = Number(env.RUNTIME_CONTROLS_TIMEOUT_MS ?? "500"); return Number.isFinite(value) ? Math.min(Math.max(Math.trunc(value), 50), 5000) : 500; }
+function positiveInt(value: string | undefined) { const parsed = Number(value); return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined; }

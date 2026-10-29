@@ -8,7 +8,6 @@ export * from "./gemini.client";
 export * from "./knowledge-base";
 export * from "./message.schema";
 export * from "./normalize-vi";
-export * from "./openrouter.client";
 export * from "./post-validation";
 export * from "./prompts";
 export * from "./retrieval";

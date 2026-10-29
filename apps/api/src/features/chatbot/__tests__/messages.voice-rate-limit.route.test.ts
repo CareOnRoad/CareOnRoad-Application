@@ -7,7 +7,7 @@ import { createVoiceRequest, responseJson, setupDiagnosisRoute } from "./api-rou
 
 describe("POST /api/chatbot/sessions/[sessionId]/messages voice rate limiting", () => {
   it("returns 429 using stricter voice session limit before ASR execution", async () => {
-    const { store, service, asr, openRouter } = setupDiagnosisRoute({});
+    const { store, service, asr, aiProvider } = setupDiagnosisRoute({});
     const records: unknown[] = [];
     const session = store.createSession();
     const rateLimiter = new InMemoryRateLimiter({ sessionLimit: 99, ipLimit: 99, voiceSessionLimit: 0 });
@@ -26,9 +26,9 @@ describe("POST /api/chatbot/sessions/[sessionId]/messages voice rate limiting", 
     expect(response.status).toBe(429);
     expect(body.error_code).toBe("AI_SESSION_LIMIT_EXCEEDED");
     expect(asr.transcribe).not.toHaveBeenCalled();
-    expect(openRouter.createDiagnosisJson).not.toHaveBeenCalled();
+    expect(aiProvider.createDiagnosisJson).not.toHaveBeenCalled();
     expect(JSON.stringify(records)).not.toContain("1,2,3,4");
     expect(JSON.stringify(records)).not.toContain("audio_file");
-    expect(JSON.stringify(records)).not.toContain("secret-openrouter-key");
+    expect(JSON.stringify(records)).not.toContain("secret-gemini-key");
   });
 });

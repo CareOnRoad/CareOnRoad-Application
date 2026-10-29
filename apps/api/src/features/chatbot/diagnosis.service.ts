@@ -17,9 +17,10 @@ import { postValidateDiagnosis } from "./post-validation";
 import { buildCompactDiagnosisPrompt } from "./prompts";
 import { retrieveKnowledge } from "./retrieval";
 import { runSafetyGate } from "./safety-gate";
+import { isVehicleRelated } from "./topic-filter";
 import type { InMemorySessionStore } from "./session.store";
 
-export type DiagnosisServiceErrorCode = "INVALID_INPUT" | "NOT_FOUND" | AsrErrorCode;
+export type DiagnosisServiceErrorCode = "INVALID_INPUT" | "NOT_FOUND" | "OFF_TOPIC" | AsrErrorCode;
 
 export type DiagnosisServiceSuccess = {
   success: true;
@@ -49,7 +50,6 @@ export type DiagnosisServiceOptions = {
     transcribe(input?: AsrAudioInput): Promise<AsrResult>;
   };
   aiProvider?: AiDiagnosisJsonProvider;
-  openRouter?: AiDiagnosisJsonProvider;
   logger?: {
     info(payload: LogEvent): void;
     warn(payload: LogEvent): void;
@@ -71,7 +71,7 @@ export class DiagnosisService {
       options.sessionStore ??
       getChatbotSessionRepository();
     this.asr = options.asr ?? asrService;
-    this.aiProvider = options.aiProvider ?? options.openRouter ?? aiDiagnosisClient;
+    this.aiProvider = options.aiProvider ?? aiDiagnosisClient;
     this.logger = options.logger ?? serverLogger;
     this.now = options.now ?? Date.now;
   }
@@ -106,8 +106,32 @@ export class DiagnosisService {
 
     const contentText = contentResult.contentText;
     const normalizedText = normalizeVietnameseText(contentText);
-    const safety = runSafetyGate(contentText);
-    const retrievedKnowledge = retrieveKnowledge(contentText, 2);
+    // Follow-up answers ("bánh trước") only make sense together with the rider's earlier messages.
+    const previousTexts = session.messages
+      .slice(-maxContextMessages)
+      .map((message) => message.content_text ?? message.transcribed_text)
+      .filter((text): text is string => Boolean(text));
+    const contextText = [...previousTexts, contentText].join("\n");
+    const safety = runSafetyGate(contextText);
+    const retrievedKnowledge = retrieveKnowledge(contextText, 2);
+    const isFollowUpAnswer = previousTexts.length > 0 && contentText.length <= maxFollowUpChars;
+
+    // Off-topic text never reaches the AI provider or the session history.
+    if (
+      !isFollowUpAnswer &&
+      !isVehicleRelated(contentText) &&
+      !runSafetyGate(contentText).is_dangerous &&
+      retrieveKnowledge(contentText, 1).length === 0
+    ) {
+      this.logger.info({
+        event: "chatbot.off_topic.rejected",
+        session_id: request.sessionId,
+        request_id: requestId,
+        input_mode: inputMode,
+        ...createTextLogMetadata(contentText)
+      });
+      return failure("OFF_TOPIC", offTopicMessage, requestId);
+    }
 
     this.logger.info({
       event: "chatbot.diagnosis.started",
@@ -118,10 +142,11 @@ export class DiagnosisService {
     });
 
     const prompt = buildCompactDiagnosisPrompt({
-      normalizedText,
+      riderText: contentText,
+      previousRiderTexts: previousTexts,
+      previousQuestions: session.latest_diagnosis?.followup_questions ?? [],
       safety,
       retrievedKnowledge,
-      ...(contentResult.transcribedText ? { transcribedText: contentResult.transcribedText } : {}),
       safetyAnswers: parsedMessage.data.safety_answers
     });
     const providerResult = await this.aiProvider.createDiagnosisJson(prompt);
@@ -135,7 +160,7 @@ export class DiagnosisService {
       );
       diagnosis = modelDiagnosis.success
         ? modelDiagnosis.diagnosis
-        : this.createLoggedFallback(contentText, contentResult.transcribedText, {
+        : this.createLoggedFallback(contextText, contentResult.transcribedText, {
             requestId,
             sessionId: request.sessionId,
             inputMode,
@@ -145,15 +170,13 @@ export class DiagnosisService {
             providerModel: providerResult.providerModel
           });
     } else {
-      diagnosis = this.createLoggedFallback(contentText, contentResult.transcribedText, {
+      diagnosis = this.createLoggedFallback(contextText, contentResult.transcribedText, {
         requestId,
         sessionId: request.sessionId,
         inputMode,
         errorCode: providerResult.errorCode,
         apiHttpStatus: providerResult.apiHttpStatus,
         retryAfterSeconds: providerResult.retryAfterSeconds,
-        openRouterErrorCode: providerResult.openRouterErrorCode,
-        openRouterErrorType: providerResult.openRouterErrorType,
         provider: providerResult.provider,
         providerName: providerResult.providerName,
         providerModel: providerResult.providerModel
@@ -308,8 +331,6 @@ export class DiagnosisService {
       errorCode: string;
       apiHttpStatus?: string;
       retryAfterSeconds?: number;
-      openRouterErrorCode?: string;
-      openRouterErrorType?: string;
       providerName?: string;
       providerModel?: string;
       provider?: string;
@@ -323,8 +344,6 @@ export class DiagnosisService {
       error_code: metadata.errorCode,
       api_http_status: metadata.apiHttpStatus,
       retry_after: metadata.retryAfterSeconds,
-      openrouter_error_code: metadata.openRouterErrorCode,
-      openrouter_error_type: metadata.openRouterErrorType,
       provider: metadata.provider,
       provider_name: metadata.providerName,
       provider_model: metadata.providerModel,
@@ -338,6 +357,13 @@ export class DiagnosisService {
 }
 
 export const diagnosisService = new DiagnosisService();
+
+const maxContextMessages = 2;
+// Only short replies inherit the session topic, so one on-topic message does not unlock free-form chat.
+const maxFollowUpChars = 80;
+
+export const offTopicMessage =
+  "Mình chỉ hỗ trợ chẩn đoán sự cố xe máy. Hãy mô tả tình trạng xe, ví dụ: \"xe đề không nổ\" hoặc \"phanh kêu rít\".";
 
 function failure(
   errorCode: DiagnosisServiceErrorCode,

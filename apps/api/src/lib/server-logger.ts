@@ -10,12 +10,11 @@ export const chatbotLogEvents = [
   "chatbot.diagnosis.started",
   "chatbot.gemini.started",
   "chatbot.gemini.failed",
-  "chatbot.openrouter.started",
-  "chatbot.openrouter.failed",
   "chatbot.ai_provider.skipped",
   "chatbot.fallback.used",
   "chatbot.diagnosis.completed",
-  "chatbot.rate_limited"
+  "chatbot.rate_limited",
+  "chatbot.off_topic.rejected"
 ] as const;
 
 export type ChatbotLogEventName = (typeof chatbotLogEvents)[number];
@@ -31,8 +30,6 @@ export type LogEvent = {
   provider_status?: string;
   api_http_status?: string;
   retry_after?: number;
-  openrouter_error_code?: string;
-  openrouter_error_type?: string;
   provider_name?: string;
   error_code?: string;
   text_length?: number;

@@ -7,7 +7,7 @@ import { createJsonRequest, responseJson, setupDiagnosisRoute } from "./api-rout
 
 describe("POST /api/chatbot/sessions/[sessionId]/messages rate limiting", () => {
   it("returns 429 for over-limit text request by session_id", async () => {
-    const { store, service, openRouter } = setupDiagnosisRoute({});
+    const { store, service, aiProvider } = setupDiagnosisRoute({});
     const session = store.createSession();
     const rateLimiter = new InMemoryRateLimiter({ sessionLimit: 1, ipLimit: 99 });
 
@@ -26,7 +26,7 @@ describe("POST /api/chatbot/sessions/[sessionId]/messages rate limiting", () => 
     expect(first.status).toBe(200);
     expect(second.status).toBe(429);
     expect(body.error_code).toBe("AI_SESSION_LIMIT_EXCEEDED");
-    expect(openRouter.createDiagnosisJson).toHaveBeenCalledTimes(1);
+    expect(aiProvider.createDiagnosisJson).toHaveBeenCalledTimes(1);
   });
 
   it("returns 429 for over-limit text request by IP fallback", async () => {
@@ -73,7 +73,7 @@ describe("POST /api/chatbot/sessions/[sessionId]/messages rate limiting", () => 
 
     expect(response.status).toBe(429);
     expect(JSON.stringify(records)).not.toContain(fullText);
-    expect(JSON.stringify(records)).not.toContain("secret-openrouter-key");
+    expect(JSON.stringify(records)).not.toContain("secret-gemini-key");
   });
 });
 

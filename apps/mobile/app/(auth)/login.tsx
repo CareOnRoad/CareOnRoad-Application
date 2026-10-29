@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Link, router } from 'expo-router';
+import { Link } from 'expo-router';
 import {
   Bike,
   Eye,
@@ -23,7 +23,6 @@ import { useAuth } from '@/contexts/auth-context';
 import { Banner } from '@/components/ui/banner';
 import { startGoogleSignIn } from '@/lib/auth-service';
 import { cn } from '@/lib/utils';
-import type { AuthRole } from '@/lib/auth-types';
 
 /**
  * Màn hình đăng nhập.
@@ -44,20 +43,6 @@ export default function LoginScreen() {
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Sau khi auth state đổi sang 'authenticated', chuyển sang nhóm role tương ứng.
-  // Lý do: React Navigation Stack không tự swap initial route khi state đổi,
-  // nên cần explicit điều hướng ra khỏi nhóm (auth).
-  // `authRole` được truyền vào từ caller (không đọc từ closure `role` vì stale).
-  const navigateAfterAuth = (authRole: AuthRole) => {
-    if (authRole === 'mechanic') {
-      router.replace('/mechanic');
-    } else if (authRole === 'rider') {
-      router.replace('/rider');
-    } else {
-      router.replace('/');
-    }
-  };
-
   const onSubmit = async () => {
     setError(null);
     if (!email.trim()) {
@@ -70,9 +55,8 @@ export default function LoginScreen() {
     }
     setSubmitting(true);
     try {
-      const result = await login({ email: email.trim(), password });
-      // Dùng role trả về từ login() thay vì `role` từ closure (state cũ).
-      navigateAfterAuth(result.role);
+      // Thành công → (auth)/_layout tự chuyển sang nhóm theo role.
+      await login({ email: email.trim(), password });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Đăng nhập thất bại');
     } finally {

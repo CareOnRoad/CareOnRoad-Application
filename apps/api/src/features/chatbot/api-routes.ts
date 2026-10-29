@@ -16,7 +16,7 @@ import { getChatbotRateLimiter } from "@/server/runtime-controls/runtime-control
 import type { DiagnosisServiceResult } from "./diagnosis.service";
 import { diagnosisService } from "./diagnosis.service";
 import type { MessageRequest } from "./message.schema";
-import { messageRequestSchema } from "./message.schema";
+import { maxMessageChars, messageRequestSchema } from "./message.schema";
 import type { InMemorySessionStore } from "./session.store";
 import { getSessionOwnershipService, ownerCookie, type SessionOwnershipService } from "./session-ownership.service";
 
@@ -301,7 +301,8 @@ async function parseJsonMessage(request: Request): Promise<ParsedRouteInput> {
     const parsed = messageRequestSchema.safeParse(body);
 
     if (!parsed.success || parsed.data.input_mode !== "text") {
-      return invalidInput("Invalid text message input.");
+      const tooLong = !parsed.success && parsed.error.issues.some((issue) => issue.code === "too_big");
+      return invalidInput(tooLong ? `Message is too long (max ${maxMessageChars} characters).` : "Invalid text message input.");
     }
 
     return {
@@ -395,6 +396,10 @@ function statusForDiagnosisError(errorCode: string): number {
     return 404;
   }
 
+  if (errorCode === "OFF_TOPIC") {
+    return 422;
+  }
+
   if (
     errorCode === "ASR_DISABLED" ||
     errorCode === "ASR_NOT_AVAILABLE" ||
@@ -422,6 +427,7 @@ function isApiErrorCode(errorCode: string): errorCode is ApiErrorCode {
     "RATE_LIMITED",
     "AI_SESSION_LIMIT_EXCEEDED",
     "AI_DAILY_LIMIT_EXCEEDED",
+    "OFF_TOPIC",
     "ASR_DISABLED",
     "ASR_NOT_AVAILABLE",
     "ASR_MODEL_NOT_FOUND",

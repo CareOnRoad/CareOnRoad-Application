@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { diagnosisSchema } from "../diagnosis.schema";
-import { postValidateDiagnosis } from "../post-validation";
+import { noPriceNote, postValidateDiagnosis, priceNote } from "../post-validation";
 import { retrieveKnowledge } from "../retrieval";
 import { runSafetyGate } from "../safety-gate";
 
 describe("postValidateDiagnosis", () => {
-  it("discards provider price ranges without a verified repair-price source", () => {
+  it("replaces provider price ranges with backend catalog prices", () => {
     const result = postValidateDiagnosis(
       {
         ...modelDiagnosis(),
@@ -24,10 +24,10 @@ describe("postValidateDiagnosis", () => {
 
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.diagnosis.estimated_total).toMatchObject({ min: 0, max: 0 });
+    expect(result.diagnosis.estimated_total).toMatchObject({ min: 250000, max: 600000 });
     expect(result.diagnosis.top_hypotheses[0]).toMatchObject({
-      estimated_cost_min: 0,
-      estimated_cost_max: 0
+      estimated_cost_min: 250000,
+      estimated_cost_max: 600000
     });
     expect(diagnosisSchema.safeParse(result.diagnosis).success).toBe(true);
   });
@@ -82,16 +82,43 @@ describe("postValidateDiagnosis", () => {
     expect(result.diagnosis.top_hypotheses[0]?.confidence).toBe(0);
     expect(result.diagnosis.recommended_next_actions).toHaveLength(2);
     expect(result.diagnosis.followup_questions).toHaveLength(2);
-    expect(result.diagnosis.short_answer).toContain("Chua co uoc tinh chi phi");
+    expect(result.diagnosis.short_answer).toContain(priceNote);
     expect(sentenceCount(result.diagnosis.short_answer)).toBeLessThanOrEqual(3);
   });
 
   it("makes unavailable repair prices explicit", () => {
-    const result = postValidateDiagnosis(modelDiagnosis(), runSafetyGate("xe kho de"));
+    const result = postValidateDiagnosis(
+      { ...modelDiagnosis(), top_hypotheses: [{ ...modelDiagnosis().top_hypotheses[0], component_code: "UNKNOWN" }] },
+      runSafetyGate("xe kho de")
+    );
 
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.diagnosis.short_answer).toContain("Chua co uoc tinh chi phi");
+    expect(result.diagnosis.short_answer).toContain(noPriceNote);
+    expect(result.diagnosis.estimated_total).toMatchObject({ min: 0, max: 0 });
+  });
+
+  it("adds the model's second likely part with its catalog price", () => {
+    const result = postValidateDiagnosis(
+      {
+        issue: "Xe khó nổ do đánh lửa hoặc bình yếu",
+        parts: ["SPARK_PLUG", "BATTERY"],
+        risk: "medium",
+        ride: true,
+        answer: "Xe khó nổ, có thể do bugi hoặc bình ắc quy.",
+        actions: ["Nhờ thợ kiểm tra bugi"],
+        questions: []
+      },
+      runSafetyGate("xe bi giat giat")
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diagnosis.top_hypotheses.map((item) => item.component_code)).toEqual(["SPARK_PLUG", "BATTERY"]);
+    expect(result.diagnosis.top_hypotheses[1]).toMatchObject({ rank: 2, estimated_cost_min: 250000 });
+    expect(result.diagnosis.top_hypotheses[1]!.confidence).toBeLessThanOrEqual(0.35);
+    expect(result.diagnosis.estimated_total).toMatchObject({ min: 50000, max: 600000 });
+    expect(diagnosisSchema.safeParse(result.diagnosis).success).toBe(true);
   });
 
   it("normalizes minimal provider output into full diagnosis schema", () => {
@@ -144,12 +171,8 @@ describe("postValidateDiagnosis", () => {
     expect(result.diagnosis.overall_confidence).toBeGreaterThanOrEqual(0.6);
     expect(result.diagnosis.top_hypotheses[0]).toMatchObject({
       component_code: "BATTERY",
-      estimated_cost_min: 0,
-      estimated_cost_max: 0
-    });
-    expect(result.diagnosis.estimated_total).toMatchObject({
-      min: 0,
-      max: 0
+      estimated_cost_min: 250000,
+      estimated_cost_max: 600000
     });
     expect(result.diagnosis.recommended_next_actions[0]?.type).toBe("book_mobile_repair");
     expect(diagnosisSchema.safeParse(result.diagnosis).success).toBe(true);
@@ -229,7 +252,7 @@ describe("postValidateDiagnosis", () => {
     expect(["high", "critical"]).toContain(result.diagnosis.risk_level);
     expect(result.diagnosis.can_continue_riding).toBe(false);
     expect(result.diagnosis.recommended_next_actions[0]?.type).toBe("emergency_rescue");
-    expect(result.diagnosis.short_answer).toContain("Dung xe");
+    expect(result.diagnosis.short_answer).toContain("Dừng xe");
   });
 
   it("uses curated questions when the model does not ask how to distinguish causes", () => {
@@ -239,7 +262,7 @@ describe("postValidateDiagnosis", () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.diagnosis.followup_questions[0]).toContain("ngập nước");
-    expect(result.diagnosis.estimated_total).toMatchObject({ min: 0, max: 0 });
+    expect(result.diagnosis.estimated_total).toMatchObject({ min: 150000, max: 400000 });
   });
 });
 
