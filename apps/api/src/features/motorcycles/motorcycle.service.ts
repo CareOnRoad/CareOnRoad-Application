@@ -1,13 +1,27 @@
 import { randomUUID } from "node:crypto";
 
 import type { ApiErrorCode } from "@/lib/api-error";
+import { isPastOrTodayVietnam } from "@/lib/vietnam-date";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
-import type { Motorcycle } from "@/server/repositories/contracts/motorcycle.repository";
+import {
+  motorcycleDetailColumns,
+  type Motorcycle,
+  type MotorcycleDetails,
+  type MotorcycleDetailsPatch
+} from "@/server/repositories/contracts/motorcycle.repository";
 import type { ServiceRequest } from "@/server/repositories/contracts/service-request.repository";
 
 import type { VerifiedSupabaseIdentity } from "../auth/auth.types";
 import { requireActorRole } from "../auth/authorization";
-import { motorcycleInputSchema, type MotorcycleInput } from "./motorcycle.schemas";
+import { hasPlan, planRequiredDetails } from "../plans/plan";
+import {
+  motorcycleDetailsPatchSchema,
+  motorcycleInputSchema,
+  type MotorcycleDetailsPatchInput,
+  type MotorcycleInput
+} from "./motorcycle.schemas";
+
+const MAX_PURCHASE_AGE_DAYS = 36500;
 
 export type MotorcycleResponse = {
   id: string;
@@ -17,6 +31,8 @@ export type MotorcycleResponse = {
   license_plate?: string;
   year?: number;
   notes?: string;
+  // Rider-private VIP details, only non-null keys (snake_case); `{}` when none are set.
+  details: Record<string, string | number>;
   last_maintenance_at?: string;
   next_maintenance_at?: string;
   created_at: string;
@@ -172,6 +188,67 @@ export class MotorcycleService {
     });
   }
 
+  async updateMotorcycleDetails(
+    identity: VerifiedSupabaseIdentity,
+    motorcycleId: string,
+    input: unknown
+  ): Promise<MotorcycleResponse> {
+    const parsed = parseDetailsPatch(input);
+
+    return await this.unitOfWork.execute(async ({ audit, motorcycles, outbox, users }) => {
+      const actor = await loadRiderActor(users, identity.subject);
+      await loadOwnedMotorcycle(motorcycles, motorcycleId, actor.id);
+      const now = this.options.now?.() ?? new Date();
+      if (parsed.purchase_date && !isPastOrTodayVietnam(parsed.purchase_date, now, MAX_PURCHASE_AGE_DAYS)) {
+        throw new MotorcycleError("INVALID_INPUT", "purchase_date must be today or earlier (Vietnam time) and within 100 years.", 400);
+      }
+      const sent = Object.entries(parsed).filter(([, value]) => value !== undefined);
+      // D14: clearing (null) stays allowed without a plan; writing a value needs vip.
+      if (sent.some(([, value]) => value !== null) && !hasPlan(actor, "vip", now)) {
+        throw new MotorcycleError("FORBIDDEN", "A higher plan is required.", 403, planRequiredDetails("vip"));
+      }
+      const updated = await motorcycles.updateDetails({
+        id: motorcycleId,
+        patch: toDetailsPatch(parsed),
+        updatedAt: now
+      });
+      if (!updated) {
+        throw new MotorcycleError("NOT_FOUND", "Motorcycle not found.", 404);
+      }
+      const createId = this.options.createId ?? randomUUID;
+      const occurrenceId = createId();
+      // Column names only: the values are rider-private and must never reach audit/outbox/logs.
+      const metadata = {
+        resource_id: updated.id,
+        rider_id: actor.id,
+        changed_fields: sent.map(([column]) => column)
+      };
+
+      await outbox.append({
+        id: occurrenceId,
+        topic: "motorcycle.details_updated",
+        aggregateType: "motorcycle",
+        aggregateId: updated.id,
+        dedupeKey: `motorcycle.details_updated:${updated.id}:${occurrenceId}`,
+        payload: metadata,
+        createdAt: now,
+        nextAttemptAt: now
+      });
+      await audit.append({
+        id: createId(),
+        actorId: actor.id,
+        actorRole: "rider",
+        action: "motorcycle.details_updated",
+        entityType: "motorcycle",
+        entityId: updated.id,
+        metadata,
+        createdAt: now
+      });
+
+      return toMotorcycleResponse(updated);
+    });
+  }
+
   archiveMotorcycle(identity: VerifiedSupabaseIdentity, motorcycleId: string): Promise<void> {
     return this.unitOfWork.execute(async ({ audit, motorcycles, outbox, reminders, users }) => {
       const actor = await loadRiderActor(users, identity.subject);
@@ -234,6 +311,26 @@ function parseMotorcycleInput(input: unknown): MotorcycleInput {
     });
   }
   return parsed.data;
+}
+
+function parseDetailsPatch(input: unknown): MotorcycleDetailsPatchInput {
+  const parsed = motorcycleDetailsPatchSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new MotorcycleError("INVALID_INPUT", "Motorcycle details input is invalid.", 400, {
+      issues: parsed.error.issues
+    });
+  }
+  return parsed.data;
+}
+
+const detailKeyByColumn = Object.fromEntries(
+  Object.entries(motorcycleDetailColumns).map(([key, column]) => [column, key])
+) as Record<string, keyof MotorcycleDetails>;
+
+function toDetailsPatch(input: MotorcycleDetailsPatchInput): MotorcycleDetailsPatch {
+  return Object.fromEntries(
+    Object.entries(input).map(([column, value]) => [detailKeyByColumn[column], value])
+  );
 }
 
 function toRepositoryInput(input: MotorcycleInput) {
@@ -300,6 +397,12 @@ export function toMotorcycleResponse(
     ...(motorcycle.licensePlate ? { license_plate: motorcycle.licensePlate } : {}),
     ...(motorcycle.year ? { year: motorcycle.year } : {}),
     ...(motorcycle.notes ? { notes: motorcycle.notes } : {}),
+    details: Object.fromEntries(
+      Object.entries(motorcycleDetailColumns).flatMap(([key, column]) => {
+        const value = motorcycle.details?.[key as keyof MotorcycleDetails];
+        return value === undefined ? [] : [[column, value]];
+      })
+    ),
     ...(maintenance?.lastMaintenanceAt
       ? { last_maintenance_at: maintenance.lastMaintenanceAt.toISOString() }
       : {}),

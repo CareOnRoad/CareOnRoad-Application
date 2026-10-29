@@ -20,6 +20,11 @@ export type MotorcycleRouteDependencies = {
       motorcycleId: string,
       input: unknown
     ): Promise<MotorcycleResponse>;
+    updateMotorcycleDetails(
+      identity: VerifiedSupabaseIdentity,
+      motorcycleId: string,
+      input: unknown
+    ): Promise<MotorcycleResponse>;
     archiveMotorcycle(identity: VerifiedSupabaseIdentity, motorcycleId: string): Promise<void>;
   };
   mechanicProfileService: {
@@ -71,6 +76,18 @@ export function createMotorcycleRouteHandlers(dependencies: MotorcycleRouteDepen
         const body = await readJson(request);
         return NextResponse.json(
           await dependencies.motorcycleService.updateMotorcycle(identity, motorcycleId, body)
+        );
+      } catch (error) {
+        return routeError(error);
+      }
+    },
+
+    async updateMotorcycleDetails(request: Request, motorcycleId: string) {
+      try {
+        const identity = await dependencies.authenticate(request);
+        const body = await readJson(request);
+        return NextResponse.json(
+          await dependencies.motorcycleService.updateMotorcycleDetails(identity, motorcycleId, body)
         );
       } catch (error) {
         return routeError(error);

@@ -1,6 +1,8 @@
 import type {
   CreateMotorcycle,
   Motorcycle,
+  MotorcycleDetails,
+  MotorcycleDetailsPatch,
   MotorcycleRepository,
   UpdateMotorcycle
 } from "../contracts/motorcycle.repository";
@@ -44,6 +46,31 @@ export class InMemoryMotorcycleRepository implements MotorcycleRepository {
     return cloneMotorcycle(this.motorcycles[index]!);
   }
 
+  async updateDetails(input: {
+    id: string;
+    patch: MotorcycleDetailsPatch;
+    updatedAt: Date;
+  }): Promise<Motorcycle | undefined> {
+    const index = this.motorcycles.findIndex(
+      (motorcycle) => motorcycle.id === input.id && !motorcycle.archivedAt
+    );
+    if (index < 0) {
+      return undefined;
+    }
+    const current = this.motorcycles[index]!;
+    const merged: Record<string, string | number> = { ...current.details };
+    for (const [key, value] of Object.entries(input.patch)) {
+      if (value === null) delete merged[key];
+      else if (value !== undefined) merged[key] = value;
+    }
+    this.motorcycles[index] = {
+      ...current,
+      details: Object.keys(merged).length > 0 ? (merged as MotorcycleDetails) : undefined,
+      updatedAt: input.updatedAt
+    };
+    return cloneMotorcycle(this.motorcycles[index]!);
+  }
+
   async archive(id: string, archivedAt: Date): Promise<Motorcycle | undefined> {
     const motorcycle = this.motorcycles.find((candidate) => candidate.id === id);
     if (!motorcycle || motorcycle.archivedAt) {
@@ -60,6 +87,7 @@ export class InMemoryMotorcycleRepository implements MotorcycleRepository {
 function cloneMotorcycle(motorcycle: Motorcycle): Motorcycle {
   return {
     ...motorcycle,
+    ...(motorcycle.details ? { details: { ...motorcycle.details } } : {}),
     archivedAt: motorcycle.archivedAt ? new Date(motorcycle.archivedAt) : undefined,
     createdAt: new Date(motorcycle.createdAt),
     updatedAt: new Date(motorcycle.updatedAt)

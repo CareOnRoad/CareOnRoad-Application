@@ -61,6 +61,34 @@ describe("audit metadata sanitizer", () => {
     expect(sanitized).toEqual({ status: "rejected" });
   });
 
+  it("keeps audit-export access evidence (filter hash and exported row count)", () => {
+    const filterHash = "a".repeat(64);
+    expect(sanitizeAuditMetadata({ filter_hash: filterHash, exported_count: 2 })).toEqual({
+      filter_hash: filterHash,
+      exported_count: 2
+    });
+  });
+
+  it("keeps changed_fields only as a list of names", () => {
+    expect(sanitizeAuditMetadata({ changed_fields: ["frame_number", "color"] })).toEqual({
+      changed_fields: ["frame_number", "color"]
+    });
+    expect(sanitizeAuditMetadata({ changed_fields: "frame_number" })).toEqual({});
+    expect(sanitizeAuditMetadata({ changed_fields: [{ frame_number: "RLH1" }] })).toEqual({});
+    expect(sanitizeAuditMetadata({ changed_fields: ["color", 32000000] })).toEqual({});
+  });
+
+  it("drops changed_fields when any entry is not a column-style name", () => {
+    // Drop the whole key (not just the bad entry) so a value can never ride along.
+    expect(sanitizeAuditMetadata({ changed_fields: ["color", "RLHJF1234"] })).toEqual({});
+    expect(sanitizeAuditMetadata({ changed_fields: ["color", "has space"] })).toEqual({});
+    expect(sanitizeAuditMetadata({ changed_fields: ["1color"] })).toEqual({});
+    expect(sanitizeAuditMetadata({ changed_fields: ["a".repeat(65)] })).toEqual({});
+    // Real emitters: mechanic availability/location audits and the motorcycle details audit.
+    const names = ["is_available", "availability_updated_at", "latest_location", "purchase_price_vnd", "a".repeat(64)];
+    expect(sanitizeAuditMetadata({ changed_fields: names })).toEqual({ changed_fields: names });
+  });
+
   it("sanitizes nested objects and arrays using the same allowlist", () => {
     expect(
       sanitizeAuditMetadata({

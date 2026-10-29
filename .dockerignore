@@ -1,4 +1,4 @@
-# Only send the API and workspace manifests to the builder.
+# Only send the API, its workspace packages and workspace manifests to the builder.
 *
 !Dockerfile
 !package.json
@@ -7,6 +7,9 @@
 !apps/
 !apps/api/
 !apps/api/**
+!packages/
+!packages/api-contract/
+!packages/api-contract/**
 
 # Local dependencies, build output and secrets must never enter an image.
 **/node_modules

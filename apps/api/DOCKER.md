@@ -27,7 +27,8 @@ PostgreSQL/Supabase tiếp tục chạy bên ngoài container. Nếu database ch
 máy host, dùng `host.docker.internal` thay cho `localhost` trong địa chỉ kết nối.
 
 Trước khi dùng backend với database, xác minh migrations đến
-`202606250046_dispatch_radius_policy_bounds.sql` theo
+`202606250048_maintenance_presets_and_plans.sql` (gồm 047 và 048, phải áp dụng
+lên hosted/dev trước khi deploy) theo
 [schema release checklist](SCHEMA-RELEASE-CHECKLIST.md) và chạy
 `pnpm.cmd run preflight:schema`. Docker không tự chạy migrations hoặc seed.
 

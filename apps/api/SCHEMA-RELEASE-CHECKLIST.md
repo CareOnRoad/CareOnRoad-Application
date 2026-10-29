@@ -1,7 +1,8 @@
 # Schema preflight and database test setup
 
 Run these commands from the repository root. The current API requires migration
-`202606250046_dispatch_radius_policy_bounds.sql`, including schema 035 columns,
+`202606250048_maintenance_presets_and_plans.sql` (047 and 048 must be applied on
+hosted/dev before deploy), including schema 035 columns,
 validated constraints, indexes, enabled triggers, `btree_gist`, and the narrowed
 mechanic-role trigger needed for historical rating updates after revoke and the
 location guard for new requests, dispatch episode/retry constraints, assignment
@@ -13,6 +14,8 @@ Migration 044 adds enabled reminder ownership and dashboard indexes; 045 adds ex
 Migration 046 replaces the legacy fixed-radius CHECK with 1,000–100,000 meter
 bounds. Runtime readiness verifies this constraint shape; require 046 before
 enabling configurable radius policies. Ranking and SQL use nearest-meter values.
+Migration 047 adds the `app_users` profile columns; 048 adds rider plans,
+reminder preset columns, and VIP motorcycle details. Readiness requires 048.
 See [admin recovery](./ADMIN-RECOVERY-OPERATIONS.md) for Batch 10–12 contracts.
 See [profile/lists/admin dispatch](./PROFILE-LISTS-ADMIN-DISPATCH.md) and
 [scheduled visits](./SCHEDULED-FULFILLMENT.md)

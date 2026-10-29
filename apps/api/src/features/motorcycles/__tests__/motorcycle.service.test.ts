@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { deliverOutboxEvent } from "@/features/outbox/outbox-consumers";
+import type { PlanCode } from "@/features/plans/plan";
+import type { MotorcycleDetails } from "@/server/repositories/contracts/motorcycle.repository";
 import { InMemoryUnitOfWork } from "@/server/repositories/testing/in-memory-unit-of-work";
 
 import { MotorcycleService } from "../motorcycle.service";
@@ -9,6 +12,11 @@ const otherRiderId = "22222222-2222-4222-8222-222222222222";
 const mechanicId = "33333333-3333-4333-8333-333333333333";
 const motorcycleId = "44444444-4444-4444-8444-444444444444";
 const now = new Date("2026-06-25T03:00:00Z");
+
+type TestPlan = { planCode: PlanCode; planExpiresAt: Date };
+const vipPlan: TestPlan = { planCode: "vip", planExpiresAt: new Date("2027-01-01T00:00:00Z") };
+const expiredVipPlan: TestPlan = { planCode: "vip", planExpiresAt: new Date("2026-06-01T00:00:00Z") };
+const vipFrame = { frame_number: "RLHJF1234", purchase_price_vnd: 32000000 };
 
 const riderIdentity = identity(riderId);
 const otherRiderIdentity = identity(otherRiderId);
@@ -354,6 +362,188 @@ describe("MotorcycleService", () => {
     expect(one.last_maintenance_at).toBe("2026-06-15T00:00:00.000Z");
     expect(one.next_maintenance_at).toBeUndefined();
   });
+
+  describe("updateMotorcycleDetails", () => {
+    const requiredVip = {
+      status: 403,
+      errorCode: "FORBIDDEN",
+      details: { reason: "plan_required", required_plan: "vip" }
+    };
+
+    it("rejects non-null values for free and expired-plan riders but still allows clearing", async () => {
+      const uow = detailsUnitOfWork(undefined, { color: "Xanh", frameNumber: "KEEPME" });
+      const service = detailsService(uow);
+
+      await expect(
+        service.updateMotorcycleDetails(riderIdentity, motorcycleId, { color: "Đỏ" })
+      ).rejects.toMatchObject(requiredVip);
+      await expect(
+        detailsService(detailsUnitOfWork(expiredVipPlan)).updateMotorcycleDetails(riderIdentity, motorcycleId, {
+          color: "Đỏ"
+        })
+      ).rejects.toMatchObject(requiredVip);
+      // A rejected request must not touch the stored value.
+      expect(uow.snapshot().motorcycles[0]?.details).toEqual({ color: "Xanh", frameNumber: "KEEPME" });
+
+      // D14: clearing is always allowed, a mixed null/value body is not.
+      await expect(
+        service.updateMotorcycleDetails(riderIdentity, motorcycleId, { color: null, frame_number: "X1" })
+      ).rejects.toMatchObject(requiredVip);
+      await expect(
+        service.updateMotorcycleDetails(riderIdentity, motorcycleId, { color: null })
+      ).resolves.toMatchObject({ details: { frame_number: "KEEPME" } });
+      expect(uow.snapshot().motorcycles[0]?.details).toEqual({ frameNumber: "KEEPME" });
+    });
+
+    it("applies a partial update for vip riders and returns only non-null keys", async () => {
+      const service = detailsService(detailsUnitOfWork(vipPlan));
+
+      await expect(service.getMotorcycle(riderIdentity, motorcycleId)).resolves.toMatchObject({ details: {} });
+      await expect(
+        service.updateMotorcycleDetails(riderIdentity, motorcycleId, { ...vipFrame, color: "  Đỏ  " })
+      ).resolves.toMatchObject({
+        details: { color: "Đỏ", frame_number: "RLHJF1234", purchase_price_vnd: 32000000 }
+      });
+      const afterColorClear = await service.updateMotorcycleDetails(riderIdentity, motorcycleId, { color: null });
+      expect(afterColorClear.details).toEqual({ frame_number: "RLHJF1234", purchase_price_vnd: 32000000 });
+
+      const afterAdd = await service.updateMotorcycleDetails(riderIdentity, motorcycleId, {
+        color: "Đỏ",
+        purchase_date: "2026-06-25",
+        insurance_expires_on: "2027-03-01",
+        warranty_expires_on: "2028-03-01",
+        engine_number: "JF123E",
+        insurance_provider: "Bảo Việt",
+        insurance_policy_number: "BV-001",
+        preferred_service_center: "Head Quận 7"
+      });
+      expect(afterAdd.details).toEqual({
+        color: "Đỏ",
+        frame_number: "RLHJF1234",
+        engine_number: "JF123E",
+        purchase_date: "2026-06-25",
+        purchase_price_vnd: 32000000,
+        insurance_provider: "Bảo Việt",
+        insurance_policy_number: "BV-001",
+        insurance_expires_on: "2027-03-01",
+        warranty_expires_on: "2028-03-01",
+        preferred_service_center: "Head Quận 7"
+      });
+    });
+
+    it("keeps frame_number when only color is sent, and the basic PATCH never wipes details", async () => {
+      const service = detailsService(detailsUnitOfWork(vipPlan));
+      await service.updateMotorcycleDetails(riderIdentity, motorcycleId, vipFrame);
+      await expect(
+        service.updateMotorcycleDetails(riderIdentity, motorcycleId, { color: "Đỏ" })
+      ).resolves.toMatchObject({ details: { frame_number: "RLHJF1234", color: "Đỏ" } });
+
+      const basic = await service.updateMotorcycle(riderIdentity, motorcycleId, {
+        brand_text: "Honda",
+        model_text: "Future"
+      });
+      const expectedDetails = { frame_number: "RLHJF1234", purchase_price_vnd: 32000000, color: "Đỏ" };
+      expect(basic).toMatchObject({ model_text: "Future" });
+      expect(basic.details).toEqual(expectedDetails);
+      await expect(service.getMotorcycle(riderIdentity, motorcycleId)).resolves.toMatchObject({
+        details: expectedDetails
+      });
+      const listed = await service.listMotorcycles(riderIdentity);
+      expect(listed.items[0]?.details).toEqual(expectedDetails);
+    });
+
+    it("rejects invalid bodies with 400 before any plan check", async () => {
+      const service = detailsService(detailsUnitOfWork(vipPlan));
+      const bad: unknown[] = [
+        {},
+        { unknown_key: "x" },
+        { color: "   " },
+        { color: "x".repeat(51) },
+        { frame_number: "x".repeat(51) },
+        { insurance_provider: "x".repeat(101) },
+        { preferred_service_center: "x".repeat(201) },
+        { purchase_price_vnd: -1 },
+        { purchase_price_vnd: 1.5 },
+        { purchase_price_vnd: 1_000_000_000_000 },
+        { purchase_date: "2026-06-26" },
+        { purchase_date: "2026-02-30" },
+        { purchase_date: "25/06/2026" },
+        { purchase_date: "1900-01-01" },
+        { insurance_expires_on: "not-a-date" },
+        { warranty_expires_on: "2026-13-01" },
+        "frame",
+        null
+      ];
+      for (const body of bad) {
+        await expect(service.updateMotorcycleDetails(riderIdentity, motorcycleId, body)).rejects.toMatchObject({
+          status: 400,
+          errorCode: "INVALID_INPUT"
+        });
+      }
+      // One message covers both bounds (future and older than 100 years).
+      for (const purchase_date of ["2026-06-26", "1900-01-01"]) {
+        await expect(
+          service.updateMotorcycleDetails(riderIdentity, motorcycleId, { purchase_date })
+        ).rejects.toThrow("purchase_date must be today or earlier (Vietnam time) and within 100 years.");
+      }
+      // Future insurance/warranty expiry is normal, and a purchase today (Vietnam) is allowed.
+      await expect(
+        service.updateMotorcycleDetails(riderIdentity, motorcycleId, {
+          purchase_date: "2026-06-25",
+          warranty_expires_on: "2030-01-01"
+        })
+      ).resolves.toMatchObject({ details: { purchase_date: "2026-06-25", warranty_expires_on: "2030-01-01" } });
+
+      // Validation runs before the plan gate, so a free rider also gets 400 for a future date.
+      await expect(
+        detailsService(detailsUnitOfWork()).updateMotorcycleDetails(riderIdentity, motorcycleId, {
+          purchase_date: "2026-06-26"
+        })
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it("keeps ownership and role checks", async () => {
+      const service = detailsService(detailsUnitOfWork(vipPlan));
+      await expect(
+        service.updateMotorcycleDetails(otherRiderIdentity, motorcycleId, { color: null })
+      ).rejects.toMatchObject({ status: 403, errorCode: "FORBIDDEN" });
+      await expect(
+        service.updateMotorcycleDetails(mechanicIdentity, motorcycleId, { color: null })
+      ).rejects.toMatchObject({ status: 403, errorCode: "FORBIDDEN" });
+      await expect(
+        service.updateMotorcycleDetails(riderIdentity, otherRiderId, { color: null })
+      ).rejects.toMatchObject({ status: 404, errorCode: "NOT_FOUND" });
+    });
+
+    it("audits and queues only column names, never the values", async () => {
+      const uow = detailsUnitOfWork(vipPlan);
+      await detailsService(uow).updateMotorcycleDetails(riderIdentity, motorcycleId, vipFrame);
+
+      const snapshot = uow.snapshot();
+      const changedFields = ["frame_number", "purchase_price_vnd"];
+      const [event] = snapshot.outboxEvents;
+      expect(event).toMatchObject({
+        topic: "motorcycle.details_updated",
+        aggregateType: "motorcycle",
+        aggregateId: motorcycleId,
+        payload: { resource_id: motorcycleId, rider_id: riderId, changed_fields: changedFields }
+      });
+      expect(snapshot.auditLogs).toHaveLength(1);
+      expect(snapshot.auditLogs[0]).toMatchObject({
+        action: "motorcycle.details_updated",
+        entityType: "motorcycle",
+        entityId: motorcycleId,
+        actorId: riderId,
+        // The audit sanitizer already strips rider_id from motorcycle audits (actorId carries it).
+        metadata: { resource_id: motorcycleId, changed_fields: changedFields }
+      });
+      const serialized = JSON.stringify(snapshot.outboxEvents) + JSON.stringify(snapshot.auditLogs);
+      expect(serialized).not.toContain("RLHJF1234");
+      expect(serialized).not.toContain("32000000");
+      // The emitted topic must be deliverable, or the worker dead-letters it.
+      await expect(deliverOutboxEvent(event!)).resolves.toBeUndefined();
+    });
+  });
 });
 
 function seededRiderUnitOfWork() {
@@ -363,13 +553,44 @@ function seededRiderUnitOfWork() {
   });
 }
 
-function activeUser(id: string) {
+function activeUser(id: string, plan?: TestPlan) {
   return {
     id,
     status: "active" as const,
+    ...plan,
     createdAt: now,
     updatedAt: now
   };
+}
+
+function detailsUnitOfWork(plan?: TestPlan, details?: MotorcycleDetails) {
+  return new InMemoryUnitOfWork({
+    users: [activeUser(riderId, plan), activeUser(otherRiderId), activeUser(mechanicId)],
+    userRoles: [
+      { userId: riderId, role: "rider" },
+      { userId: otherRiderId, role: "rider" },
+      { userId: mechanicId, role: "mechanic" }
+    ],
+    motorcycles: [
+      {
+        id: motorcycleId,
+        riderId,
+        brandText: "Honda",
+        modelText: "Wave",
+        ...(details ? { details } : {}),
+        createdAt: now,
+        updatedAt: now
+      }
+    ]
+  });
+}
+
+function detailsService(unitOfWork: InMemoryUnitOfWork) {
+  let counter = 0;
+  return new MotorcycleService(unitOfWork, {
+    now: () => now,
+    createId: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`
+  });
 }
 
 function identity(subject: string) {

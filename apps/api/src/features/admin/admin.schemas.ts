@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { serviceTypes, userRoles, userStatuses } from "@careonroad/api-contract/enums";
 
+import { planCodes } from "@/features/plans/plan";
+
 export const ADMIN_REASON_MIN_LENGTH = 10;
 export const ADMIN_REASON_MAX_LENGTH = 500;
 export const ADMIN_PAGE_DEFAULT_LIMIT = 50;
@@ -18,6 +20,24 @@ export const adminReasonSchema = z
     reason: adminReasonValueSchema
   })
   .strict();
+
+export const adminPlanChangeSchema = z
+  .object({
+    reason: adminReasonValueSchema,
+    plan_code: z.enum(planCodes),
+    duration: z.enum(["month", "year"]).optional()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    // A paid plan needs a duration; the free plan must not have one.
+    if ((value.plan_code === "free") === (value.duration !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["duration"],
+        message: "Duration is required for paid plans and not allowed for the free plan."
+      });
+    }
+  });
 
 export const adminUuidSchema = z.string().uuid();
 

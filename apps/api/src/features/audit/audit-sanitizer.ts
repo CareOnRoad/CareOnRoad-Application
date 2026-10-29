@@ -16,7 +16,9 @@ const ALLOWED_LEAF_KEYS = new Set([
   "eta_at",
   "eta_metadata_id",
   "event_type",
+  "exported_count",
   "field",
+  "filter_hash",
   "idempotency_key_hash",
   "media_metadata_id",
   "media_purpose",
@@ -24,6 +26,9 @@ const ALLOWED_LEAF_KEYS = new Set([
   "mechanic_id",
   "next_status",
   "new_status",
+  "plan_code",
+  "plan_expires_at",
+  "previous_plan_code",
   "previous_status",
   "provider",
   "reason_code",
@@ -40,6 +45,10 @@ const ALLOWED_LEAF_KEYS = new Set([
   "user_id"
 ]);
 const ALLOWED_CONTAINER_KEYS = new Set(["changes", "context"]);
+// Lists of column/field names (never values), e.g. motorcycle.details_updated.
+const ALLOWED_NAME_LIST_KEYS = new Set(["changed_fields"]);
+// An entry that is not a snake_case column name could be a value; drop the whole list then.
+const COLUMN_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const PROHIBITED_KEY_PATTERN =
   /(api[_-]?key|authorization|secret|password|credential|token|audio|blob|buffer|bytes|content|symptom|transcri|message|phone|email|payment|card|cvv|bank|amount|currency|price)/i;
 
@@ -57,6 +66,15 @@ function sanitizeObject(value: JsonObject): JsonObject {
 
     if (ALLOWED_CONTAINER_KEYS.has(key)) {
       sanitized[key] = sanitizeValue(entry);
+      continue;
+    }
+
+    if (
+      ALLOWED_NAME_LIST_KEYS.has(key) &&
+      Array.isArray(entry) &&
+      entry.every((name) => typeof name === "string" && COLUMN_NAME_PATTERN.test(name))
+    ) {
+      sanitized[key] = entry;
       continue;
     }
 

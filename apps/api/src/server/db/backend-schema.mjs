@@ -1,4 +1,4 @@
-export const REQUIRED_BACKEND_SCHEMA_VERSION = "202606250046";
+export const REQUIRED_BACKEND_SCHEMA_VERSION = "202606250048";
 
 // Catalog-only query: it also works when an application table/column is missing.
 const SCHEMA_CHECK_SQL = `select
@@ -20,6 +20,9 @@ const SCHEMA_CHECK_SQL = `select
       ('assignments', 'reservation_start_at', 'timestamp with time zone'),
       ('assignments', 'reservation_end_at', 'timestamp with time zone'),
       ('assignments', 'activated_at', 'timestamp with time zone'),
+      ('app_users', 'plan_code', 'text'),
+      ('reminder_rules', 'item_code', 'text'),
+      ('motorcycles', 'frame_number', 'text'),
       ('service_requests', 'dispatch_episode_start_round', 'integer'),
       ('service_requests', 'dispatch_retry_count', 'integer'),
       ('notification_delivery_receipts', 'lease_token', 'text'),

@@ -192,6 +192,33 @@ describe("admin user route handlers", () => {
     expect(activity.items).toHaveLength(6);
     expect(JSON.stringify(activity)).not.toContain("Approved administrative");
   });
+
+  it("forwards userId, body, and idempotency key to changeUserPlan", async () => {
+    const changeUserPlan = vi.fn(async () => ({ id: RIDER_USER_ID }));
+    const handlers = createAdminUserRouteHandlers({
+      authenticate: vi.fn(async () => adminIdentity),
+      service: { changeUserPlan } as never
+    });
+    const body = { ...reason, plan_code: "advance", duration: "month" };
+
+    const response = await handlers.changeUserPlan(
+      createAdminRequest(`/api/v1/admin/users/${RIDER_USER_ID}/plan`, {
+        method: "POST",
+        token: "valid-token",
+        body,
+        idempotencyKey: "plan-user-key"
+      }),
+      RIDER_USER_ID
+    );
+
+    expect(response.status).toBe(200);
+    expect(changeUserPlan).toHaveBeenCalledWith(
+      adminIdentity,
+      RIDER_USER_ID,
+      body,
+      "plan-user-key"
+    );
+  });
 });
 
 function createHandlers(subject = ADMIN_USER_ID) {

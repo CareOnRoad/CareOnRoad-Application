@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
+import { planRequiredDetails } from "@/features/plans/plan";
 import { InMemoryUnitOfWork } from "@/server/repositories/testing/in-memory-unit-of-work";
 import { ReminderWorker } from "@/server/workers/reminder.worker";
 
-import { createReminderRouteHandlers } from "../reminder.route-handlers";
-import { ReminderService } from "../reminder.service";
+import {
+  createReminderRouteHandlers,
+  type ReminderRouteDependencies
+} from "../reminder.route-handlers";
+import { ReminderError, ReminderService } from "../reminder.service";
 
 const riderId = "11111111-1111-4111-8111-111111111111";
 const otherRiderId = "22222222-2222-4222-8222-222222222222";
@@ -124,6 +128,72 @@ describe("reminder routes", () => {
     await expect(disabled.json()).resolves.toMatchObject({ enabled: false });
   });
 
+  it("routes preset list, apply and done to the service with the path ids", async () => {
+    const listReminderPresets = vi.fn().mockResolvedValue({ unknown_last_done_due_days: 7, items: [] });
+    const applyReminderPresets = vi.fn().mockResolvedValue({ items: [] });
+    const markReminderDone = vi.fn().mockResolvedValue({ id: reminderId });
+    const handlers = createFakeServiceHandlers({
+      listReminderPresets,
+      applyReminderPresets,
+      markReminderDone
+    });
+    const body = { usage_level: "normal", items: [{ item_code: "engine_oil" }] };
+
+    const listed = await handlers.listReminderPresets(
+      request("GET", "/api/v1/reminder-presets", undefined, "rider")
+    );
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({ unknown_last_done_due_days: 7 });
+    expect(listReminderPresets).toHaveBeenCalledWith(identity(riderId));
+
+    const applied = await handlers.applyReminderPresets(
+      request("POST", `/api/v1/motorcycles/${motorcycleId}/reminder-presets`, body, "rider"),
+      motorcycleId
+    );
+    expect(applied.status).toBe(200);
+    expect(applyReminderPresets).toHaveBeenCalledWith(identity(riderId), motorcycleId, body);
+
+    const done = await handlers.markReminderDone(
+      request("POST", `/api/v1/reminders/${reminderId}/done`, { done_on: "2026-10-18" }, "rider"),
+      reminderId
+    );
+    expect(done.status).toBe(200);
+    await expect(done.json()).resolves.toMatchObject({ id: reminderId });
+    expect(markReminderDone).toHaveBeenCalledWith(identity(riderId), reminderId, {
+      done_on: "2026-10-18"
+    });
+  });
+
+  it("returns plan_required details when the service rejects for a missing plan", async () => {
+    const forbidden = () =>
+      Promise.reject(
+        new ReminderError("FORBIDDEN", "Plan upgrade is required.", 403, planRequiredDetails("advance"))
+      );
+    const handlers = createFakeServiceHandlers({
+      listReminderPresets: forbidden,
+      applyReminderPresets: forbidden,
+      markReminderDone: forbidden
+    });
+
+    const responses = [
+      await handlers.applyReminderPresets(
+        request("POST", `/api/v1/motorcycles/${motorcycleId}/reminder-presets`, { usage_level: "normal" }, "rider"),
+        motorcycleId
+      ),
+      await handlers.markReminderDone(
+        request("POST", `/api/v1/reminders/${reminderId}/done`, { done_on: "2026-10-18" }, "rider"),
+        reminderId
+      )
+    ];
+    for (const response of responses) {
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: "FORBIDDEN",
+        details: { reason: "plan_required", required_plan: "advance" }
+      });
+    }
+  });
+
   it("protects the reminder worker route with worker authority only", async () => {
     const handlers = createHandlers();
     const missing = await handlers.runReminderWorker(
@@ -200,6 +270,17 @@ function createHandlers() {
         workerId: authority.workerId,
         createId: sequentialIds([uuid(20), uuid(21), uuid(22), uuid(23), uuid(24)])
       })
+  });
+}
+
+function createFakeServiceHandlers(
+  reminderService: Partial<ReminderRouteDependencies["reminderService"]>
+) {
+  return createReminderRouteHandlers({
+    authenticate,
+    authenticateWorker: () => ({ workerId: "route-test-worker" }),
+    reminderService: reminderService as ReminderRouteDependencies["reminderService"],
+    createWorker: () => ({ processDueReminders: async () => ({}) as never })
   });
 }
 

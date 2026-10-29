@@ -48,6 +48,21 @@ describe("MechanicJobListService", () => {
     expect(JSON.stringify(detail)).not.toMatch(/PRIVATE_|objectKey|storageBucket|finalizedResponse|notes/);
   });
 
+  it("never exposes rider-private vehicle details in the job detail or job list", async () => {
+    const state = createMechanicOperationsUnitOfWork().snapshot();
+    state.motorcycles[0]!.details = { frameNumber: "RLHSECRET1", engineNumber: "ENGSECRET1", purchasePriceVnd: 777000111 };
+    const service = new MechanicJobListService(new InMemoryUnitOfWork(state));
+
+    const detail = await service.getJob(identity(MECHANIC_ID), ASSIGNMENT_ID);
+    const list = await service.listJobs(identity(MECHANIC_ID), {});
+    expect(detail.motorcycle).toBeDefined();
+    expect(list.items.length).toBeGreaterThan(0);
+    const serialized = JSON.stringify({ detail, list });
+    for (const secret of ["RLHSECRET1", "ENGSECRET1", "777000111", "frame_number"]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
   it("requires active current mechanic ownership and keeps terminal summaries without location/media/license plate", async () => {
     const uow = createMechanicOperationsUnitOfWork(); const service = new MechanicJobListService(uow);
     await expect(service.getJob(identity(OTHER_MECHANIC_ID), ASSIGNMENT_ID)).rejects.toMatchObject({ status: 403 });

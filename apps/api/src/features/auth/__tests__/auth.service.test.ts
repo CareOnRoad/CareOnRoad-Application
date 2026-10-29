@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { deliverOutboxEvent } from "@/features/outbox/outbox-consumers";
 import { InMemoryUnitOfWork } from "@/server/repositories/testing/in-memory-unit-of-work";
 
 import { assertActorOwns, requireActorRole } from "../authorization";
@@ -325,6 +326,48 @@ describe("AuthService", () => {
     });
   });
 
+  describe("getCurrentActor plan", () => {
+    const now = new Date("2026-10-18T03:00:00Z");
+    const userWithPlan = (plan: { planCode?: "advance"; planExpiresAt?: Date }) =>
+      new InMemoryUnitOfWork({
+        users: [
+          {
+            id: identity.subject,
+            status: "active",
+            createdAt: now,
+            updatedAt: now,
+            ...plan
+          }
+        ],
+        userRoles: [{ userId: identity.subject, role: "rider" }]
+      });
+    const currentActor = (unitOfWork: InMemoryUnitOfWork) =>
+      new AuthService(unitOfWork, { now: () => now }).getCurrentActor(identity);
+
+    it("reports the free plan without expiry for a user with no plan", async () => {
+      const actor = await currentActor(userWithPlan({}));
+
+      expect(actor.plan_code).toBe("free");
+      expect(actor).not.toHaveProperty("plan_expires_at");
+    });
+
+    it("reports an active plan with its ISO expiry", async () => {
+      const planExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const actor = await currentActor(userWithPlan({ planCode: "advance", planExpiresAt }));
+
+      expect(actor.plan_code).toBe("advance");
+      expect(actor.plan_expires_at).toBe("2026-10-19T03:00:00.000Z");
+    });
+
+    it("reports free but keeps the expiry for an expired plan", async () => {
+      const planExpiresAt = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const actor = await currentActor(userWithPlan({ planCode: "advance", planExpiresAt }));
+
+      expect(actor.plan_code).toBe("free");
+      expect(actor.plan_expires_at).toBe("2026-10-17T03:00:00.000Z");
+    });
+  });
+
   it("rejects suspended users", async () => {
     const unitOfWork = new InMemoryUnitOfWork({
       users: [
@@ -407,6 +450,8 @@ describe("AuthService", () => {
       payload: { resource_id: identity.subject }
     });
     expect(profileOutbox[0]?.dedupeKey).toContain(`user.profile.updated:${identity.subject}:`);
+    // The emitted outbox topic must be deliverable, or the worker dead-letters every profile update.
+    await expect(deliverOutboxEvent(profileOutbox[0]!)).resolves.toBeUndefined();
 
     // Sanitize: raw phone value must not leak into audit or outbox payloads.
     expect(JSON.stringify(snapshot.auditLogs)).not.toContain("+84 90 555 1234");
