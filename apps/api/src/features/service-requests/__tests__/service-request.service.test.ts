@@ -316,6 +316,8 @@ describe("ServiceRequestService", () => {
           createdAt: now
         }
       ]
+    }, {
+      shouldFailOutboxAppend: () => true
     });
     const service = createService(unitOfWork, [
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -336,7 +338,7 @@ describe("ServiceRequestService", () => {
         },
         "rollback-key"
       )
-    ).rejects.toThrow("OUTBOX_DEDUPE_KEY_EXISTS");
+    ).rejects.toThrow("OUTBOX_WRITE_FAILED");
 
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.serviceRequests).toHaveLength(0);
@@ -353,7 +355,10 @@ function createService(unitOfWork: InMemoryUnitOfWork, ids: string[]) {
   });
 }
 
-function createUnitOfWork(overrides: Partial<ConstructorParameters<typeof InMemoryUnitOfWork>[0]> = {}) {
+function createUnitOfWork(
+  overrides: Partial<ConstructorParameters<typeof InMemoryUnitOfWork>[0]> = {},
+  options: ConstructorParameters<typeof InMemoryUnitOfWork>[1] = {}
+) {
   return new InMemoryUnitOfWork({
     users: [activeUser(riderId), activeUser(otherRiderId), activeUser(mechanicId)],
     userRoles: [
@@ -380,7 +385,7 @@ function createUnitOfWork(overrides: Partial<ConstructorParameters<typeof InMemo
       }
     ],
     ...overrides
-  });
+  }, options);
 }
 
 function activeUser(id: string) {

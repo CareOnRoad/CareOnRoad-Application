@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, Text, View, type PressableProps } from 'react-native';
+import { Pressable, Text, type PressableProps } from 'react-native';
 import { cn } from '@/lib/utils';
 
 type Variant = 'primary' | 'secondary' | 'destructive' | 'ghost' | 'outline' | 'mint';
@@ -12,6 +12,23 @@ const variantStyles: Record<Variant, string> = {
   ghost: 'bg-transparent text-foreground',
   outline: 'border border-border bg-transparent text-foreground',
   mint: 'bg-mint text-green',
+};
+
+/**
+ * Màu chữ theo variant.
+ *
+ * `variantStyles` đặt `text-*` trên container — nhưng React Native KHÔNG kế
+ * thừa `color` từ View/Pressable xuống Text. Nên khi children là chuỗi,
+ * `<Text>` phải tự mang class màu chữ, nếu không sẽ ra chữ màu mặc định
+ * (đen) — dễ bị chìm hoặc mất tương phản trên nền trùng màu.
+ */
+const variantTextStyles: Record<Variant, string> = {
+  primary: 'text-primary-foreground',
+  secondary: 'text-secondary-foreground',
+  destructive: 'text-destructive-foreground',
+  ghost: 'text-foreground',
+  outline: 'text-foreground',
+  mint: 'text-green',
 };
 
 const sizeStyles: Record<Size, string> = {
@@ -39,7 +56,17 @@ const sizeText: Record<Size, string> = {
  *  - `md` (mặc định): padding đầy đủ `px-5 py-3`, dùng cho form / hero CTA.
  *  - `sm`: padding nhỏ `px-3 py-2`, dùng cho CTA inline (trong card, in-row button).
  *
- * Nút được `active:scale-[0.97]` để có feedback cảm ứng tốt.
+ * ⚠️ Layout contract (sửa bug "nút chỉ hiện pill màu, không có chữ"):
+ *  - `className` của caller phải áp lên `<Pressable>` GỐC — chính Pressable
+ *    mới là flex item của container cha (ví dụ `flex-row gap-3`).
+ *    Nếu bọc thêm một `<View>` bên trong và đặt `flex-1` lên View con,
+ *    thì `flex-1` = `flexBasis: 0%` khiến **chiều cao content box = 0**
+ *    (padding vẫn còn) → chữ bị clip hoàn toàn, chỉ còn một "pill" màu.
+ *  - Không dùng `inline-flex`: React Native không hỗ trợ `display:inline-flex`,
+ *    NativeWind bỏ qua class này (kèm cảnh báo) → phải dùng `flex-row` rõ ràng.
+ *  - Không dùng `style={({ pressed }) => ...}` cùng lúc với `className`:
+ *    NativeWind ghi đè `style` bằng style từ className. Dùng variant
+ *    `active:` của Tailwind để có feedback cảm ứng.
  */
 export function ActionButton({
   children,
@@ -56,29 +83,25 @@ export function ActionButton({
       disabled={isDisabled}
       accessibilityRole="button"
       accessibilityState={{ disabled: isDisabled }}
-      style={({ pressed }) => [
-        {
-          opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1,
-          transform: [{ scale: pressed && !isDisabled ? 0.97 : 1 }],
-        },
-      ]}
+      className={cn(
+        'flex-row items-center justify-center gap-2 active:scale-[0.97] active:opacity-80',
+        sizeStyles[size],
+        variantStyles[variant],
+        // `w-full` cho chiều rộng; `shrink` để nhiều nút trong `flex-row`
+        // không tràn (RN mặc định flexShrink = 0).
+        fullWidth && 'w-full self-stretch shrink',
+        isDisabled && 'opacity-50',
+        className,
+      )}
       {...props}
     >
-      <View
-        className={cn(
-          'inline-flex items-center justify-center gap-2',
-          sizeStyles[size],
-          variantStyles[variant],
-          fullWidth && 'w-full self-stretch',
-          className,
-        )}
-      >
-        {typeof children === 'string' ? (
-          <Text className={cn('font-semibold', sizeText[size])}>{children}</Text>
-        ) : (
-          <View className="flex-row items-center gap-2">{children}</View>
-        )}
-      </View>
+      {typeof children === 'string' ? (
+        <Text className={cn('font-semibold', sizeText[size], variantTextStyles[variant])}>
+          {children}
+        </Text>
+      ) : (
+        children
+      )}
     </Pressable>
   );
 }

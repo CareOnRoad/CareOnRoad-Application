@@ -25,19 +25,20 @@ export const adminPlanChangeSchema = z
   .object({
     reason: adminReasonValueSchema,
     plan_code: z.enum(planCodes),
-    duration: z.enum(["month", "year"]).optional()
+    // Mọi gói đều tính theo chu kỳ 30 ngày, không có gói năm.
+    duration: z.literal("month").optional()
   })
-  .strict()
-  .superRefine((value, context) => {
-    // A paid plan needs a duration; the free plan must not have one.
-    if ((value.plan_code === "free") === (value.duration !== undefined)) {
-      context.addIssue({
-        code: "custom",
-        path: ["duration"],
-        message: "Duration is required for paid plans and not allowed for the free plan."
-      });
-    }
-  });
+    .strict()
+    .superRefine((value, context) => {
+      // A paid plan needs a duration; the free plan must not have one.
+      if ((value.plan_code === "free") === (value.duration !== undefined)) {
+        context.addIssue({
+          code: "custom",
+          path: ["duration"],
+          message: "Duration is required for paid plans and not allowed for the free plan."
+        });
+      }
+    });
 
 export const adminUuidSchema = z.string().uuid();
 

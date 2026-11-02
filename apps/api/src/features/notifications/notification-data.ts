@@ -13,9 +13,14 @@ const navigationData = z.object({
   motorcycle_id: z.string().uuid().optional(),
   payment_order_id: z.string().uuid().optional(),
   notification_id: z.string().uuid().optional(),
+  // Gói dịch vụ: cho phép app điều hướng tới màn gói / đơn mua khi thông
+  // báo "gói đã kích hoạt" tới hộp thư.
+  subscription_id: z.string().uuid().optional(),
+  plan_code: z.enum(["free", "advance", "vip"]).optional(),
   version: z.number().int().positive().optional(),
   due_at: z.string().datetime({ offset: true }).optional(),
-  scheduled_start_at: z.string().datetime({ offset: true }).optional()
+  scheduled_start_at: z.string().datetime({ offset: true }).optional(),
+  plan_expires_at: z.string().datetime({ offset: true }).optional()
 });
 
 export function sanitizeNotificationData(data: Record<string, unknown>): JsonObject {

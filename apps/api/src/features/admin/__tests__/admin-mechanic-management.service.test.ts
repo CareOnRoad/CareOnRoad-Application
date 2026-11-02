@@ -174,7 +174,8 @@ describe("AdminMechanicManagementService", () => {
           nextAttemptAt: now,
           createdAt: now
         }
-      ]
+      ],
+      shouldFailOutboxAppend: () => true
     });
     const identifiers = [
       "88888888-8888-4888-8888-888888888888",
@@ -187,7 +188,7 @@ describe("AdminMechanicManagementService", () => {
     });
     await expect(
       service.suspend(adminIdentity, ACTIVE_ID, reason, "rollback-mechanic-key")
-    ).rejects.toThrow("OUTBOX_DEDUPE_KEY_EXISTS");
+    ).rejects.toThrow("OUTBOX_WRITE_FAILED");
     const snapshot = unitOfWork.snapshot();
     expect(
       snapshot.mechanicProfiles.find((profile) => profile.userId === ACTIVE_ID)
@@ -207,6 +208,10 @@ function createState(
     activeAssignment?: boolean;
     completedAssignment?: boolean;
     outboxEvents?: InMemoryFoundationState["outboxEvents"];
+    /**
+     * Mô phỏng outbox write failure để kiểm tra transaction rollback.
+     */
+    shouldFailOutboxAppend?: () => boolean;
   } = {}
 ) {
   const assignmentStatus = options.completedAssignment
@@ -257,7 +262,11 @@ function createState(
     ],
     assignments,
     outboxEvents: options.outboxEvents ?? []
-  });
+  },
+  {
+    shouldFailOutboxAppend: options.shouldFailOutboxAppend
+  }
+  );
 }
 
 function appUser(id: string) {

@@ -129,14 +129,18 @@ describe("AuthService", () => {
           createdAt: new Date("2026-06-25T00:00:00Z")
         }
       ]
-    });
+    },
+    {
+      shouldFailOutboxAppend: () => true
+    }
+    );
 
     await expect(
       new AuthService(unitOfWork).bootstrapProfile(identity, {
         display_name: "Rollback Mechanic",
         account_type: "mechanic"
       })
-    ).rejects.toThrow("OUTBOX_DEDUPE_KEY_EXISTS");
+    ).rejects.toThrow("OUTBOX_WRITE_FAILED");
 
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.users).toHaveLength(0);

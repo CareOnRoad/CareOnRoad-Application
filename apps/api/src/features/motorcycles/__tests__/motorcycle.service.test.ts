@@ -149,7 +149,11 @@ describe("MotorcycleService", () => {
           createdAt: now
         }
       ]
-    });
+    },
+    {
+      shouldFailOutboxAppend: () => true
+    }
+    );
     const service = new MotorcycleService(unitOfWork, {
       now: () => now,
       createId: sequentialIds([
@@ -164,7 +168,7 @@ describe("MotorcycleService", () => {
         brand_text: "Honda",
         model_text: "Wave"
       })
-    ).rejects.toThrow("OUTBOX_DEDUPE_KEY_EXISTS");
+    ).rejects.toThrow("OUTBOX_WRITE_FAILED");
 
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.motorcycles).toHaveLength(0);

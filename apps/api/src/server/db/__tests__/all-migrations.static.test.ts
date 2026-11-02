@@ -52,7 +52,8 @@ const expectedMigrations = [
   "202606250045_admin_dispatch_configuration.sql",
   "202606250046_dispatch_radius_policy_bounds.sql",
   "202606250047_user_profile_extended.sql",
-  "202606250048_maintenance_presets_and_plans.sql"
+  "202606250048_maintenance_presets_and_plans.sql",
+  "202606250049_plan_subscriptions.sql"
 ] as const;
 
 const migrationSql = expectedMigrations

@@ -17,6 +17,8 @@ export const adminUserSummarySchema = z.object({
   phone_masked: z.string().optional(),
   status: z.enum(userStatuses),
   roles: z.array(z.enum(userRoles)),
+  plan_code: z.enum(["free", "advance", "vip"]),
+  plan_expires_at: z.string().optional(),
   device_summary: z.object({
     total: z.number().int().nonnegative(),
     enabled: z.number().int().nonnegative()
@@ -88,5 +90,33 @@ export const adminRoleMutationSchema = z
 
 /** `POST /api/v1/admin/users/[userId]/devices/[deviceId]/revoke` body. */
 export const adminDeviceRevokeMutationSchema = adminReasonSchema;
+
+/**
+ * `POST /api/v1/admin/users/[userId]/plan` body (`adminPlanChangeSchema` in
+ * `apps/api/src/features/admin/admin.schemas.ts:26`).
+ *
+ * A paid plan REQUIRES `duration`; the free plan FORBIDS it. The backend
+ * rejects the wrong combination with a 400, so the frontend must disable the
+ * duration field when the free plan is selected.
+ */
+export const adminPlanCodes = ["free", "advance", "vip"] as const;
+
+export const adminPlanChangeSchema = z
+  .object({
+    reason: adminReasonSchema.shape.reason,
+    plan_code: z.enum(adminPlanCodes),
+    duration: z.literal("month").optional()
+  })
+  .strict()
+  .refine(
+    (value) => (value.plan_code === "free") !== (value.duration !== undefined),
+    {
+      message:
+        "Duration is required for paid plans and not allowed for the free plan.",
+      path: ["duration"]
+    }
+  );
+
+export type AdminPlanCode = (typeof adminPlanCodes)[number];
 
 export { adminUuidSchema };

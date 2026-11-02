@@ -216,7 +216,8 @@ describe("AdminServiceRequestService", () => {
           nextAttemptAt: now,
           createdAt: now
         }
-      ]
+      ],
+      shouldFailOutboxAppend: () => true
     });
     const ids = [
       "13131313-1313-4313-8313-131313131313",
@@ -235,7 +236,7 @@ describe("AdminServiceRequestService", () => {
         reason,
         "admin-request-rollback-key"
       )
-    ).rejects.toThrow("OUTBOX_DEDUPE_KEY_EXISTS");
+    ).rejects.toThrow("OUTBOX_WRITE_FAILED");
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.serviceRequests[0]?.status).toBe("offered");
     expect(snapshot.dispatchRounds[0]?.status).toBe("active");
@@ -256,6 +257,10 @@ function createState(
     withRelationships?: boolean;
     requestStatus?: "offered" | "assigned";
     outboxEvents?: InMemoryFoundationState["outboxEvents"];
+    /**
+     * Mô phỏng outbox write failure để kiểm tra transaction rollback.
+     */
+    shouldFailOutboxAppend?: () => boolean;
   } = {}
 ) {
   const requestStatus = options.requestStatus ?? "offered";
@@ -404,7 +409,11 @@ function createState(
         ]
       : [],
     outboxEvents: options.outboxEvents ?? []
-  });
+  },
+  {
+    shouldFailOutboxAppend: options.shouldFailOutboxAppend
+  }
+  );
 }
 
 function user(id: string) {

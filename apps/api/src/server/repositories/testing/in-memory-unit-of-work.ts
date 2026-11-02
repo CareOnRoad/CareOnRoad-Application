@@ -24,6 +24,7 @@ import type { Motorcycle } from "../contracts/motorcycle.repository";
 import type { Notification } from "../contracts/notification.repository";
 import type { NotificationDeliveryReceipt } from "../contracts/notification-delivery.repository";
 import type { OutboxEvent } from "../contracts/outbox.repository";
+import type { AppendOutboxEvent } from "../contracts/outbox.repository";
 import type { WorkerRunRecord } from "../contracts/operational-monitoring.repository";
 import type { PaymentEvent, PaymentOrder } from "../contracts/payment.repository";
 import type { Quote, QuoteLine } from "../contracts/quote.repository";
@@ -31,6 +32,10 @@ import type { RequestCodeSequence } from "../contracts/request-code.repository";
 import type { RequestMediaMetadata } from "../contracts/request-media.repository";
 import type { ReminderOccurrence, ReminderRule } from "../contracts/reminder.repository";
 import type { ServiceReview } from "../contracts/review.repository";
+import type {
+  PlanSubscription,
+  PlanSubscriptionEvent
+} from "../contracts/subscription.repository";
 import type {
   RequestStatusHistory,
   ServiceRequest
@@ -65,10 +70,10 @@ import { InMemoryRequestMediaRepository } from "./in-memory-request-media.reposi
 import { InMemoryReminderRepository } from "./in-memory-reminder.repository";
 import { InMemoryReviewRepository } from "./in-memory-review.repository";
 import { InMemoryServiceRequestRepository } from "./in-memory-service-request.repository";
+import { InMemorySubscriptionRepository } from "./in-memory-subscription.repository";
 import { InMemoryUserRepository } from "./in-memory-user.repository";
 
-export type InMemoryFoundationState = {
-  adminConfigurationRows: DispatchConfigurationRow[];
+export type InMemoryFoundationState = {  adminConfigurationRows: DispatchConfigurationRow[];
   adminConfigurationVersions: DispatchConfigurationVersion[];
   adminSupervisionActions: SupervisionAction[];
   adminInternalNotes: AdminInternalNote[];
@@ -106,13 +111,28 @@ export type InMemoryFoundationState = {
   chatbotSessions: ChatbotSession[];
   paymentOrders: PaymentOrder[];
   paymentEvents: PaymentEvent[];
+  planSubscriptions: PlanSubscription[];
+  planSubscriptionEvents: PlanSubscriptionEvent[];
+};
+
+export type InMemoryUnitOfWorkOptions = {
+  /**
+   * Hook cho phép test mô phỏng outbox write failure để kiểm tra rollback.
+   * Trả về `true` để `append` ném lỗi.
+   */
+  shouldFailOutboxAppend?: (input: AppendOutboxEvent) => boolean;
 };
 
 export class InMemoryUnitOfWork implements UnitOfWork {
   private state: InMemoryFoundationState;
   private transactionTail: Promise<void> = Promise.resolve();
+  private readonly options: InMemoryUnitOfWorkOptions;
 
-  constructor(initialState: Partial<InMemoryFoundationState> = {}) {
+  constructor(
+    initialState: Partial<InMemoryFoundationState> = {},
+    options: InMemoryUnitOfWorkOptions = {}
+  ) {
+    this.options = options;
     this.state = cloneState({
       adminConfigurationRows: initialState.adminConfigurationRows ?? [],
       adminConfigurationVersions: initialState.adminConfigurationVersions ?? [],
@@ -151,7 +171,9 @@ export class InMemoryUnitOfWork implements UnitOfWork {
       notificationDeliveryReceipts: initialState.notificationDeliveryReceipts ?? [],
       chatbotSessions: initialState.chatbotSessions ?? [],
       paymentOrders: initialState.paymentOrders ?? [],
-      paymentEvents: initialState.paymentEvents ?? []
+      paymentEvents: initialState.paymentEvents ?? [],
+      planSubscriptions: initialState.planSubscriptions ?? [],
+      planSubscriptionEvents: initialState.planSubscriptionEvents ?? []
     });
   }
 
@@ -190,7 +212,10 @@ export class InMemoryUnitOfWork implements UnitOfWork {
           draft.auditLogs
         ),
         idempotency: new InMemoryIdempotencyRepository(draft.idempotencyRecords),
-        outbox: new InMemoryOutboxRepository(draft.outboxEvents),
+        outbox: new InMemoryOutboxRepository(
+          draft.outboxEvents,
+          this.options.shouldFailOutboxAppend
+        ),
         operationalMonitoring: new InMemoryOperationalMonitoringRepository({
           outboxEvents: draft.outboxEvents,
           paymentOrders: draft.paymentOrders,
@@ -248,7 +273,11 @@ export class InMemoryUnitOfWork implements UnitOfWork {
           draft.notificationDeliveryReceipts
         ),
         chatbotSessions: new InMemorySessionStore(draft.chatbotSessions),
-        payments: new InMemoryPaymentRepository(draft.paymentOrders, draft.paymentEvents)
+        payments: new InMemoryPaymentRepository(draft.paymentOrders, draft.paymentEvents),
+        subscriptions: new InMemorySubscriptionRepository(
+          draft.planSubscriptions,
+          draft.planSubscriptionEvents
+        )
       };
 
       const result = await work(repositories);

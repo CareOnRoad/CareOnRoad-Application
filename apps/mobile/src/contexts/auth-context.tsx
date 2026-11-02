@@ -4,9 +4,10 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
-import { Linking } from 'react-native';
+import { AppState, Linking, type AppStateStatus } from 'react-native';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -26,9 +27,12 @@ import {
   type AppActor,
 } from '@/lib/auth-service';
 import { isAuthConfigured } from '@/lib/config';
-import type { AuthRole, PublicAuthUser } from '@/lib/auth-types';
+import type { AuthRole, PlanCode, PublicAuthUser } from '@/lib/auth-types';
+import { getMySubscription } from '@/lib/subscriptions-service';
+import { extractOAuthCode, isOAuthCallbackUrl } from '@/lib/deep-link';
 import { getSupabase } from '@/lib/supabase-client';
 import { ApiError, setAccessTokenProvider } from '@/lib/api';
+import { isAccountAlreadyRegisteredError } from '@/lib/auth-errors';
 import { ACTIVE_REQUEST_STORAGE_KEY } from '@/contexts/active-request-context';
 import { requestLocationPermissionOnce } from '@/lib/location-service';
 
@@ -68,6 +72,11 @@ interface AuthState {
     address?: string;
     avatar?: string;
   }) => Promise<PublicAuthUser>;
+  /**
+   * Tải lại hồ sơ từ BE (gói, hạn dùng, tên...). Dùng sau khi mua gói thành
+   * công để badge trên profile cập nhật ngay.
+   */
+  refreshActor: () => Promise<PublicAuthUser | null>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -90,6 +99,12 @@ function actorToPublic(actor: AppActor, fallbackEmail: string): PublicAuthUser {
   if (actor.address) {
     result.address = actor.address;
   }
+  if (actor.plan_code) {
+    result.planCode = actor.plan_code;
+  }
+  if (actor.plan_expires_at) {
+    result.planExpiresAt = actor.plan_expires_at;
+  }
   return result;
 }
 
@@ -98,7 +113,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<PublicAuthUser | null>(null);
   const [role, setRole] = useState<AuthRole | null>(null);
 
+  /**
+   * Email của user hiện tại, giữ trong ref.
+   *
+   * Backend không trả email (chỉ trả trong Supabase session), nên khi refresh
+   * actor phải lấy email từ state hiện tại. Dùng ref để `refreshActor` có
+   * identity ổn định — nếu phụ thuộc `user` thì mỗi lần setUser sẽ tạo
+   * callback mới, khiến `useFocusEffect` ở Home/Profile chạy lại vô hạn.
+   */
+  const userEmailRef = useRef('');
+
   const backendReady = useMemo(() => isAuthConfigured() && getSupabase() !== null, []);
+
+  // Đồng bộ email hiện tại vào ref (xem chú thích ở `userEmailRef`).
+  useEffect(() => {
+    if (user?.email) {
+      userEmailRef.current = user.email;
+    }
+  }, [user?.email]);
 
   // =========================================================
   // Auto xin foreground location permission cho mechanic ngay khi
@@ -148,23 +180,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // eslint-disable-next-line no-console
           console.log('[auth] Deep-link URL received:', url);
         }
-        const parsed = new URL(url);
         // Deep-link format: careonroad://auth/callback?code=xxx
-        // (Supabase OAuth PKCE flow)
-        const isAuthCallback =
-          parsed.pathname.endsWith('/auth/callback') ||
-          (parsed.host === 'auth' && parsed.pathname === '/callback') ||
-          url.includes('/auth/callback') ||
-          url.includes('auth/callback');
-        if (!isAuthCallback) {
+        // (Supabase OAuth PKCE flow).
+        //
+        // Dùng helper thay vì `new URL()` vì URL native từ dev client có thể là
+        // URL không hợp lệ (`new URL()` sẽ throw và làm hỏng luôn flow OAuth).
+        if (!isOAuthCallbackUrl(url)) {
           if (__DEV__) {
             // eslint-disable-next-line no-console
-            console.log('[auth] Deep-link không phải auth callback, bỏ qua:', parsed.pathname);
+            console.log('[auth] Deep-link không phải auth callback, bỏ qua:', url);
           }
           return;
         }
 
-        const code = parsed.searchParams.get('code');
+        const code = extractOAuthCode(url);
         if (__DEV__) {
           // eslint-disable-next-line no-console
           console.log('[auth] Auth callback parsed - code present:', !!code);
@@ -404,6 +433,69 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [backendReady]);
 
   // =========================================================
+  // Refresh actor khi app quay lại foreground
+  //
+  // Gói có thể thay đổi ngoài app (admin cấp gói, thanh toán payOS hoàn
+  // tất ở trình duyệt, webhook tới muộn). Nếu chỉ hydrate lúc mount thì
+  // `user.planCode` là snapshot cũ → Home/Profile vẫn hiện "Free" dù
+  // backend đã ghi "vip". Gọi lại GET /auth/me mỗi lần app foreground để
+  // gói/hạn dùng luôn khớp với backend.
+  //
+  // Chỉ refresh khi đang authenticated và đã qua ít nhất
+  // ACTOR_REFRESH_MIN_INTERVAL_MS để không spam mạng khi user chuyển app
+  // liên tục.
+  // =========================================================
+  const ACTOR_REFRESH_MIN_INTERVAL_MS = 5000;
+  const lastActorRefreshAt = useRef(0);
+
+  useEffect(() => {
+    if (!backendReady || status !== 'authenticated') return undefined;
+
+    const refresh = async () => {
+      const now = Date.now();
+      if (now - lastActorRefreshAt.current < ACTOR_REFRESH_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastActorRefreshAt.current = now;
+      try {
+        const actor = await fetchCurrentActor();
+        if (!actor) return;
+        setUser((previous) => {
+          const next = actorToPublic(actor, previous?.email ?? userEmailRef.current);
+          // Không ghi đè nếu response không có gói (đề phòng response cũ) →
+          // giữ gói đã biết.
+          const merged: PublicAuthUser = {
+            ...next,
+            ...(next.planCode ? {} : { planCode: previous?.planCode }),
+            ...(next.planExpiresAt ? {} : { planExpiresAt: previous?.planExpiresAt }),
+          };
+          // Chỉ setState khi thực sự khác → tránh render loop vô ích.
+          if (
+            previous &&
+            previous.planCode === merged.planCode &&
+            previous.planExpiresAt === merged.planExpiresAt &&
+            previous.name === merged.name &&
+            previous.avatar === merged.avatar
+          ) {
+            return previous;
+          }
+          return merged;
+        });
+      } catch (err) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[auth] foreground refreshActor failed:', err);
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active') void refresh();
+    });
+    return () => subscription.remove();
+  }, [backendReady, status]);
+
+  // =========================================================
   // Login
   //
   // Trả về PublicAuthUser để caller (LoginScreen) navigate theo role chính xác
@@ -435,16 +527,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           'Backend chưa được cấu hình. Vui lòng liên hệ quản trị viên.',
         );
       }
-      const result = await authSignUp({
-        role: r,
-        name,
-        email,
-        phone,
-        password,
-      });
+      let result;
+      try {
+        result = await authSignUp({
+          role: r,
+          name,
+          email,
+          phone,
+          password,
+        });
+      } catch (err) {
+        // Tài khoản đã tồn tại ở Supabase nhưng đăng nhập lại cũng thất bại
+        // (ví dụ sai mật khẩu). Hướng dẫn user sang màn đăng nhập thay vì
+        // báo chung chung "Email này đã được sử dụng" khiến user bị kẹt.
+        if (isAccountAlreadyRegisteredError(err)) {
+          throw new Error(
+            'Email này đã được sử dụng. Vui lòng đăng nhập bằng email và mật khẩu này.',
+          );
+        }
+        throw err;
+      }
       if (result.needsEmailConfirmation) {
         return { needsEmailConfirmation: true };
       }
+      // Đăng ký tự động chuyển sang đăng nhập (tài khoản đã tồn tại ở
+      // Supabase) hoặc đăng ký mới kèm session → vào app ngay.
       setUser(result.user);
       setRole(result.user.role);
       setStatus('authenticated');
@@ -489,6 +596,103 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     [backendReady, user],
   );
+
+  // =========================================================
+  // Refresh actor
+  //
+  // Gọi lại GET /api/v1/auth/me để cập nhật gói/hạn dùng sau khi thanh toán.
+  // Không đổi session nên không gây màn hình loading.
+  // =========================================================
+
+  /**
+   * Đọc gói hiện tại từ endpoint có lazy-sync (`GET /api/v1/subscription`).
+   *
+   * `GET /api/v1/auth/me` chỉ đọc DB nên không phản ánh gói vừa thanh toán
+   * khi webhook payOS chưa tới được backend (LAN-only). Endpoint
+   * `/subscription` tự hỏi payOS về các đơn đang chờ và kích hoạt gói trước
+   * khi trả về → đây là nguồn gói đáng tin cậy nhất cho UI.
+   *
+   * Trả null nếu lỗi (network/403) — caller dùng gói từ actor.
+   */
+  const fetchFreshPlan = useCallback(async (): Promise<{
+    planCode: PlanCode;
+    planExpiresAt?: string;
+  } | null> => {
+    try {
+      const subscription = await getMySubscription();
+      return {
+        planCode: subscription.current_plan,
+        ...(subscription.plan_expires_at
+          ? { planExpiresAt: subscription.plan_expires_at }
+          : {}),
+      };
+    } catch (err) {
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn('[auth] fetchFreshPlan failed:', err);
+      }
+      return null;
+    }
+  }, []);
+
+  const refreshActor = useCallback(async (): Promise<PublicAuthUser | null> => {
+    if (!backendReady) {
+      return null;
+    }
+    try {
+      const actor = await fetchCurrentActor();
+      if (!actor) {
+        return null;
+      }
+      // Đọc email qua ref để callback này có identity ổn định. Nếu phụ thuộc
+      // `user` thì mỗi lần setUser sẽ tạo callback mới → useFocusEffect trong
+      // Home/Profile chạy lại vô hạn.
+      const nextUser = actorToPublic(actor, userEmailRef.current);
+      // Gói từ `/subscription` (có lazy-sync payOS) được ưu tiên vì nó mới
+      // hơn snapshot trong DB. Chỉ áp dụng cho rider.
+      const freshPlan = actor.roles.includes('rider')
+        ? await fetchFreshPlan()
+        : null;
+      setUser((previous) => {
+        // Gói đã biết được giữ nếu response không có (đề phòng response cũ).
+        const merged: PublicAuthUser = {
+          ...nextUser,
+          ...(freshPlan
+            ? {
+                planCode: freshPlan.planCode,
+                planExpiresAt: freshPlan.planExpiresAt,
+              }
+            : {
+                ...(nextUser.planCode ? {} : { planCode: previous?.planCode }),
+                ...(nextUser.planExpiresAt
+                  ? {}
+                  : { planExpiresAt: previous?.planExpiresAt }),
+              }),
+        };
+        // Không tạo object mới khi không có gì thay đổi → tránh render loop.
+        if (
+          previous &&
+          previous.planCode === merged.planCode &&
+          previous.planExpiresAt === merged.planExpiresAt &&
+          previous.name === merged.name &&
+          previous.avatar === merged.avatar &&
+          previous.address === merged.address &&
+          previous.phone === merged.phone
+        ) {
+          return previous;
+        }
+        return merged;
+      });
+      setRole(nextUser.role);
+      return nextUser;
+    } catch (err) {
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.warn('[auth] refreshActor failed:', err);
+      }
+      return null;
+    }
+  }, [backendReady, fetchFreshPlan]);
 
   // =========================================================
   // Logout
@@ -537,9 +741,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       register,
       updateProfile,
+      refreshActor,
       logout,
     }),
-    [status, user, role, backendReady, login, register, updateProfile, logout],
+    [
+      status,
+      user,
+      role,
+      backendReady,
+      login,
+      register,
+      updateProfile,
+      refreshActor,
+      logout,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -84,6 +84,17 @@ export type PaymentServiceOptions = {
   providerFactory: () => PaymentProviderClient;
   returnUrl: () => string;
   cancelUrl: () => string;
+  /**
+   * Xử lý đơn đăng ký gói (plan subscription). payOS dùng chung sequence order
+   * code với repair payments nên webhook phải tra cả hai bảng.
+   */
+  subscriptionService?: {
+    applyVerifiedProviderEvent(event: Extract<VerifiedPaymentEvent, { kind: "valid" }>): Promise<{
+      received: true;
+      matched: boolean;
+      status: "ignored" | "duplicate" | "succeeded" | "failed";
+    }>;
+  };
 };
 
 export class PaymentService {
@@ -504,6 +515,16 @@ export class PaymentService {
   private async applyVerifiedProviderEvent(
     event: Extract<VerifiedPaymentEvent, { kind: "valid" }>
   ): Promise<PaymentWebhookResponse> {
+    // Đơn đăng ký gói dùng chung sequence order code với repair payments:
+    // tra bảng plan_subscriptions trước, không thì webhook sẽ bị bỏ qua.
+    const subscription = await this.options.subscriptionService?.applyVerifiedProviderEvent(event);
+    if (subscription?.matched) {
+      return {
+        received: true,
+        matched: true,
+        status: subscription.status === "failed" ? "failed" : subscription.status
+      };
+    }
     return this.unitOfWork.execute(async (repositories) => {
       const now = this.options.now?.() ?? new Date();
       const createId = this.options.createId ?? randomUUID;

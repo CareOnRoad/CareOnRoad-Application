@@ -9,7 +9,14 @@ import { getPostgresClient } from "@/server/db/postgres-client";
 import { PostgresUnitOfWork } from "@/server/repositories/postgres/postgres-unit-of-work";
 import { recordWorkerRun } from "@/server/workers/worker-run-recorder";
 
-import { PayosClient, payosCancelUrl, payosReturnUrl } from "./payos.client";
+import {
+  PayosClient,
+  payosCancelUrl,
+  payosReturnUrl,
+  payosSubscriptionCancelUrl,
+  payosSubscriptionReturnUrl
+} from "./payos.client";
+import { SubscriptionService, type SubscriptionReconcileResult } from "@/features/subscriptions/subscription.service";
 import {
   PaymentService,
   type PaymentOrderResponse,
@@ -17,7 +24,6 @@ import {
   type PaymentWebhookResponse
 } from "./payment.service";
 import type { PaymentSummaryResponse } from "./payment.service";
-
 export type PaymentRouteDependencies = {
   authenticate(request: Request): Promise<VerifiedSupabaseIdentity>;
   authenticateWorker(request: Request): WorkerAuthority;
@@ -39,6 +45,15 @@ export type PaymentRouteDependencies = {
     ): Promise<PaymentOrderResponse>;
     handlePayosWebhook(payload: unknown): Promise<PaymentWebhookResponse>;
     reconcilePendingPayments(limit?: number): Promise<PaymentReconcileResult>;
+  };
+  /**
+   * Reconcile đơn đăng ký gói (plan subscription).
+   *
+   * Dùng chung route worker `payments/reconcile` vì payOS dùng chung sequence
+   * order code cho cả thanh toán sửa chữa lẫn mua gói.
+   */
+  subscriptionService?: {
+    reconcilePendingSubscriptions(limit?: number): Promise<SubscriptionReconcileResult>;
   };
   recordReconciliation?<T>(run: () => Promise<T>, summarize: (result: T) => { claimed: number; succeeded: number; failed: number }): Promise<T>;
 };
@@ -110,8 +125,33 @@ export function createPaymentRouteHandlers(dependencies: PaymentRouteDependencie
       try {
         dependencies.authenticateWorker(request);
         const limit = Number(new URL(request.url).searchParams.get("limit") ?? "20");
-        const run = () => dependencies.paymentService.reconcilePendingPayments(limit);
-        const summarize = (result: PaymentReconcileResult) => ({ claimed: result.claimed, succeeded: result.succeeded + result.needs_review + result.still_pending, failed: result.failed ?? 0 });
+        const run = async () => {
+          const payments = await dependencies.paymentService.reconcilePendingPayments(limit);
+          const subscriptions = dependencies.subscriptionService
+            ? await dependencies.subscriptionService.reconcilePendingSubscriptions(limit)
+            : undefined;
+          return {
+            ...payments,
+            ...(subscriptions
+              ? {
+                  subscriptions_claimed: subscriptions.claimed,
+                  subscriptions_succeeded: subscriptions.succeeded,
+                  subscriptions_still_pending: subscriptions.still_pending,
+                  subscriptions_failed: subscriptions.failed
+                }
+              : {})
+          };
+        };
+        const summarize = (result: ReturnType<typeof run> extends Promise<infer R> ? R : never) => ({
+          claimed: result.claimed + (result.subscriptions_claimed ?? 0),
+          succeeded:
+            result.succeeded +
+            result.needs_review +
+            result.still_pending +
+            (result.subscriptions_succeeded ?? 0) +
+            (result.subscriptions_still_pending ?? 0),
+          failed: (result.failed ?? 0) + (result.subscriptions_failed ?? 0)
+        });
         return NextResponse.json(
           dependencies.recordReconciliation ? await dependencies.recordReconciliation(run, summarize) : await run(),
           { status: 202 }
@@ -125,14 +165,21 @@ export function createPaymentRouteHandlers(dependencies: PaymentRouteDependencie
 
 export function createDefaultPaymentRouteHandlers() {
   const unitOfWork = new PostgresUnitOfWork(getPostgresClient());
+  const subscriptionService = new SubscriptionService(unitOfWork, {
+    providerFactory: () => new PayosClient(),
+    returnUrl: () => payosSubscriptionReturnUrl(),
+    cancelUrl: () => payosSubscriptionCancelUrl()
+  });
   return createPaymentRouteHandlers({
     authenticate: authenticateSupabaseRequest,
     authenticateWorker: authenticateWorkerSecret,
     paymentService: new PaymentService(unitOfWork, {
       providerFactory: () => new PayosClient(),
       returnUrl: () => payosReturnUrl(),
-      cancelUrl: () => payosCancelUrl()
+      cancelUrl: () => payosCancelUrl(),
+      subscriptionService
     }),
+    subscriptionService,
     recordReconciliation: (run, summarize) => recordWorkerRun({ unitOfWork, workerName: "payments_reconcile", run, summarize })
   });
 }

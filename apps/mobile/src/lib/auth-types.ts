@@ -4,6 +4,9 @@
  */
 export type AuthRole = 'rider' | 'mechanic';
 
+/** Gói của rider. */
+export type PlanCode = 'free' | 'advance' | 'vip';
+
 export interface AuthUser {
   id: string;
   role: AuthRole;
@@ -23,6 +26,10 @@ export interface PublicAuthUser {
   phone: string;
   address?: string;
   avatar: string;
+  /** Gói đang hiệu lực của rider. */
+  planCode?: PlanCode;
+  /** Ngày hết hạn gói (ISO). */
+  planExpiresAt?: string;
 }
 
 export interface StoredAuthSession {

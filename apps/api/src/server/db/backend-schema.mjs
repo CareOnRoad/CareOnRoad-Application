@@ -1,4 +1,4 @@
-export const REQUIRED_BACKEND_SCHEMA_VERSION = "202606250048";
+export const REQUIRED_BACKEND_SCHEMA_VERSION = "202606250049";
 
 // Catalog-only query: it also works when an application table/column is missing.
 const SCHEMA_CHECK_SQL = `select
@@ -27,7 +27,10 @@ const SCHEMA_CHECK_SQL = `select
       ('service_requests', 'dispatch_retry_count', 'integer'),
       ('notification_delivery_receipts', 'lease_token', 'text'),
       ('notification_delivery_receipts', 'lease_expires_at', 'timestamp with time zone'),
-      ('notification_delivery_receipts', 'next_attempt_at', 'timestamp with time zone')
+      ('notification_delivery_receipts', 'next_attempt_at', 'timestamp with time zone'),
+      ('plan_subscriptions', 'expires_at', 'timestamp with time zone'),
+      ('plan_subscriptions', 'provider_order_code', 'bigint'),
+      ('plan_subscription_events', 'event_dedupe_key', 'text')
     ) required(table_name, column_name, data_type)
     where not exists (
       select 1 from pg_attribute a

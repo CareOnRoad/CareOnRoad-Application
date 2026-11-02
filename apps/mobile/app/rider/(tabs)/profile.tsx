@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import {
   Bell,
   ChevronRight,
+  Crown,
   Languages,
   LifeBuoy,
   LogOut,
@@ -13,10 +14,8 @@ import {
   Moon,
   Pencil,
   Phone,
-  ShieldCheck,
   User,
 } from 'lucide-react-native';
-
 import { useApp } from '@/contexts/app-context';
 import { useAuth } from '@/contexts/auth-context';
 import { ActionButton } from '@/components/ui/action-button';
@@ -28,8 +27,10 @@ import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { EditProfileSheet } from '@/components/ui/edit-profile-sheet';
 import { HeroCard } from '@/components/ui/hero-card';
+import { PlanBadge } from '@/components/ui/plan-badge';
 import { NavRow, RowIcon, ToggleRow } from '@/components/ui/toggle-row';
 import { loadProfile, type LocalProfile } from '@/lib/profile-service';
+import { formatPlanExpiry, planLabel } from '@/lib/subscriptions-service';
 
 /**
  * ProfileScreen - hồ sơ cá nhân + cài đặt của rider.
@@ -47,6 +48,7 @@ export default function ProfileScreen() {
   const { vehicles, services, darkMode, toggleDarkMode, user: appUser } = useApp();
   const {
     user: authUser,
+    refreshActor,
     logout,
   } = useAuth();
   const [language, setLanguage] = useState<'EN' | 'VI'>('VI');
@@ -71,6 +73,14 @@ export default function ProfileScreen() {
     reloadLocalProfile();
   }, [reloadLocalProfile]);
 
+  // Gói hiện tại phải khớp backend: mỗi lần vào tab Profile (vd sau khi
+  // thanh toán gói ở màn "Gói của tôi", hoặc admin cấp gói) → đọc lại actor.
+  useFocusEffect(
+    useCallback(() => {
+      void refreshActor();
+    }, [refreshActor]),
+  );
+
   const user = {
     name: localProfile?.name ?? authUser?.name ?? '',
     phone: localProfile?.phone ?? authUser?.phone ?? '',
@@ -80,6 +90,15 @@ export default function ProfileScreen() {
     address:
       localProfile?.address ?? authUser?.address ?? appUser.address ?? '',
   };
+
+  // Gói hiện tại lấy từ actor backend (đã refresh sau khi mua gói).
+  const currentPlan = authUser?.planCode ?? 'free';
+  const currentPlanExpiryText = formatPlanExpiry(authUser?.planExpiresAt);
+
+  // Mọi vùng hiển thị gói đều mở màn hình "Gói của tôi" (catalog + modal mua).
+  const openPlans = useCallback(() => {
+    router.push('/rider/plans');
+  }, []);
 
   const handleProfileSaved = (profile: LocalProfile) => {
     setLocalProfile(profile);
@@ -149,10 +168,20 @@ export default function ProfileScreen() {
                 <Pencil size={14} color="#ffffff" />
               </Pressable>
             </View>
-            <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
-              <ShieldCheck size={16} color="#a9ffad" />
-              <Text className="text-xs text-white">CareOnRoad Plus · thành viên từ 2024</Text>
-            </View>
+            <Pressable
+              onPress={openPlans}
+              accessibilityRole="button"
+              accessibilityLabel="Xem và nâng cấp gói của bạn"
+              className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2 active:bg-white/20"
+            >
+              <Crown size={16} color="#a9ffad" />
+              <Text className="flex-1 text-xs text-white">
+                {currentPlanExpiryText
+                  ? `Gói ${planLabel(authUser?.planCode)} · hết hạn ${currentPlanExpiryText}`
+                  : `Gói ${planLabel(authUser?.planCode)} · Nâng cấp để mở nhắc bảo dưỡng & chi tiết xe VIP`}
+              </Text>
+              <ChevronRight size={16} color="#a9ffad" />
+            </Pressable>
         </HeroCard>
 
         {/* Stats */}
@@ -164,6 +193,51 @@ export default function ProfileScreen() {
           <Card className="flex-1 items-center p-4">
             <Text className="text-2xl font-bold text-green">{services.length}</Text>
             <Text className="mt-0.5 text-xs text-muted-foreground">Dịch vụ đã dùng</Text>
+          </Card>
+        </View>
+
+        {/* Gói của tôi */}
+        <View className="mt-6">
+          <SectionHeader title="Gói của tôi" />
+          <Card>
+            <Pressable
+              onPress={openPlans}
+              accessibilityRole="button"
+              accessibilityLabel="Xem và nâng cấp gói của bạn"
+              className="flex-row items-center justify-between p-4 active:bg-secondary/40"
+            >
+              <View className="flex-1">
+                <Text className="text-sm text-muted-foreground">Gói đang dùng</Text>
+                <Text className="mt-1 text-lg font-bold text-foreground">
+                  {planLabel(currentPlan)}
+                </Text>
+              </View>
+              <View className="flex-row items-center gap-2">
+                <PlanBadge plan={currentPlan} />
+                <ChevronRight size={20} color="#64748b" />
+              </View>
+            </Pressable>
+
+            <Pressable
+              onPress={openPlans}
+              accessibilityRole="button"
+              accessibilityLabel="Xem và nâng cấp gói của bạn"
+              className="px-4 pb-1 active:bg-secondary/40"
+            >
+              <Text className="text-xs text-muted-foreground">
+                {currentPlanExpiryText
+                  ? `Gói hiện tại có hiệu lực đến ${currentPlanExpiryText}.`
+                  : 'Gói Free không có thời hạn. Nâng cấp để mở nhắc bảo dưỡng định kỳ và chi tiết xe VIP.'}
+              </Text>
+            </Pressable>
+
+            <NavRow
+              icon={Crown}
+              label="Quản lý gói"
+              description="Xem tất cả gói và thanh toán"
+              right={<ChevronRight size={20} color="#64748b" />}
+              onPress={openPlans}
+            />
           </Card>
         </View>
 

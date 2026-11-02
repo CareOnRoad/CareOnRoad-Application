@@ -52,6 +52,8 @@ export default function RiderLayout() {
           <Stack.Screen name="payments/[quoteId]" options={{ headerShown: false }} />
           <Stack.Screen name="review" options={{ headerShown: false }} />
           <Stack.Screen name="notifications" options={{ headerShown: false }} />
+          <Stack.Screen name="plans/index" options={{ headerShown: false }} />
+          <Stack.Screen name="plans/[orderId]" options={{ headerShown: false }} />
         </Stack>
       </AppProvider>
     </ActiveRequestProvider>

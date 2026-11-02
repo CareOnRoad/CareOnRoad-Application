@@ -14,7 +14,7 @@ describe("admin feature scope", () => {
   it("does not introduce prohibited feature artifacts or unsafe generic commands", () => {
     const files = roots
       .flatMap(listProductionTypeScriptFiles)
-      .filter((file) => file.toLowerCase().includes("admin"));
+      .filter(isAdminScopedFile);
     const source = files
       .map((file) => `// ${relative(process.cwd(), file)}\n${readFileSync(file, "utf8")}`)
       .join("\n");
@@ -30,12 +30,24 @@ describe("admin feature scope", () => {
     expect(existsSync(resolve(process.cwd(), "app", "admin"))).toBe(false);
     const adminSource = roots
       .flatMap(listProductionTypeScriptFiles)
-      .filter((file) => file.toLowerCase().includes("admin"))
+      .filter(isAdminScopedFile)
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
     expect(adminSource).not.toMatch(/\b(?:PaymentService|PaymentRepository|RefundService)\b/);
   });
 });
+
+/**
+ * Chỉ match file thuộc phạm vi admin.
+ *
+ * ⚠️ Không được match trên absolute path: trên Windows, đường dẫn chứa
+ * `C:\Users\Admin\...` sẽ khớp "admin" cho **mọi** file, khiến test kiểm tra
+ * nhầm các file không liên quan (false positive) và fail tuỳ tên user máy.
+ * Vì vậy ta so khớp trên đường dẫn tương đối so với `process.cwd()`.
+ */
+function isAdminScopedFile(file: string): boolean {
+  return relative(process.cwd(), file).toLowerCase().includes("admin");
+}
 
 function listProductionTypeScriptFiles(root: string): string[] {
   if (!existsSync(root)) {

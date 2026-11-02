@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
+  AppState,
   Linking,
   Pressable,
   Share,
   Text,
   View,
+  type AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -16,9 +17,11 @@ import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
+import { QrCode } from '@/components/ui/qr-code';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { cn } from '@/lib/utils';
 import { formatDdMmYyyyHHmm } from '@/lib/format';
+import { canRenderQrCode } from '@/lib/qr-payload';
 import {
   cancelPaymentOrder,
   createPaymentOrder,
@@ -134,6 +137,22 @@ export default function PaymentScreen() {
     }, 1000);
     return () => clearInterval(t);
   }, [order?.status]);
+
+  /**
+   * Quay lại app sau khi thanh toán ở trình duyệt → app được foreground.
+   *
+   * Hệ điều hành có thể làm chậm timer khi app chạy nền, nên phải hỏi lại
+   * backend ngay thay vì chờ tới tick 4s tiếp theo — nếu không người dùng
+   * thấy trạng thái "đang chờ" dù đã trả tiền.
+   */
+  useEffect(() => {
+    if (!order?.id) return;
+    const subscription = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state !== 'active') return;
+      void refresh(order.id);
+    });
+    return () => subscription.remove();
+  }, [order?.id, refresh]);
 
   const handleCancel = async () => {
     if (!order) return;
@@ -282,18 +301,24 @@ function PendingPaymentCard({
         </Text>
       </View>
       <View className="items-center p-5">
-        {order.qr_code ? (
-          <Image
-            source={{ uri: order.qr_code }}
-            className="size-56"
-            resizeMode="contain"
+        {order.qr_code && canRenderQrCode(order.qr_code) ? (
+          <QrCode
+            value={order.qr_code}
+            size={224}
             accessibilityLabel="QR code thanh toán"
           />
         ) : order.checkout_url ? (
           <View className="size-56 items-center justify-center rounded-2xl bg-secondary">
             <ShieldCheck size={64} color="#1974f7" />
           </View>
-        ) : null}
+        ) : (
+          <View className="size-56 items-center justify-center rounded-2xl bg-secondary px-4">
+            <Text className="text-center text-xs text-muted-foreground">
+              Không tạo được mã QR. Vui lòng dùng nút &quot;Mở trang thanh toán&quot;
+              bên dưới.
+            </Text>
+          </View>
+        )}
         <View className="mt-4 flex-row items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1.5">
           <Hourglass size={12} color="#a16207" />
           <Text className="text-xs font-semibold text-amber-700">

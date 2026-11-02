@@ -81,9 +81,65 @@ interface RequestOptions {
 }
 
 interface ErrorResponseBody {
+  /**
+   * Format thực tế của BE: body PHẲNG
+   * `{ error_code, message, details?, request_id? }` (xem `createApiErrorBody`
+   * trong `apps/api/src/lib/api-error.ts`).
+   */
+  error_code?: string;
+  message?: string;
+  details?: unknown;
+  request_id?: string;
+  /** Format legacy: body NESTED `{ error: { code, message, details } }`. */
   error?: ApiErrorPayload & {
     code?: ApiErrorCode;
   };
+}
+
+/** Message chuẩn khi request bị huỷ vì hết thời gian chờ. */
+export const TIMEOUT_MESSAGE = 'Yêu cầu bị huỷ do hết thời gian chờ';
+
+/** Message chuẩn khi không thể kết nối tới máy chủ. */
+export const NETWORK_MESSAGE = 'Không thể kết nối tới máy chủ';
+
+/**
+ * Nhận diện lỗi timeout của `fetch`.
+ *
+ * ⚠️ Bản RELEASE dùng native fetch của Expo, khác hẳn bản dev:
+ *
+ *   - Dev: `fetch` là JS của React Native → abort sinh `AbortError` đúng chuẩn.
+ *   - Release: `expo/src/winter/fetch/fetch.ts` bọc **mọi** lỗi native thành
+ *     `FetchError` (`expo/src/winter/fetch/FetchErrors.ts`):
+ *     `super("fetch failed: " + message)` và `name` vẫn là `"Error"`.
+ *
+ * Nếu chỉ kiểm tra `err.name === 'AbortError'` thì trong release nhánh này
+ * KHÔNG BAO GIỜ khớp → timeout bị đẩy nguyên chuỗi `"fetch failed: ..."`
+ * lên UI, đúng lỗi mà user thật gặp phải.
+ */
+export function isTimeoutError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const candidate = err as { name?: unknown; message?: unknown };
+  if (candidate.name === 'AbortError' || candidate.name === 'TimeoutError') {
+    return true;
+  }
+  const message =
+    typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
+  if (!message.includes('fetch failed')) {
+    return false;
+  }
+  return (
+    message.includes('abort') ||
+    message.includes('timeout') ||
+    message.includes('timed out')
+  );
+}
+
+/**
+ * Chuẩn hoá lỗi mạng thành message tiếng Việt, không để lộ chuỗi thô
+ * (`"fetch failed: ..."`) cho người dùng.
+ */
+export function toNetworkErrorMessage(err: unknown): string {
+  return isTimeoutError(err) ? TIMEOUT_MESSAGE : NETWORK_MESSAGE;
 }
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
@@ -146,14 +202,7 @@ export async function apiRequest<TResponse = unknown>(
     });
   } catch (err) {
     clearTimeout(timeoutId);
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new ApiError(0, 'NETWORK_ERROR', 'Yêu cầu bị huỷ do hết thời gian chờ');
-    }
-    throw new ApiError(
-      0,
-      'NETWORK_ERROR',
-      err instanceof Error ? err.message : 'Không thể kết nối tới máy chủ',
-    );
+    throw new ApiError(0, 'NETWORK_ERROR', toNetworkErrorMessage(err));
   }
   clearTimeout(timeoutId);
 
@@ -174,12 +223,18 @@ export async function apiRequest<TResponse = unknown>(
 
   if (!response.ok) {
     const body = (payload ?? {}) as ErrorResponseBody;
-    const err = body?.error ?? {};
+    // BE trả body PHẲNG `{ error_code, message, details }`; format NESTED
+    // `{ error: { code, message } }` là format legacy — hỗ trợ cả hai và ưu
+    // tiên format phẳng để không mất `error_code` cụ thể của backend.
+    const nested = body?.error ?? {};
+    const code = (body?.error_code ?? nested?.code) as ApiErrorCode | undefined;
+    const message = body?.message ?? nested?.message;
+    const details = body?.details ?? nested?.details;
     throw new ApiError(
       response.status,
-      err?.code ?? defaultCodeForStatus(response.status),
-      err?.message ?? `Yêu cầu thất bại (HTTP ${response.status})`,
-      err?.details,
+      code ?? defaultCodeForStatus(response.status),
+      message ?? `Yêu cầu thất bại (HTTP ${response.status})`,
+      details,
     );
   }
 

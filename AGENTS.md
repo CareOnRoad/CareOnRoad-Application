@@ -26,6 +26,8 @@
 - **Typecheck API:** `pnpm.cmd run typecheck`
 - **Lint API:** `pnpm.cmd run lint` or `pnpm.cmd run lint:api`
 - **Lint web:** `pnpm.cmd run lint:web`
+- **Typecheck web:** `pnpm.cmd --filter @careonroad/web run typecheck`
+- **Audit admin web/API parity:** `node scripts/audit-admin-web-coverage.cjs`
 - **Test API unit/static/route:** `pnpm.cmd test` or `pnpm.cmd run test:unit`
 - **Test PostgreSQL integration:** `pnpm.cmd run test:db`
 - **Test full API suite:** `pnpm.cmd run test:full`
@@ -174,6 +176,29 @@
   patch/snooze/disable of existing reminders stay allowed, and existing reminders
   keep firing. Admins grant plans manually; there is no plan payment. See
   `apps/api/VEHICLE-MAINTENANCE-PLANS-DESIGN.md`.
+- Self-service plan purchases (rider buys `advance` 10.000đ / `vip` 50.000đ via
+  payOS, 30-day period, no yearly tier) are implemented through migration
+  `202606250049_plan_subscriptions.sql`; 049 must be applied and verified on
+  hosted/dev before deploy (readiness requires 049). Purchases are strictly
+  non-refundable and require an explicit acknowledgment before order creation.
+  Downgrades are blocked with `409` (`details.reason = "downgrade_blocked"`);
+  renewals and upgrades carry over remaining days
+  (`new_expiry = max(current_expiry, now) + 30 days`). Admin grants are recorded
+  in the same `plan_subscriptions` history with `source = "admin_grant"`.
+  Provider order codes share `payment_order_code_seq` with repair payments, so
+  the single payOS webhook routes both order types.
+- Plan activation locks the `app_users` row (`findActorForUpdate`) before
+  computing `new_expiry`, so two orders activating at the same time cannot lose
+  carried-over days. Lazy provider sync re-reads the order from the database
+  even when the provider event was already recorded, so a client polling after
+  a webhook still sees `succeeded` instead of a stale `pending` snapshot.
+  When the payOS webhook cannot reach the backend (LAN-only deployment), the
+  plan still activates through two fallbacks: lazy provider sync on
+  `GET /api/v1/subscription` and `GET /api/v1/subscription/orders/{id}`, and
+  the `payments/reconcile` worker scanning stale pending subscription orders.
+  Mobile passes deep-link `return_url`/`cancel_url` (`careonroad`/`exp`/`exps`
+  schemes only) so payOS returns the rider into the app instead of a blank
+  web page.
 - Run `pnpm.cmd run preflight:schema` before release. This read-only gate checks
   source migration history and runtime schema objects; readiness also rejects
   missing schema. See `apps/api/SCHEMA-RELEASE-CHECKLIST.md` for test isolation and
@@ -305,20 +330,44 @@
     quotes awaiting payment. Creation requires `X-Idempotency-Key`.
 - `POST /api/v1/payments/webhooks/payos`
   - Signed payOS webhook route; verified matching payment success marks payment
-    succeeded but does not automatically start assignment work.
+    succeeded but does not automatically start assignment work. The same route
+    resolves plan-subscription orders before repair payment orders.
+- `GET /api/v1/plans`
+  - Authenticated plan catalog (`free`/`advance`/`vip`) with prices, 30-day
+    period, feature lists, and the non-refundable notice.
+- `GET /api/v1/subscription`
+  - Rider-owned current plan, expiry, active subscription, and purchase history.
+  - Pending orders are lazily synced with payOS on read (throttled 30s per order
+    code) so a plan still activates when the payOS webhook cannot reach the
+    backend (for example a LAN-only deployment).
+- `POST /api/v1/subscription/orders`
+  - Rider-owned plan purchase (payOS). Requires `X-Idempotency-Key` and
+    `non_refundable_acknowledged: true`; rejects downgrades with 409
+    (`details.reason = "downgrade_blocked"`).
+  - Optional `return_url`/`cancel_url` are client deep links, restricted to the
+    `careonroad`/`exp`/`exps` schemes, so payOS returns the rider straight into
+    the app instead of an empty web page. The backend falls back to
+    `PAYOS_SUBSCRIPTION_RETURN_URL`/`PAYOS_SUBSCRIPTION_CANCEL_URL`, and retries
+    once with those URLs when the provider rejects the deep-link scheme.
+- `GET /api/v1/subscription/orders/[orderId]`, `POST /api/v1/subscription/orders/[orderId]/cancel`
+  - Owner-only subscription order polling and cancellation. Polling also syncs
+    the real payOS status (lazy provider sync). A late webhook for an order the
+    rider already canceled is ignored and never activates the plan.
 - `POST /api/v1/internal/workers/payments/reconcile`
   - Protected worker route requiring worker secret authority; reconciles stale
-    pending payOS payment orders.
+    pending payOS payment orders and stale pending plan-subscription orders
+    (older than 2 minutes).
 - `/api/v1/admin/users/**`
   - Admin-only backend user list/detail/status, role grant/revoke, device list,
     device revoke, and activity read models. Mutations require
     `X-Idempotency-Key` and reason metadata.
 - `POST /api/v1/admin/users/[userId]/plan`
   - Admin grants or extends a rider plan (`plan_code` is `free|advance|vip`; `duration`
-    month=30 / year=365 days is required for paid plans and forbidden for `free`,
+    must be `month` (30 days) for paid plans and is forbidden for `free`,
     which revokes the plan; plus `reason`); the same active plan extends from its
     current expiry. Returns 409 if the target is not an active rider. Requires
-    `X-Idempotency-Key`; no payment involved.
+    `X-Idempotency-Key`; no payment involved. Paid grants are also recorded in
+    `plan_subscriptions` with `source = "admin_grant"`.
 - `/api/v1/admin/mechanics/**`
   - Admin-only backend mechanic list/detail, approve/reject/suspend/ban/reactivate,
     skills, service radius, force-unavailable, work-history, and performance.
@@ -369,12 +418,73 @@
   - Admin-only cursor-paginated, redacted operational monitoring queues; they
     are read-only and never expose event payloads or raw worker errors.
 
+## Admin Web Console (`apps/web`)
+
+- **Scope:** `apps/web/src/app/admin/**` is the operator console. It covers all
+  96 backend admin routes under `apps/api/app/api/v1/admin/**`.
+- **13 sidebar tabs** live in `apps/web/src/lib/admin/nav.ts` — ONE source of
+  truth. `AdminNav` renders it, `findAdminNavItem` resolves the active tab.
+  A page never defines its own menu.
+  - Tổng quan: `/admin/dashboard`
+  - Vận hành: `/admin/service-requests`, `/admin/assignments`, `/admin/quotes`
+  - Tài khoản: `/admin/mechanics`, `/admin/users`
+  - Hệ thống: `/admin/reminders`, `/admin/notifications`, `/admin/outbox`,
+    `/admin/payments`, `/admin/audit`, `/admin/configuration`,
+    `/admin/operations`
+- **Route parity is verified by a script:** `node scripts/audit-admin-web-coverage.cjs`
+  fails if a backend admin route is unreachable from the web API layer, if a
+  read/mutation wrapper has no consumer, or if a Server Action is never
+  rendered by a component. Run it after touching the admin web code.
+- **API layer (server-only):**
+  - `src/lib/api/admin.ts` — 48 read wrappers (GET). One function per screen;
+    a typo becomes a type error instead of a runtime 404.
+  - `src/lib/api/admin-commands.ts` — 36 mutation wrappers (POST/PUT/PATCH).
+  - `src/lib/api/admin-command-runner.ts` — the shared mutation runner. It
+    sends `X-Idempotency-Key`, validates the response against the shared
+    contract, and maps backend errors to Vietnamese messages.
+  - `src/lib/api/server-client.ts` — the HTTP client, the `ApiClientError`
+    hierarchy, and `classifyApiError`.
+- **Session:** `src/lib/auth/require-admin.ts` resolves the Supabase session
+  and asks `GET /api/v1/auth/me` for the actor. The token NEVER reaches a
+  Client Component. The `(protected)` layout guard is UX only — the backend
+  re-checks authorization on every admin route.
+- **Mutations:** every write goes through a Server Action in a local
+  `actions.ts` and renders through the shared `CommandForm`
+  (`src/components/admin/command-form.tsx`). The form mints ONE idempotency
+  key per mount, so a retry after a network failure replays the same command
+  on the backend instead of creating a duplicate. The backend's
+  `details.reason` code is shown inline.
+- **Backend-driven availability:** write buttons are enabled from the
+  backend's own `next_action_codes`, never from frontend re-derivation of the
+  state machine.
+- **Immutable data is read-only:** audit entries, diagnosis revisions,
+  configuration versions and quote history render as lists with no edit or
+  delete affordance, because the backend rejects such writes.
+- **Failed ≠ empty:** every read goes through `settle()` (or `settleOrNotFound()`
+  on detail pages) so a failed request renders an explicit error panel instead
+  of looking like an empty list. A 404 on a detail page escalates to the
+  segment's `not-found.tsx`.
+- **Segment boundaries:** `(protected)/error.tsx` (one boundary for all 13
+  tabs, keeps the sidebar visible), `(protected)/loading.tsx` (shapeless
+  skeleton — never a fake number), `(protected)/not-found.tsx`.
+- **No invented numbers:** the dashboard reads `GET /api/v1/admin/dashboard/*`
+  (bucket histograms) and the operational queues. There is no online-mechanic
+  aggregate, no SLA metric and no fleet map in the backend, so none is shown.
+
 ## Core Services And Functions
 
 ### Client-facing helpers
 
 - The API workspace intentionally contains no root page; mobile and web clients
   consume its HTTP routes independently.
+- `apps/mobile/src/lib/qr-payload.ts` (mobile-only)
+  - Pure helpers for payOS VietQR payloads: `isImageUrl`, `isEmvcoPayload`,
+  `utf8Bytes`, `buildQrMatrix`, `buildQrPath`, `canRenderQrCode`.
+  - payOS returns `qr_code` as a **raw EMVCo text payload** (not an image URL),
+  so mobile must encode it client-side. `apps/mobile/src/components/ui/qr-code.tsx`
+  renders it with `toqr` + `react-native-svg` (one SVG path, 4-module quiet zone).
+  - `toqr` is a declared mobile dependency; do not rely on the global
+  `TextEncoder` (not guaranteed on Hermes) — use `utf8Bytes`.
 - `src/features/chatbot/chat-page-draft.ts`
   - Text draft helpers and recording status labels.
 - `src/features/chatbot/chat-page-view-model.ts`
@@ -593,6 +703,8 @@
 - `PAYOS_BASE_URL`
 - `PAYOS_RETURN_URL`
 - `PAYOS_CANCEL_URL`
+- `PAYOS_SUBSCRIPTION_RETURN_URL` (optional; falls back to `PAYOS_RETURN_URL`)
+- `PAYOS_SUBSCRIPTION_CANCEL_URL` (optional; falls back to `PAYOS_CANCEL_URL`)
 - ASR model variables are handled in `src/features/asr/sherpa-onnx.client.ts`; keep local model files under `models/`.
 
 Never expose `GEMINI_API_KEY`,

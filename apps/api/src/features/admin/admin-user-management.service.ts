@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import type { ApiErrorCode } from "@/lib/api-error";
-import { nextPlanExpiry, type PlanCode } from "@/features/plans/plan";
+import { nextPlanExpiry, PLAN_PERIOD_DAYS, type PlanCode } from "@/features/plans/plan";
+import { getPlanEntry } from "@/features/plans/plan-catalog";
 import { prepareIdempotency } from "@/lib/idempotency";
 import type { VerifiedSupabaseIdentity, UserRole, UserStatus } from "@/features/auth/auth.types";
 import type { UnitOfWork } from "@/server/repositories/contracts/unit-of-work";
@@ -312,8 +313,29 @@ export class AdminUserManagementService {
       const expires =
         plan === "free" || !duration
           ? undefined
-          : nextPlanExpiry(target, plan, duration, now);
+          : nextPlanExpiry(target, plan, now);
       const updated = await repositories.users.updatePlan(id, plan, expires, now);
+      // Ghi lại lịch sử gói để hồ sơ gói thống nhất giữa admin cấp và người dùng tự mua.
+      if (plan !== "free" && expires) {
+        await repositories.subscriptions.create({
+          id: this.createId(),
+          userId: id,
+          planCode: plan,
+          source: "admin_grant",
+          provider: "payos",
+          providerOrderCode: undefined,
+          status: "succeeded",
+          currency: "VND",
+          amount: getPlanEntry(plan)?.price ?? 0,
+          periodDays: PLAN_PERIOD_DAYS,
+          nonRefundableAcknowledged: true,
+          startedAt: now,
+          expiresAt: expires,
+          createdAt: now,
+          updatedAt: now,
+          succeededAt: now
+        });
+      }
       const response = toUserResponse(
         updated,
         await repositories.users.deviceSummary(id)

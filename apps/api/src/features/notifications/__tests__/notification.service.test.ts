@@ -60,6 +60,34 @@ describe("NotificationService", () => {
     expect(eventPayloads).not.toContain("full diagnosis");
   });
 
+  it("keeps subscription navigation metadata but drops unknown fields", async () => {
+    const unitOfWork = createUnitOfWork();
+    const service = new NotificationService(unitOfWork, {
+      now: () => now,
+      createId: sequentialIds(["notification-1", "event-1", "audit-1"])
+    });
+
+    const created = await service.createNotification({
+      userId,
+      type: "subscription.activated",
+      title: "Gói Advance đã được kích hoạt",
+      body: "Gói mới có hiệu lực đến 01/12/2026.",
+      data: {
+        subscription_id: "44444444-4444-4444-8444-444444444444",
+        plan_code: "advance",
+        plan_expires_at: now.toISOString(),
+        secret_note: "should be dropped"
+      },
+      dedupeKey: "subscription.activated:order-1"
+    });
+
+    expect(created.notification.data).toEqual({
+      subscription_id: "44444444-4444-4444-8444-444444444444",
+      plan_code: "advance",
+      plan_expires_at: now.toISOString()
+    });
+  });
+
   it("marks delivery sent or failed with audit and no recursive outbox", async () => {
     const unitOfWork = createUnitOfWork();
     const service = new NotificationService(unitOfWork, {

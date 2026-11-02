@@ -6,6 +6,7 @@ import {
   Bike,
   Bell,
   CalendarPlus,
+  ChevronRight,
   History,
   LucideIcon,
   ShieldCheck,
@@ -30,6 +31,7 @@ import { SectionHeader } from '@/components/ui/form';
 import { StatTile } from '@/components/ui/stat-tile';
 import { formatDdMmYyyyHHmm } from '@/lib/format';
 import { deriveStatus } from '@/lib/reminders-service';
+import { planLabel } from '@/lib/subscriptions-service';
 
 type QuickAction = {
   id: string;
@@ -112,7 +114,7 @@ export default function HomeScreen() {
     reloadNotifications,
     reloadReminders,
   } = useApp();
-  const { user: authUser } = useAuth();
+  const { user: authUser, refreshActor } = useAuth();
 
   // Request đang chạy — hiện banner ở đầu Home để rider không bị mất đường
   // vào màn hình theo dõi sau khi rời tab Rescue hoặc restart app.
@@ -136,12 +138,17 @@ export default function HomeScreen() {
     React.useCallback(() => {
       void reloadNotifications();
       void reloadReminders();
-    }, [reloadNotifications, reloadReminders]),
+      // Gói có thể đổi ở màn "Gói của tôi" (thanh toán) → đồng bộ lại
+      // để badge ở hero card hiện đúng gói hiện tại.
+      void refreshActor();
+    }, [reloadNotifications, reloadReminders, refreshActor]),
   );
 
   // Ưu tiên tên từ auth session, fallback empty.
   const displayName = authUser?.name ?? appUser.name;
   const displayAvatar = authUser?.avatar ?? appUser.avatar;
+  // Gói hiện tại — dùng cho CTA nâng cấp ở hero card.
+  const currentPlan = authUser?.planCode ?? 'free';
 
   // Reminder gần nhất (chưa hoàn thành và enabled) – sắp theo next_due_at.
   const upcomingReminder = reminders
@@ -197,12 +204,21 @@ export default function HomeScreen() {
               <Bike size={28} color="#ffffff" />
             </View>
           </View>
-          <View className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5">
+          <Pressable
+            onPress={() => router.push('/rider/plans')}
+            accessibilityRole="button"
+            accessibilityLabel="Xem và nâng cấp gói của bạn"
+            className="mt-4 flex-row items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5 active:bg-white/20"
+          >
             <ShieldCheck size={16} color="#a9ffad" />
-            <Text className="text-xs font-medium text-white">
+            <Text className="flex-1 text-xs font-medium text-white">
               CareOnRoad Plus · hỗ trợ 24/7
             </Text>
-          </View>
+            <Text className="text-xs font-semibold text-white">
+              {currentPlan === 'free' ? 'Nâng cấp' : planLabel(currentPlan)}
+            </Text>
+            <ChevronRight size={14} color="#a9ffad" />
+          </Pressable>
         </HeroCard>
 
         {/* Active request banner — luôn dẫn tới màn hình chi tiết nếu đang có

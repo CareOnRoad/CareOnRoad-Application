@@ -16,6 +16,15 @@
     "./admin/mechanics": "./src/admin-mechanics.ts",
     "./admin/service-requests": "./src/admin-service-requests.ts",
     "./admin/operations": "./src/admin-operations.ts",
+    "./admin/dashboard": "./src/admin-dashboard.ts",
+    "./admin/assignments": "./src/admin-assignments.ts",
+    "./admin/quotes": "./src/admin-quotes.ts",
+    "./admin/dispatch": "./src/admin-dispatch.ts",
+    "./admin/delivery": "./src/admin-delivery.ts",
+    "./admin/reminders": "./src/admin-reminders.ts",
+    "./admin/audit": "./src/admin-audit.ts",
+    "./admin/configuration": "./src/admin-configuration.ts",
+    "./admin/payments": "./src/admin-payments.ts",
     "./health": "./src/health.ts"
   },
   "dependencies": {

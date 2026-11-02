@@ -713,6 +713,19 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
   // ---- Live sharing ----
 
   /**
+   * Dừng auto-tracking vị trí. Đặt TRƯỚC `ingestForAssignment` vì hàm đó
+   * gọi `stopAutoTracking()` trong nhánh lỗi 409 liên tiếp — khai báo sau
+   * sẽ gây lỗi temporal dead zone ("Cannot access variable before it is
+   * declared") và crash runtime.
+   */
+  const stopAutoTracking = useCallback(() => {
+    if (autoHandleRef.current) {
+      autoHandleRef.current.stop();
+      autoHandleRef.current = null;
+    }
+  }, []);
+
+  /**
    * Helper ingest: rate-limit + accuracy filter + chỉ gửi nếu assignment
    * còn ở travel state. Tách ra để dùng được cả cho manual toggle và auto
    * tracking đều đi qua cùng 1 rate-limit (per-assignment).
@@ -772,13 +785,6 @@ export function MechanicAppProvider({ children }: { children: React.ReactNode })
       watchHandleRef.current = null;
     }
     setSharingAssignmentId(null);
-  }, []);
-
-  const stopAutoTracking = useCallback(() => {
-    if (autoHandleRef.current) {
-      autoHandleRef.current.stop();
-      autoHandleRef.current = null;
-    }
   }, []);
 
   const stopAvailabilityHeartbeat = useCallback(() => {

@@ -6,6 +6,7 @@ expo-env.d.ts
 # Build output (Expo / EAS)
 .expo/
 .expo-shared/
+.expo-typegen-tmp/
 dist/
 dist-android/
 dist-ios/

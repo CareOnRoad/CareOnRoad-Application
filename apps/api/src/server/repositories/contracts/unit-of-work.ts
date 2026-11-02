@@ -25,6 +25,7 @@ import type { RequestMediaRepository } from "./request-media.repository";
 import type { ReminderRepository } from "./reminder.repository";
 import type { ReviewRepository } from "./review.repository";
 import type { ServiceRequestRepository } from "./service-request.repository";
+import type { SubscriptionRepository } from "./subscription.repository";
 import type { UserRepository } from "./user.repository";
 
 export type FoundationRepositories = {
@@ -56,6 +57,7 @@ export type FoundationRepositories = {
   operationalMonitoring: OperationalMonitoringRepository;
   chatbotSessions: ChatbotSessionRepository;
   payments: PaymentRepository;
+  subscriptions: SubscriptionRepository;
 };
 
 export interface UnitOfWork {

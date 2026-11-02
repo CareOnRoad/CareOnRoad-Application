@@ -17,22 +17,27 @@ import type { Session, Subscription } from '@supabase/supabase-js';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Linking } from 'react-native';
-import { createURL } from 'expo-linking';
 
 import { ApiError, apiGet, apiPatch, apiPost, setAccessTokenProvider } from '@/lib/api';
+import { mapActorError, mapSupabaseError } from '@/lib/auth-errors';
+import { CANONICAL_OAUTH_REDIRECT_URL, extractOAuthCode } from '@/lib/deep-link';
 import { getSupabase } from '@/lib/supabase-client';
 
-import type { AuthRole, PublicAuthUser } from './auth-types';
+import type { AuthRole, PlanCode, PublicAuthUser } from './auth-types';
 
 /** Shape trả về từ GET /api/v1/auth/me. */
 export interface AppActor {
-  id: string;
+    id: string;
   display_name?: string;
   phone?: string;
   address?: string;
   avatar_url?: string;
   roles: AuthRole[];
   status: 'active' | 'suspended' | 'archived';
+  /** Gói đang hiệu lực (rider). */
+  plan_code?: PlanCode;
+  /** Ngày hết hạn gói (ISO). */
+  plan_expires_at?: string;
 }
 
 /** Email không hợp lệ. */
@@ -56,26 +61,6 @@ function ensurePassword(password: string): string {
  *
  * @see https://supabase.com/docs/reference/javascript/auth-error-codes
  */
-function mapSupabaseError(err: { message?: string } | null | undefined): Error {
-  const msg = err?.message ?? 'Lỗi không xác định';
-  const lower = msg.toLowerCase();
-  if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
-    return new Error('Email hoặc mật khẩu không đúng');
-  }
-  if (lower.includes('email not confirmed')) {
-    return new Error('Email chưa được xác nhận. Vui lòng kiểm tra hộp thư.');
-  }
-  if (lower.includes('user already registered')) {
-    return new Error('Email này đã được sử dụng');
-  }
-  if (lower.includes('rate limit')) {
-    return new Error('Quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.');
-  }
-  if (lower.includes('network')) {
-    return new Error('Không thể kết nối tới máy chủ xác thực');
-  }
-  return new Error(msg);
-}
 
 /** Chọn role chính từ actor. */
 function pickPrimaryRole(actor: AppActor): AuthRole {
@@ -126,12 +111,6 @@ async function loadOrBootstrapActor(session: Session, desiredRole?: AuthRole): P
 }
 
 /** Message tiếng Việt cho lỗi backend khi tải hồ sơ sau đăng nhập. */
-function mapActorError(err: unknown): Error {
-  if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-    return new Error('Tài khoản đang bị khóa hoặc không còn hoạt động. Vui lòng liên hệ hỗ trợ.');
-  }
-  return err instanceof Error ? err : new Error('Không tải được hồ sơ tài khoản');
-}
 
 /** Convert AppActor → PublicAuthUser để store trong client state. */
 export function actorToPublicUser(actor: AppActor): PublicAuthUser {
@@ -145,6 +124,12 @@ export function actorToPublicUser(actor: AppActor): PublicAuthUser {
   };
   if (actor.address) {
     result.address = actor.address;
+  }
+  if (actor.plan_code) {
+    result.planCode = actor.plan_code;
+  }
+  if (actor.plan_expires_at) {
+    result.planExpiresAt = actor.plan_expires_at;
   }
   return result;
 }
@@ -206,6 +191,60 @@ export async function signIn(email: string, password: string): Promise<SignInRes
 }
 
 /**
+ * Nhận diện lỗi "tài khoản đã tồn tại" của Supabase.
+ *
+ * Supabase trả message khác nhau tuỳ phiên bản/locale:
+ *   - `"User already registered"`
+ *   - `"A user with this email address has already been registered"`
+ *   - HTTP 422 `"Unprocessable Entity"` kèm `status === 422`
+ */
+function isAlreadyRegisteredError(error: {
+  message?: string;
+  status?: number;
+} | null): boolean {
+  if (!error) return false;
+  const message = (error.message ?? '').toLowerCase();
+  if (message.includes('already been registered')) return true;
+  if (message.includes('already registered')) return true;
+  if (message.includes('user already exists')) return true;
+  return error.status === 422 && message.includes('registered');
+}
+
+/**
+ * Đăng nhập bằng tài khoản đã tồn tại rồi bootstrap profile ở BE.
+ *
+ * Dùng khi `signUp` báo "email đã được sử dụng" nhưng hồ sơ BE có thể chưa
+ * tồn tại (đăng ký trước đó thất bại ở bước bootstrap do lỗi mạng).
+ */
+async function signInWithExistingAccount(
+  client: NonNullable<ReturnType<typeof getSupabase>>,
+  email: string,
+  password: string,
+  role: AuthRole,
+): Promise<SignUpResult> {
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
+  if (error || !data.session) {
+    // Đăng nhập cũng thất bại -> ném lỗi gốc để user biết chính xác nguyên nhân.
+    throw mapSupabaseError(error);
+  }
+
+  try {
+    setAccessTokenProvider(() =>
+      client.auth.getSession().then((s) => s.data.session?.access_token ?? null),
+    );
+    const actor = await loadOrBootstrapActor(data.session, role);
+    const user: PublicAuthUser = {
+      ...actorToPublicUser(actor),
+      email,
+    };
+    return { needsEmailConfirmation: false, session: data.session, actor, user };
+  } catch (err) {
+    await signOut().catch(() => undefined);
+    throw mapActorError(err);
+  }
+}
+
+/**
  * Đăng ký user mới qua Supabase Auth → bootstrap profile qua backend.
  *
  * Lưu ý: backend hiện chỉ gán default role = rider khi bootstrap.
@@ -236,6 +275,16 @@ export async function signUp(input: SignUpInput): Promise<SignUpResult> {
     },
   });
   if (error) {
+    // Tài khoản đã tồn tại ở Supabase: có thể do lần đăng ký trước đã tạo
+    // account thành công nhưng bootstrap profile ở BE bị lỗi mạng/timeout.
+    // Trong trường hợp đó user bị kẹt vĩnh viễn ở màn đăng ký ("Email này đã
+    // được sử dụng") dù hồ sơ BE chưa tồn tại.
+    //
+    // Cách xử lý: tự thử đăng nhập bằng chính email/mật khẩu vừa nhập rồi
+    // bootstrap profile — `loadOrBootstrapActor` đã xử lý sẵn 404 → bootstrap.
+    if (isAlreadyRegisteredError(error)) {
+      return signInWithExistingAccount(client, cleanEmail, cleanPassword, input.role);
+    }
     throw mapSupabaseError(error);
   }
   if (!data.session) {
@@ -307,9 +356,17 @@ export async function startGoogleSignIn(
     );
   }
 
-  // Tạo redirect URL từ app scheme: careonroad://auth/callback
-  // Lưu ý: createURL trả về URL đầy đủ kèm path; truyền thẳng vào redirectTo.
-  const redirectUrl = createURL('auth/callback');
+  // Redirect URL canonical, KHÔNG dùng `createURL('auth/callback')`.
+  //
+  // Lý do: `createURL()` nhúng `hostUri` của dev server vào URL khi chạy dev
+  // client → `careonroad://<ip>:<port>auth/callback` (thiếu dấu `/`, là URL
+  // KHÔNG hợp lệ) và URL còn đổi theo IP Wi-Fi, không khai báo trước được
+  // trong Supabase Dashboard → Redirect URLs.
+  //
+  // URL canonical `careonroad://auth/callback` khớp chính xác với intent
+  // filter Android đã khai báo (`scheme=careonroad`, `host=auth`,
+  // `pathPrefix=/callback`) nên hệ điều hành mở app ổn định ở mọi môi trường.
+  const redirectUrl = CANONICAL_OAUTH_REDIRECT_URL;
 
   // Lưu desiredRole vào AsyncStorage để deep-link handler đọc sau khi OAuth
   // redirect về app. Không encode vào redirectTo vì Supabase OAuth chỉ chấp
@@ -374,8 +431,10 @@ export async function completeGoogleSignIn(
 
   // Supabase PKCE: detect code trong URL và đổi lấy session.
   // Vì `detectSessionInUrl=false` (xem supabase-client.ts), ta exchange thủ công.
-  const url = new URL(callbackUrl);
-  const code = url.searchParams.get('code');
+  //
+  // Parse thủ công thay vì `new URL()`: deep-link native từ dev client có thể
+  // là URL không hợp lệ (`new URL()` throw → mất luôn flow OAuth).
+  const code = extractOAuthCode(callbackUrl);
   let session: Session | null = null;
 
   if (code) {

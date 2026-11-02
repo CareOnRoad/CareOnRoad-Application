@@ -156,6 +156,8 @@ export type AdminRequestDetail = z.infer<typeof adminRequestDetailSchema>;
 export type AdminRequestTimelineItem = z.infer<typeof adminRequestTimelineItemSchema>;
 export type AdminRequestMedia = z.infer<typeof adminRequestMediaSchema>;
 export type AdminRequestNote = z.infer<typeof adminRequestNoteSchema>;
+export type AdminRequestQuote = z.infer<typeof adminRequestQuoteSchema>;
+export type AdminRequestAssignment = z.infer<typeof adminRequestAssignmentSchema>;
 
 /** `GET /api/v1/admin/service-requests` query filters. */
 export const adminRequestListQuerySchema = z.object({
@@ -182,4 +184,38 @@ export const adminRequestNoteMutationSchema = z
     reason: adminReasonValueSchema,
     note: z.string().trim().min(1).max(2000)
   })
+  .strict();
+
+/**
+ * `POST /api/v1/admin/service-requests/[requestId]/repair-cancellation` body
+ * (`cancellationRepairInput` in
+ * `apps/api/src/features/admin/admin-service-request.service.ts:41`).
+ *
+ * `dry_run` defaults to `true`: the backend only performs the repair when it
+ * is explicitly set to `false`, so the frontend must offer a dry run first.
+ */
+export const adminRequestCancellationRepairSchema = z
+  .object({
+    reason: adminReasonValueSchema,
+    assignment_id: z.string().uuid(),
+    dry_run: z.boolean().default(true)
+  })
+  .strict();
+
+/**
+ * `POST /api/v1/admin/service-requests/[requestId]/repair-reservation` body
+ * (`reservationRepairInput`, service line 42).
+ */
+export const adminRequestReservationRepairSchema = adminRequestCancellationRepairSchema
+  .extend({
+    estimated_duration_minutes: z.number().int().min(15).max(480)
+  })
+  .strict();
+
+/**
+ * `POST /api/v1/admin/service-requests/[requestId]/dispatch/cancel` and
+ * `.../dispatch/retry` body.
+ */
+export const adminRequestDispatchCommandSchema = z
+  .object({ reason: adminReasonValueSchema })
   .strict();

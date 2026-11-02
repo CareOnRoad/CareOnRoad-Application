@@ -95,6 +95,15 @@ apps/mobile/
 | POST | `/api/v1/assignments/{id}/recover` | `lib/mechanic-jobs-service.ts` |
 | POST | `/api/v1/service-requests/{id}/quotes` | `lib/mechanic-quotes-service.ts` |
 
+### Plan subscriptions (rider)
+| Method | Endpoint | File wrapper |
+|---|---|---|
+| GET | `/api/v1/plans` | `lib/subscriptions-service.ts` |
+| GET | `/api/v1/subscription` | `lib/subscriptions-service.ts` |
+| POST | `/api/v1/subscription/orders` | `lib/subscriptions-service.ts` |
+| GET | `/api/v1/subscription/orders/{id}` | `lib/subscriptions-service.ts` |
+| POST | `/api/v1/subscription/orders/{id}/cancel` | `lib/subscriptions-service.ts` |
+
 ### Notifications (cả 2 role)
 | Method | Endpoint | File wrapper |
 |---|---|---|
@@ -199,6 +208,71 @@ apps/mobile/
 - Optimistic placeholder quote trong context `latestQuoteMap`; rollback khi BE
   fail (đặc biệt 409 - state machine không cho phép).
 - Form UI ở `components/mechanic/forms/quote-form.tsx` + `diagnosis-form.tsx`.
+
+### 4.10. Gói của tôi (plan subscription)
+- `apps/mobile/src/lib/subscriptions-service.ts` export `getPlanCatalog()`,
+  `getMySubscription()`, `createSubscriptionOrder()`, `getSubscriptionOrder()`,
+  `cancelSubscriptionOrder()` cùng helper `planLabel`, `planPriceLabel`,
+  `planStatusLabel`, `formatPlanExpiry`.
+- Màn hình `app/rider/plans/index.tsx` (catalog 3 gói + modal xác nhận) và
+  `app/rider/plans/[orderId].tsx` (QR payOS + polling 4s, timeout 5 phút).
+- `PlanConfirmModal` bắt buộc tick "không được hoàn tiền" trước khi gọi
+  `createSubscriptionOrder` (BE cũng từ chối khi thiếu xác nhận).
+- Gói hiện tại đọc từ `useAuth().user.planCode` / `planExpiresAt`;
+  `refreshActor()` được gọi sau khi thanh toán thành công để cập nhật badge.
+- **Đồng bộ gói giữa các màn hình**: `useAuth().user.planCode` là snapshot
+  client, nên có thể lệch với backend (gói đổi do admin cấp, thanh toán payOS
+  hoàn tất ở trình duyệt, webhook tới muộn). Vì vậy:
+   - `AuthProvider` tự gọi lại `GET /api/v1/auth/me` mỗi lần app quay lại
+     foreground (`AppState` → `active`), giới hạn 1 lần / 5 giây.
+   - Tab Home và tab Profile gọi `refreshActor()` trong `useFocusEffect` để
+     badge gói luôn khớp backend khi vào tab.
+   - `refreshActor` đọc gói từ `GET /api/v1/subscription` (endpoint có
+     lazy-sync payOS, nên phản ánh đơn vừa trả tiền dù webhook chưa tới
+     backend) và chỉ fallback về `plan_code` của actor. Nguồn từ
+     `/auth/me` là DB snapshot nên không tự thấy gói mới.
+   - `refreshActor` dùng `userEmailRef` (ref) chứ không phụ thuộc `user` —
+     nếu phụ thuộc `user` thì mỗi lần `setUser` sẽ tạo callback mới và
+     `useFocusEffect` chạy lại vô hạn. `setUser` cũng so sánh trước/sau để
+     không re-render khi không có gì đổi.
+  Màn "Gói của tôi" (`plans/index.tsx`) không dùng cache này — nó đọc
+  `GET /api/v1/subscription` nên luôn mới.
+- **Đồng bộ gói giữa các màn hình**: `useAuth().user.planCode` là snapshot
+  client, nên có thể lệch với backend (gói đổi do admin cấp, thanh toán payOS
+  hoàn tất ở trình duyệt, webhook tới muộn). Vì vậy:
+   - `AuthProvider` tự gọi lại `GET /api/v1/auth/me` mỗi lần app quay lại
+     foreground (`AppState` → `active`), giới hạn 1 lần / 5 giây.
+   - Tab Home và tab Profile gọi `refreshActor()` trong `useFocusEffect` để
+     badge gói luôn khớp backend khi vào tab.
+   - `refreshActor` dùng `userEmailRef` (ref) chứ không phụ thuộc `user` —
+     nếu phụ thuộc `user` thì mỗi lần `setUser` sẽ tạo callback mới và
+     `useFocusEffect` chạy lại vô hạn. `setUser` cũng so sánh trước/sau để
+     không re-render khi không có gì đổi.
+  Màn "Gói của tôi" (`plans/index.tsx`) không dùng cache này — nó đọc
+  `GET /api/v1/subscription` nên luôn mới.
+- Lỗi 409 `downgrade_blocked` hiển thị bằng `Banner` thân thiện, không crash.
+- Route đăng ký trong `app/rider/_layout.tsx`: `plans/index`, `plans/[orderId]`.
+- Typed routes: sau khi thêm/trừ file route, chạy
+  `node scripts/regen-typed-routes.cjs` trong `apps/mobile` để
+  `.expo/types/router.d.ts` khớp (file này bị git-ignore).
+- **QR thanh toán**: payOS trả `qr_code` là payload EMVCo/VietQR dạng TEXT
+  (vd `00020101021238570010A000000727012700069704220113VQRQANGTG...`),
+  KHÔNG phải URL ảnh. `<Image source={{uri}}>` sẽ fail im lặng → trắng.
+  Dùng `src/components/ui/qr-code.tsx` (`toqr` + `react-native-svg`), helper
+  thuần ở `src/lib/qr-payload.ts`. Không dùng global `TextEncoder` (Hermes
+  không bảo đảm) — dùng `utf8Bytes`. `toqr` là dependency trực tiếp của mobile.
+  - QR gói: `app/rider/plans/[orderId].tsx`; QR sửa chữa: `app/rider/payments/[quoteId].tsx`.
+  - Nếu `canRenderQrCode(value)` false → hiện banner fallback, không render `<Image>`.
+
+### 4.11. ActionButton — layout contract (đã sửa bug chữ biến mất)
+- `className` của caller phải áp lên `<Pressable>` GỐC, KHÔNG bọc View con.
+  `flex-1` trên View con trong container cha (column) → `flexBasis:0%` → chiều cao
+  content = 0 → chữ bị clip → chỉ còn "pill" màu.
+- Không dùng `inline-flex` (RN không hỗ trợ) → dùng `flex-row` rõ ràng.
+- Không dùng `style={({pressed})=>...}` cùng lúc với `className` (NativeWind
+  ghi đè). Dùng variant `active:` của Tailwind cho feedback cảm ứng.
+- `color` trên `<View>`/`<Pressable>` KHÔNG kế thừa xuống `<Text>` → chuỗi
+  children phải tự mang class màu chữ (`variantTextStyles`).
 
 ## 5. Test trên thiết bị thật (Expo Go)
 

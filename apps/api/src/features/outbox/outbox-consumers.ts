@@ -43,7 +43,8 @@ export const domainOnlyTopics = new Set([
   "admin.user.suspended", "admin.user.reactivated", "admin.user.archived", "admin.device.revoked", "admin.user.role.granted", "admin.user.role.revoked", "admin.user.plan_changed",
   "admin.mechanic.approved", "admin.mechanic.rejected", "admin.mechanic.suspended", "admin.mechanic.banned",
   "admin.mechanic.reactivated", "admin.mechanic.skills_updated", "admin.mechanic.radius_updated", "admin.mechanic.forced_unavailable",
-  "admin.service_request.canceled", "admin.service_request.manual_escalated", "admin.service_request.note_added", "admin.service_request.cancellation_repaired", "admin.service_request.reservation_repaired"
+  "admin.service_request.canceled", "admin.service_request.manual_escalated", "admin.service_request.note_added", "admin.service_request.cancellation_repaired", "admin.service_request.reservation_repaired",
+  "subscription.order.created", "subscription.order.pending", "subscription.order.failed", "subscription.order.canceled", "subscription.activated"
 ]);
 
 export async function deliverOutboxEvent(

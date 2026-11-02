@@ -187,6 +187,24 @@ export function payosCancelUrl(environment: PayosEnvironment = process.env): str
   return requireEnv(environment, "PAYOS_CANCEL_URL");
 }
 
+/**
+ * URL quay lại sau khi thanh toán gói (plan subscription).
+ *
+ * Tuỳ chọn: nếu không set thì fallback về `PAYOS_RETURN_URL`/`PAYOS_CANCEL_URL`
+ * của luồng sửa chữa, nên không cần cấu hình thêm cho môi trường cũ.
+ */
+export function payosSubscriptionReturnUrl(environment: PayosEnvironment = process.env): string {
+  const value = environment.PAYOS_SUBSCRIPTION_RETURN_URL?.trim();
+  if (value) return value;
+  return requireEnv(environment, "PAYOS_RETURN_URL");
+}
+
+export function payosSubscriptionCancelUrl(environment: PayosEnvironment = process.env): string {
+  const value = environment.PAYOS_SUBSCRIPTION_CANCEL_URL?.trim();
+  if (value) return value;
+  return requireEnv(environment, "PAYOS_CANCEL_URL");
+}
+
 function requireEnv(environment: PayosEnvironment, name: string): string {
   const value = environment[name]?.trim();
   if (!value) {

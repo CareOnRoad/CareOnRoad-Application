@@ -1,6 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import { AdminSignOutButton } from "@/app/admin/forbidden/sign-out-button";
+import { AdminNav } from "@/components/admin/admin-nav";
+import type { AdminNavBadge } from "@/lib/admin/nav";
 
 /**
  * Admin dashboard layout chrome — theo figma Section `256:15205`.
@@ -11,24 +13,19 @@ import { AdminSignOutButton } from "@/app/admin/forbidden/sign-out-button";
  *  - Main (1136-1184): nội dung riêng từng trang
  *
  * Component này render aside + header và slot nội dung vào Main.
+ *
+ * The navigation itself lives in `@/lib/admin/nav` — a single source of
+ * truth for the 13 tabs. A page never defines its own menu, so a tab cannot
+ * disappear from the sidebar just because someone forgot to update a list.
  */
-
-interface NavItem {
-  label: string;
-  href: string;
-  badge?: { text: string; tone?: "neutral" | "danger" };
-  active?: boolean;
-}
 
 interface AdminLayoutProps {
   children: ReactNode;
-  active?: string;
-  navItems?: NavItem[];
+  /** Optional badge overrides, keyed by nav href. */
+  badges?: Record<string, AdminNavBadge>;
   crumb?: string[];
   userName?: string;
 }
-
-const defaultNav: NavItem[] = [{ label: "Tổng quan", href: "/admin/dashboard" }];
 
 const ink: CSSProperties = { color: "#162130" };
 const inkSubtle: CSSProperties = { color: "#3d4d63" };
@@ -47,13 +44,10 @@ function initialsOf(userName: string) {
 
 export function AdminLayout({
   children,
-  active,
-  navItems,
+  badges,
   crumb = [],
-  userName = "Quản trị viên",
+  userName = "Quản trị viên"
 }: AdminLayoutProps) {
-  const items = navItems ?? defaultNav;
-
   return (
     <div
       className="flex min-h-screen w-full"
@@ -61,7 +55,7 @@ export function AdminLayout({
     >
       {/* ===== Aside (Sidebar) ===== */}
       <aside
-        className="flex w-[256px] shrink-0 flex-col"
+        className="flex w-[256px] shrink-0 flex-col overflow-y-auto"
         style={{
           backgroundColor: "#f3f5f8",
           borderRight: "1px solid #e5e9ef",
@@ -89,51 +83,7 @@ export function AdminLayout({
           </div>
         </div>
 
-        <nav
-          className="flex flex-col gap-1 px-3"
-          aria-label="Điều hành"
-        >
-          <span
-            className="px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wider"
-            style={inkSubtle}
-          >
-            Phân hệ điều hành
-          </span>
-          {items.map((item) => {
-            const isActive =
-              item.active ?? (active ? item.href === active : false);
-            return (
-              <a
-                key={item.href}
-                href={item.href}
-                className="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors"
-                style={
-                  isActive
-                    ? { backgroundColor: "#162130", color: "#fff" }
-                    : { color: "#3d4d63" }
-                }
-              >
-                <span className="font-medium" style={isActive ? { color: "#fff" } : inkSubtle}>
-                  {item.label}
-                </span>
-                {item.badge ? (
-                  <span
-                    className="rounded-md px-2 py-0.5 text-[11px] font-semibold"
-                    style={
-                      item.badge.tone === "danger"
-                        ? { backgroundColor: "#93000a", color: "#fff" }
-                        : isActive
-                          ? { backgroundColor: "rgba(255,255,255,0.15)", color: "#fff" }
-                          : { backgroundColor: "#e5e9ef", color: "#162130" }
-                    }
-                  >
-                    {item.badge.text}
-                  </span>
-                ) : null}
-              </a>
-            );
-          })}
-        </nav>
+        <AdminNav badges={badges} />
 
         {/* No network-capacity card: `/api/v1` exposes no online-mechanic
             aggregate, so any "42/50 on duty" figure here would be invented. */}
@@ -146,7 +96,7 @@ export function AdminLayout({
           className="flex h-16 items-center justify-between gap-4 px-8"
           style={{
             backgroundColor: "#fff",
-            borderBottom: "1px solid #e5e9ef",
+            borderBottom: "1px solid #e5e9ef"
           }}
         >
           <div className="flex flex-col leading-tight">
@@ -154,7 +104,9 @@ export function AdminLayout({
               {crumb[crumb.length - 1] ?? "Tổng quan Điều hành"}
             </span>
             <span className="text-xs" style={accentGreen}>
-              {crumb.length > 1 ? crumb.join(" / ") : "Trực tiếp — Dữ liệu từ API vận hành"}
+              {crumb.length > 1
+                ? crumb.join(" / ")
+                : "Trực tiếp — Dữ liệu từ API vận hành"}
             </span>
           </div>
 

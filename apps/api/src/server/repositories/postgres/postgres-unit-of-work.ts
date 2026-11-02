@@ -30,6 +30,7 @@ import { PostgresRequestMediaRepository } from "./request-media.repository";
 import { PostgresReminderRepository } from "./reminder.repository";
 import { PostgresReviewRepository } from "./review.repository";
 import { PostgresServiceRequestRepository } from "./service-request.repository";
+import { PostgresSubscriptionRepository } from "./subscription.repository";
 import { PostgresUserRepository } from "./user.repository";
 
 export class PostgresUnitOfWork implements UnitOfWork {
@@ -70,7 +71,8 @@ export class PostgresUnitOfWork implements UnitOfWork {
           notifications: new PostgresNotificationRepository(transaction),
           notificationDeliveries: new PostgresNotificationDeliveryRepository(transaction),
           chatbotSessions: new PostgresChatbotSessionRepository(transaction),
-          payments: new PostgresPaymentRepository(transaction)
+          payments: new PostgresPaymentRepository(transaction),
+          subscriptions: new PostgresSubscriptionRepository(transaction)
         }),
       this.transactionOptions
     );

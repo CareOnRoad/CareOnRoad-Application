@@ -187,12 +187,12 @@ describe("AdminUserManagementService", () => {
       const vip = await service.changeUserPlan(
         adminIdentity,
         RIDER_USER_ID,
-        { plan_code: "vip", duration: "year", reason },
+        { plan_code: "vip", duration: "month", reason },
         "plan-key-3"
       );
       expect(vip).toMatchObject({
         plan_code: "vip",
-        plan_expires_at: new Date(now.getTime() + 365 * DAY_MS).toISOString()
+        plan_expires_at: new Date(now.getTime() + 30 * DAY_MS).toISOString()
       });
 
       const removed = await service.changeUserPlan(
@@ -262,7 +262,7 @@ describe("AdminUserManagementService", () => {
         service.changeUserPlan(
           adminIdentity,
           RIDER_USER_ID,
-          { plan_code: "vip", duration: "year", reason },
+          { plan_code: "vip", duration: "month", reason },
           "plan-conflict-key"
         )
       ).rejects.toMatchObject({ errorCode: "CONFLICT", status: 409 });
@@ -358,7 +358,8 @@ describe("AdminUserManagementService", () => {
           nextAttemptAt: now,
           createdAt: now
         }
-      ]
+      ],
+      shouldFailOutboxAppend: () => true
     });
     const ids = [
       "55555555-5555-4555-8555-555555555555",
@@ -377,7 +378,7 @@ describe("AdminUserManagementService", () => {
         { reason: "Rollback must preserve the original account state" },
         "rollback-suspend-key"
       )
-    ).rejects.toThrow("OUTBOX_DEDUPE_KEY_EXISTS");
+    ).rejects.toThrow("OUTBOX_WRITE_FAILED");
     const snapshot = unitOfWork.snapshot();
     expect(snapshot.users.find((user) => user.id === RIDER_USER_ID)?.status).toBe(
       "active"
@@ -397,6 +398,10 @@ function createState(
     includeMechanic?: boolean;
     riderStatus?: "active" | "suspended";
     outboxEvents?: InMemoryFoundationState["outboxEvents"];
+    /**
+     * Mô phỏng outbox write failure để kiểm tra transaction rollback.
+     */
+    shouldFailOutboxAppend?: () => boolean;
   } = {}
 ) {
   const users = [
@@ -456,5 +461,9 @@ function createState(
       }
     ],
     outboxEvents: options.outboxEvents ?? []
-  });
+  },
+  {
+    shouldFailOutboxAppend: options.shouldFailOutboxAppend
+  }
+  );
 }

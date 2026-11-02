@@ -71,6 +71,55 @@ describe("payment route handlers", () => {
     });
     expect(response.status).toBe(401);
   });
+
+  it("reconciles both repair payments and plan subscriptions in the worker route", async () => {
+    const handlers = createPaymentRouteHandlers({
+      authenticate: async () => identity,
+      authenticateWorker: () => ({ workerId: "worker" }),
+      paymentService: {
+        ...paymentService(),
+        async reconcilePendingPayments() {
+          return { claimed: 2, succeeded: 1, needs_review: 0, still_pending: 1 };
+        }
+      },
+      subscriptionService: {
+        async reconcilePendingSubscriptions() {
+          return { claimed: 3, succeeded: 2, still_pending: 1, failed: 0 };
+        }
+      }
+    });
+
+    const response = await handlers.reconcilePendingPayments(
+      new Request("http://localhost/api/v1/internal/workers/payments/reconcile", { method: "POST" })
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      claimed: 2,
+      succeeded: 1,
+      needs_review: 0,
+      still_pending: 1,
+      subscriptions_claimed: 3,
+      subscriptions_succeeded: 2,
+      subscriptions_still_pending: 1,
+      subscriptions_failed: 0
+    });
+  });
+
+  it("does not fail the worker route when the subscription service is not configured", async () => {
+    const handlers = createPaymentRouteHandlers({
+      authenticate: async () => identity,
+      authenticateWorker: () => ({ workerId: "worker" }),
+      paymentService: paymentService()
+    });
+
+    const response = await handlers.reconcilePendingPayments(
+      new Request("http://localhost/api/v1/internal/workers/payments/reconcile", { method: "POST" })
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.not.toHaveProperty("subscriptions_claimed");
+  });
 });
 
 function paymentService() {

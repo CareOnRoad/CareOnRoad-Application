@@ -6,7 +6,14 @@ import type {
 } from "../contracts/outbox.repository";
 
 export class InMemoryOutboxRepository implements OutboxRepository {
-  constructor(private readonly events: OutboxEvent[]) {}
+  /**
+   * Hook dùng cho test: nếu trả về `true` thì `append` ném lỗi, mô phỏng
+   * outbox write failure (vd. lỗi DB) để kiểm tra transaction rollback.
+   */
+  constructor(
+    private readonly events: OutboxEvent[],
+    private readonly shouldFailAppend?: (input: AppendOutboxEvent) => boolean
+  ) {}
 
   async findById(id: string) { return this.events.find((row) => row.id === id); }
   async findByIdForUpdate(id: string) { return this.findById(id); }
@@ -29,8 +36,15 @@ export class InMemoryOutboxRepository implements OutboxRepository {
   }
 
   async append(input: AppendOutboxEvent): Promise<OutboxEvent> {
-    if (await this.findByDedupeKey(input.dedupeKey)) {
-      throw new Error("OUTBOX_DEDUPE_KEY_EXISTS");
+    if (this.shouldFailAppend?.(input)) {
+      throw new Error("OUTBOX_WRITE_FAILED");
+    }
+    // Parity với `PostgresOutboxRepository.append`: `on conflict (dedupe_key)
+    // do nothing` — append idempotent theo dedupe key, trả về event đã tồn tại
+    // thay vì ném `OUTBOX_DEDUPE_KEY_EXISTS`.
+    const existing = await this.findByDedupeKey(input.dedupeKey);
+    if (existing) {
+      return existing;
     }
 
     const event: OutboxEvent = {

@@ -24,7 +24,7 @@ if (check) {
   console.log(JSON.stringify({ worker_secret_configured: true, payments_enabled: paymentsEnabled,
     payment_configuration_complete: missing.length === 0 }));
 } else {
-  await Promise.all(["reminders/run", "outbox/run", "dispatch/run", ...(paymentsEnabled ? ["payments/reconcile?limit=1"] : [])]
+  await Promise.all(["reminders/run", "outbox/run", "dispatch/run", ...(paymentsEnabled ? ["payments/reconcile?limit=50"] : [])]
     .map(async (route) => {
       do {
         try {
@@ -33,7 +33,8 @@ if (check) {
           });
           const result = await response.json().catch(() => ({}));
           const counts = Object.fromEntries(Object.entries(result).filter(([key, value]) =>
-            ["claimed", "generated", "queued", "processed", "retried", "deadLettered", "leaseLost", "succeeded", "needs_review", "still_pending", "failed"].includes(key) && Number.isSafeInteger(value)));
+            ["claimed", "generated", "queued", "processed", "retried", "deadLettered", "leaseLost", "succeeded", "needs_review", "still_pending", "failed",
+              "subscriptions_claimed", "subscriptions_succeeded", "subscriptions_still_pending", "subscriptions_failed"].includes(key) && Number.isSafeInteger(value)));
           const ok = response.ok && !(counts.failed > 0 || counts.deadLettered > 0 || counts.retried > 0 || counts.leaseLost > 0);
           if (!ok && !watch) process.exitCode = 1;
           console.log(JSON.stringify({ worker: route.split("?")[0], http_status: response.status, ok, ...counts }));

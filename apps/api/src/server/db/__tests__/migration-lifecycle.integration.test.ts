@@ -103,12 +103,20 @@ describeDatabase("complete migration lifecycle", () => {
   "202606250045_admin_dispatch_configuration.sql",
   "202606250046_dispatch_radius_policy_bounds.sql",
   "202606250047_user_profile_extended.sql",
-  "202606250048_maintenance_presets_and_plans.sql"
+  "202606250048_maintenance_presets_and_plans.sql",
+  "202606250049_plan_subscriptions.sql"
       ]);
 
       const tables = await applicationTables(context.sql, context.schema);
-      expect(tables).toHaveLength(44);
-      expect(tables).toEqual(expect.arrayContaining(["admin_operation_configs", "admin_operation_config_versions"]));
+      expect(tables).toHaveLength(46);
+      expect(tables).toEqual(
+        expect.arrayContaining([
+          "admin_operation_configs",
+          "admin_operation_config_versions",
+          "plan_subscriptions",
+          "plan_subscription_events"
+        ])
+      );
 
       const indexes = await context.sql<{ indexname: string }[]>`
         select indexname

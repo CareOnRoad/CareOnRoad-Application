@@ -1,7 +1,7 @@
 # Schema preflight and database test setup
 
 Run these commands from the repository root. The current API requires migration
-`202606250048_maintenance_presets_and_plans.sql` (047 and 048 must be applied on
+`202606250049_plan_subscriptions.sql` (047, 048, and 049 must be applied on
 hosted/dev before deploy), including schema 035 columns,
 validated constraints, indexes, enabled triggers, `btree_gist`, and the narrowed
 mechanic-role trigger needed for historical rating updates after revoke and the
@@ -16,6 +16,8 @@ bounds. Runtime readiness verifies this constraint shape; require 046 before
 enabling configurable radius policies. Ranking and SQL use nearest-meter values.
 Migration 047 adds the `app_users` profile columns; 048 adds rider plans,
 reminder preset columns, and VIP motorcycle details. Readiness requires 048.
+Migration 049 adds `plan_subscriptions` and `plan_subscription_events` for
+self-service plan purchases; readiness requires 049 as well.
 See [admin recovery](./ADMIN-RECOVERY-OPERATIONS.md) for Batch 10–12 contracts.
 See [profile/lists/admin dispatch](./PROFILE-LISTS-ADMIN-DISPATCH.md) and
 [scheduled visits](./SCHEDULED-FULFILLMENT.md)

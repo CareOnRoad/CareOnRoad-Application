@@ -258,22 +258,44 @@ PAYOS_CLIENT_ID=<client-id-cua-cung-kenh>
 PAYOS_API_KEY=<api-key-cua-cung-kenh>
 PAYOS_CHECKSUM_KEY=<checksum-key-cua-cung-kenh>
 PAYOS_BASE_URL=https://api-merchant.payos.vn
-PAYOS_RETURN_URL=https://YOUR-PUBLIC-HOST/api/v1/internal/health/live
-PAYOS_CANCEL_URL=https://YOUR-PUBLIC-HOST/api/v1/internal/health/live
+# URL trình duyệt quay về sau checkout. KHÔNG trỏ tới endpoint health-check
+# trả JSON — người dùng sẽ thấy một trang trống sau khi thanh toán.
+PAYOS_RETURN_URL=https://YOUR-PUBLIC-HOST/payment/return
+PAYOS_CANCEL_URL=https://YOUR-PUBLIC-HOST/payment/cancel
+# Tuỳ chọn: URL quay lại riêng cho luồng đăng ký gói (mặc định fallback về
+# PAYOS_RETURN_URL / PAYOS_CANCEL_URL nên không bắt buộc cấu hình).
+PAYOS_SUBSCRIPTION_RETURN_URL=https://YOUR-PUBLIC-HOST/payment/return
+PAYOS_SUBSCRIPTION_CANCEL_URL=https://YOUR-PUBLIC-HOST/payment/cancel
 WORKER_API_BASE_URL=http://localhost:3000
 HEALTH_READINESS_TIMEOUT_MS=5000
 ```
 
-Hai URL quay về dùng health route ở trên là lựa chọn **tạm để thử API**:
-trình duyệt sẽ thấy JSON, không phải màn hình thanh toán. Repo chưa có trang
-`/payment/return` hoặc `/payment/cancel`. Khi tích hợp client, thay bằng
-trang/đường dẫn xử lý quay về thực sự có trong ứng dụng; đổi domain mẫu
-không tự tạo trang.
+URL quay về ở trên là **fallback** khi client không gửi deep-link. Khi mua gói
+trên mobile, app gửi kèm `return_url`/`cancel_url` dạng deep-link
+(`careonroad://…` khi build, `exp://…` khi chạy Expo Go) nên payOS đưa
+người dùng thẳng về app; khi đó các biến env ở trên không được dùng.
+
+Nếu payOS từ chối deep-link (chỉ nhận `http`/`https`), backend **tự thử lại
+một lần** với URL fallback từ env — người dùng vẫn thanh toán được, chỉ mất
+khả năng tự động quay về app. Vì vậy nên cấu hình
+`PAYOS_SUBSCRIPTION_RETURN_URL` / `PAYOS_SUBSCRIPTION_CANCEL_URL` trỏ về một
+trang thật (không phải endpoint JSON) để có đường dự phòng.
+
+Nếu backend chạy trong mạng nội bộ (không có public URL), payOS **không gọi
+được** webhook `POST /api/v1/payments/webhooks/payos`. Trong trường hợp đó
+đơn vẫn được kích hoạt nhờ hai đường dự phòng:
+
+1. **Đọc đơn**: `GET /api/v1/subscription/orders/{id}` và
+   `GET /api/v1/subscription` tự hỏi payOS về trạng thái thật (throttle 30s
+   mỗi order code) và kích hoạt gói nếu đã thanh toán.
+2. **Worker**: `POST /api/v1/internal/workers/payments/reconcile` quét các đơn
+   gói `created`/`pending` cũ hơn 2 phút và đồng bộ từ payOS.
 
 | Địa chỉ | Dùng cho | Phải public? |
 | --- | --- | --- |
 | `https://YOUR-PUBLIC-HOST/api/v1/payments/webhooks/payos` | payOS gọi backend để báo giao dịch | Có |
-| `PAYOS_RETURN_URL`, `PAYOS_CANCEL_URL` | Trình duyệt quay về sau checkout | Truy cập được từ thiết bị đang thanh toán |
+| `PAYOS_RETURN_URL`, `PAYOS_CANCEL_URL` | Trình duyệt quay về sau checkout (sửa chữa) | Truy cập được từ thiết bị đang thanh toán |
+| `PAYOS_SUBSCRIPTION_RETURN_URL`, `PAYOS_SUBSCRIPTION_CANCEL_URL` | Trình duyệt quay về sau checkout gói (tuỳ chọn, fallback về 2 biến trên) | Truy cập được từ thiết bị đang thanh toán |
 | `WORKER_API_BASE_URL` | Script gọi các worker route của API | Có thể là localhost nếu worker chạy cùng máy |
 | `PAYOS_BASE_URL` | Backend gọi merchant API của payOS | Giữ endpoint payOS chính thức |
 
@@ -758,6 +780,46 @@ database hiện đã áp dụng đến 034. Chạy lại smoke theo tài liệu 
 khi migration giữ lịch được kiểm tra/áp dụng và API dùng bản build mới nhất.
 DB integration suite vẫn cần project test riêng. Không coi giao dịch cứu hộ
 đã chuyển khoản là bằng chứng giao dịch bảo dưỡng.
+
+### 7.8. Luồng tự đăng ký & thanh toán gói (plan subscription)
+
+Rider tự mua gói `advance` (10.000đ) hoặc `vip` (50.000đ), chu kỳ **30 ngày**,
+không có gói năm. Gói `free` (0đ) là mặc định và không mua được. Cùng kênh
+payOS, cùng webhook `POST /api/v1/payments/webhooks/payos` — webhook tự tra
+cả đơn sửa chữa (`payment_orders`) lẫn đơn gói (`plan_subscriptions`) nhờ
+chung sequence `payment_order_code_seq`, nên không cần đăng ký webhook thứ hai.
+
+Trước khi test, migration `202606250049_plan_subscriptions.sql` phải được áp
+dụng và `pnpm.cmd run preflight:schema` phải báo `release_ready: true` với
+`last_migration: 202606250049`.
+
+| Bước | API | Ghi chú |
+| --- | --- | --- |
+| 1 | `GET /api/v1/plans` | Catalog 3 gói + `non_refundable_notice` |
+| 2 | `GET /api/v1/subscription` | `current_plan`, `plan_expires_at`, `history[]` |
+| 3 | `POST /api/v1/subscription/orders` | Body `{"plan_code":"vip","non_refundable_acknowledged":true}` + `X-Idempotency-Key` mới |
+| 4 | `GET /api/v1/subscription/orders/<orderId>` | Poll tới khi `succeeded` |
+| 5 | `POST /api/v1/subscription/orders/<orderId>/cancel` | Huỷ đơn chưa thanh toán |
+
+Quy tắc nghiệp vụ cần kiểm chứng:
+
+- `non_refundable_acknowledged` phải là `true`, nếu không trả `400 INVALID_INPUT`.
+- Mua gói thấp hơn gói đang hiệu lực → `409 CONFLICT` với
+  `details.reason = "downgrade_blocked"`.
+- Gia hạn/nâng cấp cộng dồn ngày còn dư:
+  `new_expiry = max(current_expiry, now) + 30 ngày`.
+- Khi webhook payOS báo thành công, backend tự cập nhật `app_users.plan_code`
+  và `plan_expires_at`, ghi notification cho rider và audit/outbox
+  `subscription.activated`.
+- Admin cấp/gia hạn gói ghi thêm một dòng `plan_subscriptions` với
+  `source = "admin_grant"` (cùng transaction), nên lịch sử gói thống nhất giữa
+  admin và tự mua.
+- Retry cùng `X-Idempotency-Key` + cùng payload trả lại đúng đơn cũ, không
+  tạo mã payOS mới.
+
+Mobile đã có màn hình `/rider/plans` (catalog + modal xác nhận không hoàn
+tiền) và `/rider/plans/[orderId]` (QR payOS + polling). Nếu chưa tích hợp
+client, kiểm thử luồng này qua API như các bước trên.
 
 ## 8. Firebase push — làm khi cần kiểm chứng thông báo trên thiết bị
 

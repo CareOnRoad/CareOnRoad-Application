@@ -50,6 +50,9 @@ export class PostgresMechanicRepository implements MechanicRepository {
   constructor(private readonly sql: TransactionSql) {}
 
   async createProfile(input: CreateMechanicProfile): Promise<MechanicProfile> {
+    // `user_id` là primary key. Hai bootstrap chạy song song cho cùng user sẽ
+    // vi phạm unique `23505` nếu insert thẳng -> DATABASE_CONFLICT -> 409.
+    // `on conflict do nothing` giữ cho createProfile idempotent.
     await this.sql`
       insert into mechanic_profiles (
         user_id, profile_status, is_available, service_radius_km,
@@ -60,6 +63,7 @@ export class PostgresMechanicRepository implements MechanicRepository {
         ${input.isAvailable ?? false}, ${input.serviceRadiusKm},
         ${input.availabilityUpdatedAt}, ${input.createdAt}, ${input.updatedAt}
       )
+      on conflict (user_id) do nothing
     `;
     await this.replaceSkills(input.userId, input.serviceTypes ?? []);
     const profile = await this.findProfileByUserId(input.userId);

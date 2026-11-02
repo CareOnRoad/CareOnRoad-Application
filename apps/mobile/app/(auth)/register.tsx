@@ -26,6 +26,7 @@ import {
 import { useAuth } from '@/contexts/auth-context';
 import { Banner } from '@/components/ui/banner';
 import type { AuthRole } from '@/lib/auth-types';
+import { isAccountAlreadyRegisteredError } from '@/lib/auth-errors';
 import { cn } from '@/lib/utils';
 
 /**
@@ -52,10 +53,13 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Tài khoản đã tồn tại → hiện nút chuyển sang màn Đăng nhập. */
+  const [accountExists, setAccountExists] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const onSubmit = async () => {
     setError(null);
+    setAccountExists(false);
     setNotice(null);
 
     if (!name.trim()) {
@@ -95,7 +99,17 @@ export default function RegisterScreen() {
         );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Đăng ký thất bại');
+      const message = e instanceof Error ? e.message : 'Đăng ký thất bại';
+      // Tài khoản đã tồn tại: hướng dẫn user sang màn đăng nhập thay vì
+      // để user bị kẹt ở màn đăng ký.
+      if (isAccountAlreadyRegisteredError(e)) {
+        setAccountExists(true);
+        setError(
+          `${message} Nếu bạn đã đăng ký trước đó, hãy dùng màn Đăng nhập với chính email và mật khẩu này.`,
+        );
+      } else {
+        setError(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -161,6 +175,19 @@ export default function RegisterScreen() {
           {error && (
             <View className="mt-5">
               <Banner tone="error" description={error} />
+              {accountExists && (
+                <Link href="/login" asChild>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Đi tới màn đăng nhập"
+                    className="mt-3 items-center justify-center rounded-2xl border border-white/15 bg-white/5 py-3 active:scale-[0.98]"
+                  >
+                    <Text className="text-sm font-semibold text-brand-blue">
+                      Đi tới màn Đăng nhập
+                    </Text>
+                  </Pressable>
+                </Link>
+              )}
             </View>
           )}
 

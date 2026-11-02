@@ -63,6 +63,12 @@ export class PostgresOutboxRepository implements OutboxRepository {
   }
 
   async append(input: AppendOutboxEvent): Promise<OutboxEvent> {
+    // `dedupe_key` là UNIQUE. Khi hai request chạy song song cùng dedupe key
+    // (ví dụ hai lần bootstrap profile cho cùng một subject), request thứ hai
+    // sẽ vi phạm unique `23505` -> DATABASE_CONFLICT -> HTTP 409.
+    //
+    // `on conflict do nothing` biến `append` thành idempotent theo dedupe key:
+    // nếu event đã tồn tại thì trả về chính event đó thay vì ném lỗi.
     const rows = await this.sql<OutboxRow[]>`
       insert into outbox_events (
         id, topic, aggregate_type, aggregate_id, dedupe_key, payload, status,
@@ -78,9 +84,19 @@ export class PostgresOutboxRepository implements OutboxRepository {
         ${input.lastErrorCode ?? null}, ${input.createdAt ?? new Date()},
         ${input.processedAt ?? null}
       )
+      on conflict (dedupe_key) do nothing
       returning *
     `;
-    return mapOutboxRow(rows[0]!);
+    if (rows.length > 0) {
+      return mapOutboxRow(rows[0]!);
+    }
+
+    // Conflict xảy ra: đọc lại event đã tồn tại theo dedupe key.
+    const existing = await this.findByDedupeKey(input.dedupeKey);
+    if (!existing) {
+      throw new Error("OUTBOX_DEDUPE_KEY_EXISTS");
+    }
+    return existing;
   }
 
   async findByDedupeKey(dedupeKey: string): Promise<OutboxEvent | undefined> {
