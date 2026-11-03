@@ -1,5 +1,6 @@
 import { ArrowRightIcon } from "@/components/ui/icons";
 import {
+  BETA_COPY,
   JOIN_BETA_LABEL,
   PLAY_STORE_BETA_URL,
 } from "@/lib/play-store";
@@ -11,6 +12,9 @@ import {
  *  - Bên trái: thông điệp kêu gọi tải app thử nghiệm
  *  - Bên phải: nút "Tham gia thử nghiệm ngay" mở tab mới tới Google Play
  *    closed beta (web đã là landing-only, không còn CTA hotline/yeu-cau).
+ *
+ * Toàn bộ link/nhãn/nội dung đến từ `@/lib/play-store` — sửa 1 nơi là
+ * mọi nút trên landing page cập nhật theo.
  */
 export function ContactQuickLink() {
   return (
@@ -25,14 +29,13 @@ export function ContactQuickLink() {
               className="text-xs font-semibold uppercase md:text-sm"
               style={{ letterSpacing: "0.3em" }}
             >
-              CAREBETA — MỜI BẠN THỬ NGHIỆM
+              {BETA_COPY.eyebrow}
             </span>
             <h3 className="text-xl font-bold md:text-2xl">
-              CareOnRoad đang trong giai đoạn thử nghiệm
+              {BETA_COPY.headline}
             </h3>
             <p className="max-w-2xl text-sm leading-6 text-surface/90 md:text-base">
-              Tải app ngay hôm nay để trở thành một trong những người đầu tiên
-              trải nghiệm dịch vụ cứu hộ và bảo dưỡng xe máy lưu động.
+              {BETA_COPY.description}
             </p>
           </div>
 
@@ -47,7 +50,7 @@ export function ContactQuickLink() {
               <ArrowRightIcon className="h-5 w-5" />
             </a>
             <span className="text-xs text-surface/85">
-              Mở Google Play closed beta
+              {BETA_COPY.storeHint}
             </span>
           </div>
         </div>

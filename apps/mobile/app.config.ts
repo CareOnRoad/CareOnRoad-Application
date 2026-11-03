@@ -33,7 +33,7 @@ const settings = variantSettings[variant] ?? variantSettings.development;
 const config: ExpoConfig = {
   name: settings.name,
   slug: 'careonroad-mobile',
-  version: '1.0.0',
+  version: '1.0.1',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   // URL scheme cho deep-link (vd: careonroad://auth/callback).
@@ -67,7 +67,7 @@ const config: ExpoConfig = {
     // `android/app/build.gradle`. Giá trị dưới đây vẫn cần khớp để Expo Go
     // (chạy JS-only) hoạt động đúng.
     package: BASE_PACKAGE_ID,
-    versionCode: 5,
+    versionCode: 6,
     permissions: [
       'ACCESS_FINE_LOCATION',
       'ACCESS_COARSE_LOCATION',

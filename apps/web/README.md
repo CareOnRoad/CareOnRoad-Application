@@ -36,6 +36,45 @@ cd apps/web; .\node_modules\.bin\tsc.cmd --noEmit   # typecheck
 
 All routes are statically pre-rendered today (`○ Static`).
 
+## Link tải app (tập trung 1 nơi)
+
+Toàn bộ nội dung liên quan tải app trên landing page nằm trong **một file
+duy nhất**: `src/lib/play-store.ts`.
+
+| Export | Ý nghĩa | Dùng ở |
+| ------ | ------- | ------- |
+| `PLAY_STORE_BETA_URL` | URL tải app (mọi CTA) | header, hero, services grid, cta-glass, emergency banner, contact quick link |
+| `JOIN_BETA_LABEL` | Nhãn nút | header, hero, services grid, cta-glass, emergency banner, contact quick link |
+| `JOIN_BETA_LABEL_EMPHASIS` | Nhãn nút kèm `!` | hero (CTA đỏ) |
+| `BETA_COPY` | Eyebrow / tiêu đề / mô tả / ghi chú store | contact quick link, cta-glass, emergency banner |
+
+Đổi link tải app hoặc nhãn → sửa **chỉ file này**, toàn bộ nút trên web cập
+nhật theo. Không hardcode URL/nhãn trong component.
+
+Ghi đè qua env mà không cần sửa code (xem `.env.example`):
+
+```dotenv
+NEXT_PUBLIC_APP_DOWNLOAD_URL=https://...
+NEXT_PUBLIC_APP_DOWNLOAD_LABEL=...
+```
+
+Để trống → dùng giá trị mặc định trong `play-store.ts`. Vì `NEXT_PUBLIC_*`
+được nhúng lúc build, đổi env phải rebuild mới có hiệu lực.
+
+### Deploy trên Vercel
+
+Set 2 biến trên trong **Vercel Dashboard → Project → Settings → Environment
+Variables** (chọn scope `Production`, thêm `Preview` nếu muốn):
+
+| Key | Ví dụ giá trị |
+| --- | --- |
+| `NEXT_PUBLIC_APP_DOWNLOAD_URL` | `https://play.google.com/apps/internaltest/4701123392411738843` |
+| `NEXT_PUBLIC_APP_DOWNLOAD_LABEL` | `Tham gia thử nghiệm ngay` |
+
+Sau khi lưu env **phải Redeploy** (Deployments → ⋮ → Redeploy), vì giá trị đã
+được inline vào `.next/static/chunks/*.js` ngay lúc build — dùng đường dẫn cũ
+`/play-store.ts` trong repo cho tham chiếu.
+
 ## Project layout
 
 ```
@@ -57,6 +96,7 @@ apps/web/src/
   lib/
     mock-data.ts        # Static demo content (Vietnamese)
     api-client.ts       # Async methods that today return mocks
+    play-store.ts       # Nguồn DUY NHẤT cho link/nhãn/nội dung tải app
     cn.ts               # Tiny class merger
   types/index.ts        # Domain types (mirror BE response shapes)
 ```

@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ClockIcon, LocationIcon } from "@/components/ui/icons";
 import {
-  JOIN_BETA_LABEL,
+  JOIN_BETA_LABEL_EMPHASIS,
   PLAY_STORE_BETA_URL,
 } from "@/lib/play-store";
 
@@ -73,7 +73,7 @@ export function Hero() {
             className="inline-flex h-[60px] items-center gap-3 rounded-full px-8 text-base font-bold tracking-wide text-surface transition-transform hover:-translate-y-0.5"
             style={{ backgroundColor: "#fc555f" }}
           >
-            {JOIN_BETA_LABEL}!
+            {JOIN_BETA_LABEL_EMPHASIS}
           </a>
           <Link
             href="/dich-vu/bang-gia"

@@ -14,8 +14,23 @@ Checklist này tóm tắt các bước cần làm **bên ngoài repo** (dashboar
   - `API_BASE_URL` = `https://careonroad.dpdns.org`
   - `NEXT_PUBLIC_SUPABASE_URL` = `https://lwgwprxjyemihlkspgjc.supabase.co`
   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` = `<publishable key>` (xem Supabase Dashboard → Settings → API)
+  - `NEXT_PUBLIC_APP_DOWNLOAD_URL` = `<link tải app>` (để trống → dùng default Google Play closed beta trong `apps/web/src/lib/play-store.ts`)
+  - `NEXT_PUBLIC_APP_DOWNLOAD_LABEL` = `<nút CTA>` (để trống → dùng default "Tham gia thử nghiệm ngay")
 - [ ] **Domain**: gắn custom domain hoặc dùng Vercel subdomain (vd `careonroad-web.vercel.app`).
 - [ ] Trigger first deploy, đợi build xong, copy URL production.
+
+> **Link tải app (landing page):** toàn bộ nút "tải app / tham gia beta" đọc từ
+> `apps/web/src/lib/play-store.ts`. Sửa 2 biến `NEXT_PUBLIC_*` ở trên là **mọi nút trên web
+> cập nhật theo** — không cần sửa code từng chỗ.
+>
+> Lưu ý: `NEXT_PUBLIC_*` được **inline lúc build** (đã kiểm chứng: giá trị nằm trong
+> `.next/static/chunks/*.js`). Nên sau khi đổi env trên Vercel phải **Redeploy**
+> (Deployments → ⋮ → Redeploy, hoặc push commit mới), nếu không web vẫn dùng giá trị cũ.
+> Ngoài ra nên set cho cả `Preview` nếu muốn preview có link giống production.
+>
+> Cách khác (không dùng Vercel): sửa trực tiếp `DEFAULT_DOWNLOAD_URL` /
+> `DEFAULT_DOWNLOAD_LABEL` trong `apps/web/src/lib/play-store.ts` (giá trị mặc định
+> khi env rỗng), rồi commit.
 
 > Nếu chọn **Cloudflare Pages** thay Vercel: cần adapter (`@cloudflare/next-on-pages` hoặc `OpenNext`) do Next 16 không build thẳng ra Workers runtime. Có thể cần thêm dependency — sẽ hỏi trước khi thêm.
 

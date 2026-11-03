@@ -1,5 +1,6 @@
 import { ArrowRightIcon, BoltIcon } from "@/components/ui/icons";
 import {
+  BETA_COPY,
   JOIN_BETA_LABEL,
   PLAY_STORE_BETA_URL,
 } from "@/lib/play-store";
@@ -29,9 +30,7 @@ export function EmergencyBanner() {
                 Xe không khởi động, tai nạn, hoặc sự cố giữa đường?
               </h2>
               <p className="max-w-xl text-surface/85">
-                CareOnRoad đang trong giai đoạn thử nghiệm closed beta. Tải app
-                ngay để trải nghiệm sớm nhất khi hệ thống điều phối chính thức
-                ra mắt.
+                {BETA_COPY.emergencyDescription}
               </p>
             </div>
           </div>
