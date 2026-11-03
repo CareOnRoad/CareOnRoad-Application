@@ -15,7 +15,6 @@
   - [Phần 1 — Đăng ký \& Đăng nhập](#phần-1--đăng-ký--đăng-nhập)
     - [1.1 Tạo tài khoản mới](#11-tạo-tài-khoản-mới)
     - [1.2 Đăng nhập bằng Email / Mật khẩu](#12-đăng-nhập-bằng-email--mật-khẩu)
-    - [1.3 Đăng nhập bằng Google](#13-đăng-nhập-bằng-google)
   - [Phần 2 — Hướng dẫn cho RIDER (Khách hàng)](#phần-2--hướng-dẫn-cho-rider-khách-hàng)
     - [2.1 Trang chủ](#21-trang-chủ)
     - [2.2 Yêu cầu cứu hộ khẩn cấp](#22-yêu-cầu-cứu-hộ-khẩn-cấp)
@@ -48,8 +47,8 @@
     - [Không gửi được vị trí (mechanic)](#không-gửi-được-vị-trí-mechanic)
     - [Quên mật khẩu](#quên-mật-khẩu)
   - [Phụ lục — Trạng thái yêu cầu \& vai trò](#phụ-lục--trạng-thái-yêu-cầu--vai-trò)
-    - [Trạng thái yêu cầu dịch vụ (Rider view)](#trạng-thái-yêu-cầu-dịch-vụ-rider-view)
-    - [Trạng thái assignment (Mechanic view)](#trạng-thái-assignment-mechanic-view)
+    - [Trạng thái yêu cầu dịch vụ (góc nhìn khách hàng)](#trạng-thái-yêu-cầu-dịch-vụ-góc-nhìn-khách-hàng)
+    - [Trạng thái công việc (góc nhìn thợ)](#trạng-thái-công-việc-góc-nhìn-thợ)
 
 ---
 
@@ -82,12 +81,6 @@
 │                                    │
 │  ┌──────────────────────────────┐  │
 │  │       ĐĂNG NHẬP              │  │
-│  └──────────────────────────────┘  │
-│                                    │
-│  ─────── hoặc ───────              │
-│                                    │
-│  ┌──────────────────────────────┐  │
-│  │  G   Tiếp tục với Google     │  │
 │  └──────────────────────────────┘  │
 │                                    │
 │  Chưa có tài khoản? Đăng ký ngay   │
@@ -146,12 +139,6 @@
 1. Nhập email và mật khẩu đã đăng ký.
 2. Nhấn **"Đăng nhập"**.
 3. Nếu tài khoản có 2 role, hệ thống sẽ ưu tiên role đã đăng ký gần nhất.
-
-### 1.3 Đăng nhập bằng Google
-
-1. Nhấn nút **"Tiếp tục với Google"** trên màn hình đăng nhập.
-2. Trình duyệt mở ra → chọn tài khoản Google.
-3. Sau khi xác thực, app tự quay lại và đăng nhập thành công.
 
 ---
 

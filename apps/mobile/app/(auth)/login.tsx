@@ -21,7 +21,6 @@ import {
 
 import { useAuth } from '@/contexts/auth-context';
 import { Banner } from '@/components/ui/banner';
-import { startGoogleSignIn } from '@/lib/auth-service';
 import { cn } from '@/lib/utils';
 
 /**
@@ -31,16 +30,16 @@ import { cn } from '@/lib/utils';
  *  - Nền navy + glassmorphism cards → brand identity cho toàn auth flow.
  *  - Alerts đỏ (Banner tone="error") khi login thất bại.
  *  - Nút primary CTA = brand-blue (#1974f7), không bị mờ đi khi đang submit.
- *  - Production-first: form email/password + Google OAuth (khi BE đã cấu hình).
- *    Nếu BE chưa cấu hình, AuthContext sẽ throw lỗi rõ ràng để user biết.
+ *  - Chỉ đăng nhập bằng email/password. Đăng nhập Google (Supabase OAuth)
+ *    đã được gỡ khỏi giao diện — hạ tầng OAuth vẫn còn trong
+ *    `src/lib/auth-service.ts` nếu cần bật lại.
  */
 export default function LoginScreen() {
-  const { login, isBackendConfigured } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const onSubmit = async () => {
@@ -61,31 +60,6 @@ export default function LoginScreen() {
       setError(e instanceof Error ? e.message : 'Đăng nhập thất bại');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  /**
-   * Đăng nhập bằng Google thông qua Supabase OAuth web flow.
-   *
-   * Mở browser native để user chọn tài khoản Google → Supabase redirect
-   * về app qua deep link `careonroad://auth/callback`. AuthContext subscribe
-   * `onAuthStateChange` sẽ tự nhận diện session mới và cập nhật UI.
-   */
-  const onGoogleSignIn = async () => {
-    setError(null);
-    setGoogleSubmitting(true);
-    try {
-      await startGoogleSignIn();
-      // Session sẽ đến qua deep-link + onAuthStateChange. Không navigate ngay
-      // để tránh race condition - AuthContext sẽ tự điều hướng khi authenticated.
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Không thể mở trình duyệt để đăng nhập Google',
-      );
-    } finally {
-      setGoogleSubmitting(false);
     }
   };
 
@@ -185,47 +159,6 @@ export default function LoginScreen() {
                 <Text className="text-base font-semibold text-white">Đăng nhập</Text>
               )}
             </Pressable>
-
-            {/* Divider */}
-            <View className="my-2 flex-row items-center gap-3">
-              <View className="h-px flex-1 bg-white/15" />
-              <Text className="text-xs uppercase tracking-wider text-white/40">
-                hoặc
-              </Text>
-              <View className="h-px flex-1 bg-white/15" />
-            </View>
-
-            {/* Google sign-in - chỉ hiện khi backend đã cấu hình Supabase */}
-            {isBackendConfigured && (
-              <Pressable
-                onPress={onGoogleSignIn}
-                disabled={googleSubmitting || submitting}
-                accessibilityRole="button"
-                accessibilityLabel="Đăng nhập bằng Google"
-                className={cn(
-                  'flex-row items-center justify-center gap-3 rounded-2xl border border-white/15 bg-white py-4 active:scale-[0.98]',
-                  (googleSubmitting || submitting) && 'opacity-70',
-                )}
-              >
-                {googleSubmitting ? (
-                  <ActivityIndicator color="#1f2937" />
-                ) : (
-                  <>
-                    {/* Google "G" logo SVG inline */}
-                    <View className="size-5 items-center justify-center">
-                      <Text
-                        style={{ fontSize: 18, fontWeight: '700', color: '#4285F4' }}
-                      >
-                        G
-                      </Text>
-                    </View>
-                    <Text className="text-base font-semibold text-slate-900">
-                      Tiếp tục với Google
-                    </Text>
-                  </>
-                )}
-              </Pressable>
-            )}
           </View>
 
           {/* Register link */}
