@@ -19,7 +19,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Linking } from 'react-native';
 
 import { ApiError, apiGet, apiPatch, apiPost, setAccessTokenProvider } from '@/lib/api';
-import { mapActorError, mapSupabaseError } from '@/lib/auth-errors';
+import {
+  EMAIL_EXISTS_NOT_CONFIRMED_MESSAGE,
+  EMAIL_EXISTS_WRONG_PASSWORD_MESSAGE,
+  isEmailNotConfirmedError,
+  isInvalidCredentialsError,
+  mapActorError,
+  mapSupabaseError,
+} from '@/lib/auth-errors';
 import { CANONICAL_OAUTH_REDIRECT_URL, extractOAuthCode } from '@/lib/deep-link';
 import { getSupabase } from '@/lib/supabase-client';
 
@@ -215,6 +222,11 @@ function isAlreadyRegisteredError(error: {
  *
  * Dùng khi `signUp` báo "email đã được sử dụng" nhưng hồ sơ BE có thể chưa
  * tồn tại (đăng ký trước đó thất bại ở bước bootstrap do lỗi mạng).
+ *
+ * ⚠️ Khi đăng nhập cũng thất bại, KHÔNG được dùng chung message "Email hoặc
+ * mật khẩu không đúng" — ở màn đăng ký, email đã được Supabase xác nhận là
+ * tồn tại, nên sai chỉ có thể là mật khẩu. Báo chung khiến user tưởng mình
+ * gõ sai email và thử đăng ký lại mãi (vẫn cùng lỗi).
  */
 async function signInWithExistingAccount(
   client: NonNullable<ReturnType<typeof getSupabase>>,
@@ -224,7 +236,14 @@ async function signInWithExistingAccount(
 ): Promise<SignUpResult> {
   const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error || !data.session) {
-    // Đăng nhập cũng thất bại -> ném lỗi gốc để user biết chính xác nguyên nhân.
+    // Phân biệt 3 trường hợp để đưa ra hành động đúng cho user.
+    if (isInvalidCredentialsError(error)) {
+      throw new Error(EMAIL_EXISTS_WRONG_PASSWORD_MESSAGE);
+    }
+    if (isEmailNotConfirmedError(error)) {
+      throw new Error(EMAIL_EXISTS_NOT_CONFIRMED_MESSAGE);
+    }
+    // Lỗi mạng / rate limit / lỗi không lường trước → giữ nguyên message gốc.
     throw mapSupabaseError(error);
   }
 

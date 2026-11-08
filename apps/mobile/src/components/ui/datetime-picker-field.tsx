@@ -1,11 +1,17 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import DateTimePicker, {
+  DateTimePickerAndroid,
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { Calendar, Clock, X } from 'lucide-react-native';
 
 import { cn } from '@/lib/utils';
+import {
+  mergeSelectedTime,
+  resolveAndroidPickerMode,
+  startOfDay,
+} from '@/lib/datetime-picker';
 import {
   formatDdMmYyyy,
   formatDdMmYyyyHHmm,
@@ -48,9 +54,20 @@ const BORDER_ERROR = 'border-destructive';
  * Pressable field mở DateTimePicker native khi tap.
  *
  * - iOS: hiển thị inline modal (compact) hoặc spinner tuỳ `display`.
- * - Android: mặc định dùng `DateTimePickerAndroid.open()` để mở dialog native.
+ * - Android: dùng imperative API `DateTimePickerAndroid.open()` để mở
+ *   dialog native (Android KHÔNG hỗ trợ `mode='datetime'` → mode 'datetime'
+ *   được tách thành 2 bước: chọn ngày rồi chọn giờ).
  *
  * Component chỉ thuần wrapper, mọi logic state nằm ở parent (controlled).
+ *
+ * LƯU Ý (rất quan trọng — xem AGENTS.md 4.11):
+ * `className` (kể cả variant `active:`) PHẢI nằm trên `<Pressable>` GỐC.
+ * Nếu đặt class có pseudo-class (`active:`/`hover:`/`focus:`) lên một
+ * `<View>` con, NativeWind sẽ tự nâng `<View>` đó thành `Pressable`
+ * (react-native-css-interop `native-interop.ts` → `UpgradeState.SHOULD_UPGRADE`).
+ * `Pressable` sâu hơn sẽ cướm responder của `Pressable` cha trong quá trình
+ * `onStartShouldSetResponder` negotiation → `onPress` của cha không bao giờ
+ * chạy → "bấm vào không hiện modal".
  */
 export function DateTimePickerField({
   mode,
@@ -64,11 +81,6 @@ export function DateTimePickerField({
   accessibilityLabel,
   minuteInterval = 1,
 }: CommonProps) {
-  const [androidPickerOpen, setAndroidPickerOpen] = useState(false);
-  const [androidStage, setAndroidStage] = useState<'date' | 'time'>(
-    mode === 'time' ? 'time' : 'date',
-  );
-  const [androidTemp, setAndroidTemp] = useState<Date | null>(value ?? null);
   const [iosModalOpen, setIosModalOpen] = useState(false);
 
   const displayValue = useMemo(() => {
@@ -86,16 +98,6 @@ export function DateTimePickerField({
       ? Clock
       : Calendar;
 
-  const open = useCallback(() => {
-    if (Platform.OS === 'android') {
-      setAndroidTemp(value ?? new Date());
-      setAndroidStage(mode === 'time' ? 'time' : 'date');
-      setAndroidPickerOpen(true);
-    } else {
-      setIosModalOpen(true);
-    }
-  }, [mode, value]);
-
   const handleIosChange = useCallback(
     (_event: DateTimePickerEvent, selected?: Date) => {
       if (!selected) return;
@@ -104,29 +106,65 @@ export function DateTimePickerField({
     [onChange],
   );
 
-  const handleAndroidChange = useCallback(
-    (event: DateTimePickerEvent, selected?: Date) => {
-      if (event.type === 'dismissed' || !selected) {
-        setAndroidPickerOpen(false);
-        return;
-      }
-      if (mode === 'datetime') {
-        if (androidStage === 'date') {
-          setAndroidTemp(selected);
-          setAndroidStage('time');
-          // Reopen native picker for time stage
-          setTimeout(() => setAndroidPickerOpen(true), 50);
+  /**
+   * Android imperative API.
+   *
+   * - mode 'date'  → mở dialog chọn ngày.
+   * - mode 'time'  → mở dialog chọn giờ.
+   * - mode 'datetime' → mở dialog chọn ngày trước; khi user chốt ngày thì
+   *   mở tiếp dialog chọn giờ với ngày vừa chọn làm mốc.
+   *
+   * Dùng `onValueChange` / `onDismiss` (không dùng `onChange` vì `onChange`
+   * đã bị thư viện đánh dấu deprecated).
+   */
+  const openAndroid = useCallback(() => {
+    const androidMode = resolveAndroidPickerMode(mode);
+
+    if (androidMode === 'time') {
+      DateTimePickerAndroid.open({
+        value: value ?? new Date(),
+        mode: 'time',
+        is24Hour: true,
+        minuteInterval,
+        onValueChange: (_event, selected) => onChange(selected),
+      });
+      return;
+    }
+
+    DateTimePickerAndroid.open({
+      value: value ?? new Date(),
+      mode: 'date',
+      minimumDate,
+      maximumDate,
+      onValueChange: (_event, selected) => {
+        const pickedDay = startOfDay(selected);
+        if (mode === 'datetime') {
+          // Bước 2: chọn giờ, giữ nguyên ngày vừa chọn làm mốc.
+          DateTimePickerAndroid.open({
+            value: pickedDay,
+            mode: 'time',
+            is24Hour: true,
+            minuteInterval,
+            onValueChange: (_timeEvent, timeSelected) => {
+              onChange(mergeSelectedTime(pickedDay, timeSelected));
+            },
+          });
           return;
         }
-        onChange(selected);
-        setAndroidPickerOpen(false);
-        return;
-      }
-      onChange(selected);
-      setAndroidPickerOpen(false);
-    },
-    [androidStage, mode, onChange],
-  );
+        onChange(pickedDay);
+      },
+    });
+  }, [mode, value, minimumDate, maximumDate, minuteInterval, onChange]);
+
+  const open = useCallback(() => {
+    if (Platform.OS === 'android') {
+      openAndroid();
+      return;
+    }
+    if (Platform.OS === 'ios') {
+      setIosModalOpen(true);
+    }
+  }, [openAndroid]);
 
   return (
     <>
@@ -135,41 +173,23 @@ export function DateTimePickerField({
         accessibilityLabel={accessibilityLabel ?? placeholder}
         onPress={open}
         hitSlop={8}
-        // Style phải nằm TRỰC TIẾP trên Pressable để hitbox khớp với vùng
-        // nhìn thấy. Nếu chỉ để style ở child <View>, với New Architecture
-        // (Fabric) trên Android, Pressable có thể nhận bounds = 0×0 và
-        // nuốt onPress — đó chính là bug "bấm vào không hiện modal".
-        style={({ pressed }) => [
-          { transform: [{ scale: pressed ? 0.99 : 1 }] },
-        ]}
+        // `className` (kèm `active:`) phải nằm TRỰC TIẾP trên Pressable gốc.
+        // Không bọc View con mang class có pseudo-class, nếu không NativeWind
+        // sẽ nâng View con thành Pressable và cướm responder (mất onPress).
+        className={cn(BUTTON_CLASS, error ? BORDER_ERROR : BORDER_NORMAL)}
       >
-        <View className={cn(BUTTON_CLASS, error ? BORDER_ERROR : BORDER_NORMAL)}>
-          <View className="flex-row items-center gap-2.5">
-            <Icon size={18} color="#64748b" />
-            <Text
-              className={cn(
-                'text-sm',
-                displayValue ? 'text-foreground' : 'text-muted-foreground',
-              )}
-            >
-              {displayValue || placeholder || 'Chọn...'}
-            </Text>
-          </View>
+        <View className="flex-row items-center gap-2.5">
+          <Icon size={18} color="#64748b" />
+          <Text
+            className={cn(
+              'text-sm',
+              displayValue ? 'text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            {displayValue || placeholder || 'Chọn...'}
+          </Text>
         </View>
       </Pressable>
-
-      {/* Android inline picker (managed manually because Android uses native dialog) */}
-      {Platform.OS === 'android' && androidPickerOpen && (
-        <DateTimePicker
-          mode={androidStage}
-          value={androidTemp ?? value ?? new Date()}
-          onChange={handleAndroidChange}
-          minimumDate={minimumDate}
-          maximumDate={maximumDate}
-          minuteInterval={minuteInterval}
-          is24Hour
-        />
-      )}
 
       {/* iOS modal picker */}
       {Platform.OS === 'ios' && (
@@ -197,9 +217,7 @@ export function DateTimePickerField({
                   accessibilityRole="button"
                   accessibilityLabel="Đóng"
                   onPress={() => setIosModalOpen(false)}
-                  style={({ pressed }) => [
-                    { transform: [{ scale: pressed ? 0.95 : 1 }] },
-                  ]}
+                  className="rounded-full active:scale-95"
                 >
                   <View className="rounded-full bg-secondary p-1.5">
                     <X size={18} color="#16202f" />

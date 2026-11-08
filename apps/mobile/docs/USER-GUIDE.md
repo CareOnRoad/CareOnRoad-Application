@@ -46,6 +46,8 @@
     - [Không nhận được thông báo](#không-nhận-được-thông-báo)
     - [Không gửi được vị trí (mechanic)](#không-gửi-được-vị-trí-mechanic)
     - [Quên mật khẩu](#quên-mật-khẩu)
+    - [Báo lỗi "Email này đã được sử dụng với mật khẩu khác" khi đăng ký](#báo-lỗi-email-này-đã-được-sử-dụng-với-mật-khẩu-khác-khi-đăng-ký)
+    - [Báo lỗi "Email này đã được đăng ký nhưng chưa xác nhận"](#báo-lỗi-email-này-đã-được-đăng-ký-nhưng-chưa-xác-nhận)
   - [Phụ lục — Trạng thái yêu cầu \& vai trò](#phụ-lục--trạng-thái-yêu-cầu--vai-trò)
     - [Trạng thái yêu cầu dịch vụ (góc nhìn khách hàng)](#trạng-thái-yêu-cầu-dịch-vụ-góc-nhìn-khách-hàng)
     - [Trạng thái công việc (góc nhìn thợ)](#trạng-thái-công-việc-góc-nhìn-thợ)
@@ -1219,6 +1221,28 @@ A: Kiểm tra:
 ### Quên mật khẩu
 
 Hiện tại chưa có flow "Quên mật khẩu" trong app. Vui lòng liên hệ hỗ trợ qua email.
+
+### Báo lỗi "Email này đã được sử dụng với mật khẩu khác" khi đăng ký
+
+**Nguyên nhân**: email này đã có tài khoản trong hệ thống từ trước, nhưng bạn đang
+nhập mật khẩu khác với mật khẩu đã đặt. Supabase từ chối tạo tài khoản trùng
+email nên app báo lỗi này.
+
+**Cách xử lý**:
+1. Bấm nút **"Đi tới màn Đăng nhập"** ngay dưới thông báo lỗi.
+2. Đăng nhập bằng mật khẩu đã đặt cho email này.
+3. Nếu không nhớ mật khẩu → liên hệ hỗ trợ qua email để được đặt lại.
+
+> Lưu ý: trước đây màn này báo chung "Email hoặc mật khẩu không đúng" dù email
+> hoàn toàn hợp lệ, khiến nhiều người dùng tưởng mình gõ sai và thử đăng ký
+> lại mãi với cùng một lỗi. Thông báo hiện tại đã nói rõ nguyên nhân.
+
+### Báo lỗi "Email này đã được đăng ký nhưng chưa xác nhận"
+
+**Nguyên nhân**: tài khoản đã được tạo nhưng email xác nhận chưa được bấm.
+
+**Cách xử lý**: mở hộp thư (kể cả thư rác/spam) và bấm link xác nhận, sau đó
+đăng nhập lại. Nếu không thấy email, liên hệ hỗ trợ để gửi lại.
 
 ---
 

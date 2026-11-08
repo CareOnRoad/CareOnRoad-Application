@@ -17,6 +17,38 @@ export const AUTH_NETWORK_MESSAGE = 'Không thể kết nối tới máy chủ x
 export const API_NETWORK_MESSAGE = 'Không thể kết nối tới máy chủ';
 
 /**
+ * Message chuẩn cho credential sai (đúng ngữ nghĩa ở màn ĐĂNG NHẬP).
+ */
+export const INVALID_CREDENTIALS_MESSAGE = 'Email hoặc mật khẩu không đúng';
+
+/**
+ * Message chung khi email đã có trong hệ thống.
+ */
+export const EMAIL_ALREADY_REGISTERED_MESSAGE = 'Email này đã được sử dụng';
+
+/**
+ * Message khi email ĐÃ TỒN TẠI nhưng mật khẩu user nhập không khớp.
+ *
+ * ⚠️ Khác với {@link INVALID_CREDENTIALS_MESSAGE}: ở màn đăng ký, email
+ * không bị sai — Supabase đã xác nhận email tồn tại. Chỉ có mật khẩu không
+ * khớp với tài khoản đã có. Báo chung "Email hoặc mật khẩu không đúng" khiến
+ * user tưởng mình nhập sai và thử lại mãi.
+ */
+export const EMAIL_EXISTS_WRONG_PASSWORD_MESSAGE =
+  'Email này đã được sử dụng với mật khẩu khác. ' +
+  'Vui lòng đăng nhập bằng mật khẩu đã đặt, hoặc liên hệ hỗ trợ để đặt lại mật khẩu.';
+
+/**
+ * Message khi email đã đăng ký nhưng chưa xác nhận.
+ *
+ * Cùng lý do với {@link EMAIL_EXISTS_WRONG_PASSWORD_MESSAGE}: hành động đúng
+ * là mở hộp thư xác nhận, không phải thử lại đăng ký.
+ */
+export const EMAIL_EXISTS_NOT_CONFIRMED_MESSAGE =
+  'Email này đã được đăng ký nhưng chưa xác nhận. ' +
+  'Vui lòng kiểm tra hộp thư để xác nhận tài khoản rồi đăng nhập.';
+
+/**
  * Cloudflare trả lỗi gateway (524, 520, 502, 503, 504) khi request tới
  * origin bị timeout. `auth-js` bọc thành `AuthRetryableFetchError` với
  * message dạng `"HTTP 524"` hoặc kèm HTML body thô.
@@ -60,13 +92,13 @@ export function mapSupabaseError(err: { message?: string } | null | undefined): 
   const msg = err?.message ?? 'Lỗi không xác định';
   const lower = msg.toLowerCase();
   if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
-    return new Error('Email hoặc mật khẩu không đúng');
+    return new Error(INVALID_CREDENTIALS_MESSAGE);
   }
   if (lower.includes('email not confirmed')) {
     return new Error('Email chưa được xác nhận. Vui lòng kiểm tra hộp thư.');
   }
   if (lower.includes('user already registered')) {
-    return new Error('Email này đã được sử dụng');
+    return new Error(EMAIL_ALREADY_REGISTERED_MESSAGE);
   }
   if (lower.includes('rate limit')) {
     return new Error('Quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.');
@@ -78,14 +110,39 @@ export function mapSupabaseError(err: { message?: string } | null | undefined): 
 }
 
 /**
+ * Nhận diện lỗi credential sai từ Supabase (chưa map qua message tiếng Việt).
+ *
+ * Dùng ở luồng đăng ký để phân biệt "sai mật khẩu" với các lỗi khác.
+ */
+export function isInvalidCredentialsError(err: { message?: string } | null | undefined): boolean {
+  const lower = (err?.message ?? '').toLowerCase();
+  return lower.includes('invalid login credentials') || lower.includes('invalid credentials');
+}
+
+/**
+ * Nhận diện lỗi "email chưa xác nhận" từ Supabase (chưa map qua message tiếng Việt).
+ */
+export function isEmailNotConfirmedError(err: { message?: string } | null | undefined): boolean {
+  return (err?.message ?? '').toLowerCase().includes('email not confirmed');
+}
+
+/**
  * Nhận diện lỗi "tài khoản đã tồn tại" đã được ánh xạ sang message
  * tiếng Việt ("Email này đã được sử dụng").
  *
  * Dùng ở UI để hướng dẫn user sang màn đăng nhập thay vì báo lỗi chung.
+ *
+ * Bao gồm cả trường hợp "email đã có nhưng mật khẩu không khớp" và
+ * "email đã có nhưng chưa xác nhận" — cả 3 đều có chung một hành động
+ * đúng: chuyển sang màn Đăng nhập, không phải thử đăng ký lại.
  */
 export function isAccountAlreadyRegisteredError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  return err.message.includes('Email này đã được sử dụng');
+  return (
+    err.message.includes(EMAIL_ALREADY_REGISTERED_MESSAGE) ||
+    err.message.includes(EMAIL_EXISTS_WRONG_PASSWORD_MESSAGE) ||
+    err.message.includes(EMAIL_EXISTS_NOT_CONFIRMED_MESSAGE)
+  );
 }
 
 /** Message tiếng Việt cho lỗi backend khi tải hồ sơ sau đăng nhập. */

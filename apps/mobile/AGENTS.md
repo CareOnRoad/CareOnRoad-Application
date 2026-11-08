@@ -274,6 +274,28 @@ apps/mobile/
 - `color` trên `<View>`/`<Pressable>` KHÔNG kế thừa xuống `<Text>` → chuỗi
   children phải tự mang class màu chữ (`variantTextStyles`).
 
+### 4.12. Pseudo-class (`active:`/`hover:`/`focus:`) KHÔNG được đặt trên `<View>` con
+- NativeWind biến class có pseudo-class thành CSS pseudo-class. Nếu class đó
+  nằm trên một `<View>` (không phải `Pressable`), `react-native-css-interop` tự
+  NÂNG `<View>` đó thành `Pressable`
+  (`native-interop.ts` → `sharedState.pressable ||= UpgradeState.SHOULD_UPGRADE`).
+- `Pressable` sâu hơn sẽ cướm responder của `Pressable` cha trong bước
+  `onStartShouldSetResponder` negotiation của RN (deepest wins). `onPress` của
+  cha không bao giờ chạy → **"bấm vào không hiện modal"** (bug thật đã xảy ra
+  ở `DateTimePickerField`, sửa ở commit sửa lỗi picker ngày/giờ).
+- Quy tắc: **mọi `className` chứa `active:`/`hover:`/`focus:` phải nằm trên
+  `<Pressable>` gốc**, không bọc thêm `<View>` mang class pseudo-class bên trong.
+- Mẫu đúng:
+  ```tsx
+  <Pressable onPress={open} className="... active:scale-[0.99]">
+    <View className="flex-row items-center gap-2.5">{/* chỉ layout, không pseudo-class */}</View>
+  </Pressable>
+  ```
+- `DateTimePickerField` (`src/components/ui/datetime-picker-field.tsx`) là ví dụ
+  chuẩn: `className` (kèm `active:`) nằm trên `<Pressable>` gốc; Android dùng
+  imperative API `DateTimePickerAndroid.open()` (không dùng `<DateTimePicker>`
+  khai báo vì Android không có `mode='datetime'` và `onChange` đã deprecated).
+
 ## 5. Test trên thiết bị thật (Expo Go)
 
 ### 5.1. Pre-conditions

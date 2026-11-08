@@ -104,9 +104,10 @@ export default function RegisterScreen() {
       // để user bị kẹt ở màn đăng ký.
       if (isAccountAlreadyRegisteredError(e)) {
         setAccountExists(true);
-        setError(
-          `${message} Nếu bạn đã đăng ký trước đó, hãy dùng màn Đăng nhập với chính email và mật khẩu này.`,
-        );
+        // `message` đã mô tả đúng nguyên nhân (email đã có + sai mật khẩu,
+        // hoặc chưa xác nhận email) nên không nối thêm câu gợi ý chung chung
+        // "dùng chính email và mật khẩu này" — câu đó sai khi mật khẩu đã khác.
+        setError(message);
       } else {
         setError(message);
       }

@@ -32,7 +32,6 @@ import { getMySubscription } from '@/lib/subscriptions-service';
 import { extractOAuthCode, isOAuthCallbackUrl } from '@/lib/deep-link';
 import { getSupabase } from '@/lib/supabase-client';
 import { ApiError, setAccessTokenProvider } from '@/lib/api';
-import { isAccountAlreadyRegisteredError } from '@/lib/auth-errors';
 import { ACTIVE_REQUEST_STORAGE_KEY } from '@/contexts/active-request-context';
 import { requestLocationPermissionOnce } from '@/lib/location-service';
 
@@ -537,14 +536,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           password,
         });
       } catch (err) {
-        // Tài khoản đã tồn tại ở Supabase nhưng đăng nhập lại cũng thất bại
-        // (ví dụ sai mật khẩu). Hướng dẫn user sang màn đăng nhập thay vì
-        // báo chung chung "Email này đã được sử dụng" khiến user bị kẹt.
-        if (isAccountAlreadyRegisteredError(err)) {
-          throw new Error(
-            'Email này đã được sử dụng. Vui lòng đăng nhập bằng email và mật khẩu này.',
-          );
-        }
+        // `authSignUp` đã tự map lỗi sang message có ngữ nghĩa chính xác cho
+        // màn đăng ký (email đã có + sai mật khẩu / chưa xác nhận email).
+        // Giữ nguyên message đó — không ghi đè lại thành message chung chung,
+        // vì khi đó user mất thông tin "mật khẩu đã khác" và tưởng mình
+        // gõ sai email rồi thử đăng ký lại mãi.
         throw err;
       }
       if (result.needsEmailConfirmation) {
