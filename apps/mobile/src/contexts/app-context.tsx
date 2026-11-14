@@ -12,6 +12,8 @@ import {
   fromVehicleInput,
   listMotorcycles,
   updateMotorcycle as apiUpdateMotorcycle,
+  updateMotorcycleDetails as apiUpdateMotorcycleDetails,
+  type MotorcycleDetailsPatch,
 } from '@/lib/motorcycles-service';
 import {
   listServiceRequests,
@@ -73,6 +75,17 @@ interface AppState {
     notes?: string;
   }) => Promise<Vehicle | null>;
   updateVehicle: (v: Vehicle) => Promise<Vehicle | null>;
+  /**
+   * Cập nhật "hồ sơ xe đầy đủ" (gói VIP) qua
+   * `PATCH /api/v1/motorcycles/{id}/details`.
+   *
+   * Ném lỗi gốc (ApiError) để caller hiển thị message chính xác, ví dụ lỗi
+   * 403 `plan_required`. Lỗi cũng được ghi vào `vehiclesError`.
+   */
+  updateVehicleDetails: (
+    id: string,
+    patch: MotorcycleDetailsPatch,
+  ) => Promise<Vehicle>;
   archiveVehicle: (id: string) => Promise<boolean>;
 
   selectedVehicleId: string | null;
@@ -450,7 +463,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           name: `${input.brand || 'Xe máy'} ${input.model || 'Xe'}`.trim(),
           brand: input.brand.trim() || 'Xe máy',
           plate: input.plate.trim(),
-          mileage: 0,
           color: '—',
           year: input.year ?? new Date().getFullYear(),
           lastMaintenance: new Date().toISOString().slice(0, 10),
@@ -497,8 +509,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [isBackendConfigured],
   );
 
-  const archiveVehicle = useCallback(
-    async (id: string): Promise<boolean> => {
+  const updateVehicleDetails = useCallback(
+    async (id: string, patch: MotorcycleDetailsPatch): Promise<Vehicle> => {
+      if (!isBackendConfigured) {
+        // Demo mode: chỉ cập nhật state local (không có BE để khoá theo gói).
+        setVehicles((prev) =>
+          prev.map((v) =>
+            v.id === id
+              ? {
+                  ...v,
+                  details: { ...(v.details ?? {}), ...(patch as object) },
+                  color: (patch.color as string | undefined) ?? v.color,
+                }
+              : v,
+          ),
+        );
+        const local = vehicles.find((v) => v.id === id);
+        if (!local) throw new Error('Không tìm thấy xe');
+        return {
+          ...local,
+          details: { ...(local.details ?? {}), ...(patch as object) },
+          color: (patch.color as string | undefined) ?? local.color,
+        };
+      }
+      try {
+        const updated = await apiUpdateMotorcycleDetails(id, patch);
+        setVehicles((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+        return updated;
+      } catch (e) {
+        setVehiclesError(e instanceof Error ? e.message : 'Không thể cập nhật hồ sơ xe');
+        throw e;
+      }
+    },
+    [isBackendConfigured, vehicles],
+  );
+
+  const archiveVehicle = useCallback(    async (id: string): Promise<boolean> => {
       if (!isBackendConfigured) {
         setVehicles((prev) => prev.filter((v) => v.id !== id));
         return true;
@@ -544,6 +590,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       reloadServices,
       addVehicle,
       updateVehicle,
+      updateVehicleDetails,
       archiveVehicle,
       selectedVehicleId,
       selectVehicle: setSelectedVehicleId,
@@ -575,6 +622,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       reloadServices,
       addVehicle,
       updateVehicle,
+      updateVehicleDetails,
       archiveVehicle,
       selectedVehicleId,
       selectedServiceId,

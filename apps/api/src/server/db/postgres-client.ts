@@ -14,7 +14,25 @@ export type PostgresConfig = {
   idleTimeoutSeconds: number;
 };
 
-let sharedClient: Sql | undefined;
+/**
+ * Postgres client phải là SINGLETON trong toàn bộ process.
+ *
+ * Lý do: Next.js App Router (kể cả dev mode) biên dịch MỖI route handler thành
+ * một bundle entry riêng. Vì vậy `let sharedClient` ở module scope KHÔNG được
+ * chia sẻ giữa các route — mỗi route tạo một pool riêng (mặc định 10
+ * connection). Với hosted Supabase (giới hạn connection thấp), nhiều pool
+ * song song dẫn tới lỗi `53300 too many clients already` → mọi route trả 500
+ * `DATABASE_ERROR` và mobile mất toàn bộ dữ liệu (jobs list, quotes, ...).
+ *
+ * Cách sửa: cache client trên `globalThis` (cùng pattern với
+ * `global.__css_interop` của react-native-css-interop) để mọi bundle trong
+ * cùng process dùng chung 1 pool.
+ */
+type PostgresGlobal = typeof globalThis & {
+  __careonroadPostgresClient?: Sql;
+};
+
+const postgresGlobal = globalThis as PostgresGlobal;
 
 export function readPostgresConfig(
   environment: PostgresEnvironment = process.env as PostgresEnvironment
@@ -41,17 +59,23 @@ export function createPostgresClient(config: PostgresConfig = readPostgresConfig
   });
 }
 
+/**
+ * Trả về pool Postgres dùng chung cho toàn process.
+ *
+ * `globalThis` đảm bảo các route handler khác nhau (mỗi route là 1 bundle
+ * riêng trong Next.js) không tạo thêm pool mới.
+ */
 export function getPostgresClient(): Sql {
-  sharedClient ??= createPostgresClient();
-  return sharedClient;
+  postgresGlobal.__careonroadPostgresClient ??= createPostgresClient();
+  return postgresGlobal.__careonroadPostgresClient;
 }
 
 export async function closePostgresClient(): Promise<void> {
-  if (!sharedClient) {
+  const client = postgresGlobal.__careonroadPostgresClient;
+  if (!client) {
     return;
   }
-  const client = sharedClient;
-  sharedClient = undefined;
+  postgresGlobal.__careonroadPostgresClient = undefined;
   await client.end({ timeout: 5 });
 }
 

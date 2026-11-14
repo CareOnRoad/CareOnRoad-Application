@@ -26,11 +26,16 @@ export default function HistoryScreen() {
   const sr = useServiceRequests();
   const [selected, setSelected] = useState<ServiceRequestResponse | null>(null);
 
+  // Danh sách giờ nằm trong `ActiveRequestProvider` (nguồn chung cho mọi
+  // screen) và provider tự hydrate lúc mount → không cần effect local.
+  // Chỉ nạp lại khi list còn trống (VD: mở thẳng màn này qua deep-link
+  // trước khi provider hydrate xong).
+  const { list, listLoading, reloadList } = sr;
   useEffect(() => {
-    void sr.reloadList();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (list.length === 0) void reloadList();
+  }, [list.length, reloadList]);
 
-  const completed = sr.list.filter((r) => r.status === 'completed');
+  const completed = list.filter((r) => r.status === 'completed');
 
   if (selected) {
     return (
@@ -142,17 +147,17 @@ export default function HistoryScreen() {
             </View>
             <View className="rounded-full bg-white/15 px-3 py-1.5">
               <Text className="text-sm font-semibold text-white">
-                {sr.list.length} yêu cầu
+                {list.length} yêu cầu
               </Text>
             </View>
           </View>
         </HeroCard>
 
-        {sr.listLoading ? (
+        {listLoading ? (
           <View className="items-center py-8">
             <ActivityIndicator color="#1974f7" />
           </View>
-        ) : sr.list.length === 0 ? (
+        ) : list.length === 0 ? (
           <View className="mt-4">
             <EmptyState
               icon={History}
@@ -167,7 +172,7 @@ export default function HistoryScreen() {
           </View>
         ) : (
           <View className="mt-5 gap-3">
-            {sr.list.map((r) => (
+            {list.map((r) => (
               <HistoryCard
                 key={r.id}
                 request={r}

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Image, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Gauge, ChevronRight } from 'lucide-react-native';
+import { ChevronRight, Palette } from 'lucide-react-native';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { formatDate } from '@/lib/format';
@@ -9,6 +9,7 @@ import type { Vehicle } from '@/lib/types';
 
 export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
   const router = useRouter();
+  const hasColor = !!vehicle.color && vehicle.color !== '—';
   return (
     <Card onPress={() => router.push({ pathname: '/rider/vehicles/detail', params: { id: vehicle.id } })}>
       <View className="flex-row gap-3 p-3">
@@ -28,17 +29,19 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
             <ChevronRight size={20} color="#64748b" />
           </View>
           <View className="mt-2 flex-row flex-wrap items-center gap-1.5">
-            <Badge tone="blue">
-              <Gauge size={12} color="#1974f7" />
-              <Text className="ml-1 text-xs font-semibold text-primary">
-                {vehicle.mileage.toLocaleString()} km
-              </Text>
-            </Badge>
             <Badge tone="neutral">
               <Text className="text-xs font-semibold text-secondary-foreground">
                 {vehicle.year}
               </Text>
             </Badge>
+            {hasColor && (
+              <Badge tone="blue">
+                <Palette size={12} color="#1974f7" />
+                <Text className="ml-1 text-xs font-semibold text-primary">
+                  {vehicle.color}
+                </Text>
+              </Badge>
+            )}
           </View>
           <Text className="mt-1.5 text-xs text-muted-foreground">
             Bảo dưỡng tiếp theo: {formatDate(vehicle.nextMaintenance)}

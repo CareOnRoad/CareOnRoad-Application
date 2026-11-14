@@ -35,15 +35,18 @@ function pickString(value: unknown): string | undefined {
 export function routeFor(notification: NotificationItem, role: Role): RouteTarget {
   const data = notification.data ?? {};
   const requestId = pickString(data.request_id);
-  const quoteId = pickString(data.quote_id);
   const assignmentId = pickString(data.assignment_id);
   const reminderId = pickString(data.reminder_id);
   const motorcycleId = pickString(data.motorcycle_id);
 
   switch (notification.category) {
     case 'quote':
-      if (role === 'rider' && requestId && quoteId) {
-        return { kind: 'rider-payment', requestId, quoteId };
+      if (role === 'rider' && requestId) {
+        // Thông báo "Cần duyệt báo giá" phải mở màn CHI TIẾT yêu cầu, không mở
+        // thẳng màn thanh toán: quote lúc này còn `pending` → BE trả 409
+        // "Quote is not payable." Màn chi tiết tự hiển thị card báo giá +
+        // nút Duyệt/Từ chối, và sau khi duyệt mới có nút "Thanh toán ngay".
+        return { kind: 'rider-rescue', requestId };
       }
       return { kind: 'none' };
     case 'payment':

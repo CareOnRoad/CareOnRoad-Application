@@ -21,6 +21,35 @@ import type { PaymentProviderClient, ProviderPaymentStatus, VerifiedPaymentEvent
 
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_PAYMENT_EXPIRY_MS = 30 * 60 * 1000;
+/**
+ * Khoảng cách tối thiểu giữa 2 lần hỏi payOS về cùng một đơn (ms).
+ *
+ * Màn hình QR poll `GET /payments/orders/{id}` mỗi 4s; nếu mỗi lần poll đều
+ * gọi payOS thì dễ bị chặn rate-limit. 30s đủ để phản hồi nhanh mà vẫn giảm
+ * tải provider. Mirror cùng cơ chế với `subscription.service.ts`.
+ */
+const PROVIDER_STATUS_THROTTLE_MS = 30_000;
+/** Ngưỡng số entry throttle trước khi cắt bỏ entry cũ (chống rò rỉ bộ nhớ). */
+const PROVIDER_STATUS_THROTTLE_MAX_ENTRIES = 500;
+
+/**
+ * Cache throttle theo `providerOrderCode` (module-level).
+ *
+ * Dùng Map thay vì field trên service để mọi instance service trong cùng
+ * process dùng chung nhịp throttle (route handler + worker có thể tạo service
+ * riêng).
+ */
+const providerStatusThrottle = new Map<number, number>();
+
+/**
+ * Xoá cache throttle (chỉ dùng trong test).
+ *
+ * Map là module-level nên các test dùng lại cùng `providerOrderCode` sẽ bị
+ * throttle của test trước. Hàm này giữ test độc lập với nhau.
+ */
+export function resetPaymentProviderStatusThrottle(): void {
+  providerStatusThrottle.clear();
+}
 
 export type PaymentOrderResponse = {
   id: string;
@@ -300,7 +329,7 @@ export class PaymentService {
     if (!parsedId.success) {
       throw new PaymentError("INVALID_INPUT", "Payment order id must be a valid UUID.", 400);
     }
-    return this.unitOfWork.execute(async (repositories) => {
+    const snapshot = await this.unitOfWork.execute(async (repositories) => {
       const actor = await loadActiveActor(repositories, identity.subject);
       const order = await repositories.payments.findById(parsedId.data);
       if (!order) {
@@ -319,8 +348,68 @@ export class PaymentService {
           throw new PaymentError("FORBIDDEN", "Payment order access is not allowed.", 403);
         }
       }
-      return toPaymentOrderResponse(order);
+      return order;
     });
+
+    // Lazy provider sync: hỏi payOS về trạng thái thật khi đơn còn chờ.
+    // Bù cho trường hợp webhook payOS không tới được backend (backend chạy
+    // trong LAN, payOS gọi từ cloud) — người dùng poll sẽ thấy "đã thanh toán"
+    // thay vì kẹt ở "chờ thanh toán" mãi. Có throttle 30s/order-code.
+    const refreshed = await this.syncWithProvider(snapshot);
+    return toPaymentOrderResponse(refreshed);
+  }
+
+  /**
+   * Hỏi payOS về trạng thái đơn và áp dụng nếu đã thanh toán.
+   *
+   * - Chỉ hỏi khi đơn còn `created`/`pending`.
+   * - Throttle 30s/mỗi order code để không spam payOS khi mobile poll liên tục.
+   * - Lỗi provider (mạng, timeout, 5xx) NUỐT và trả về đơn hiện tại — polling
+   *   vẫn phải hoạt động khi payOS tạm thời không sẵn sàng (không trả 500).
+   */
+  private async syncWithProvider(order: PaymentOrder): Promise<PaymentOrder> {
+    if (!["created", "pending"].includes(order.status)) return order;
+    const orderCode = order.providerOrderCode;
+
+    const now = this.options.now?.() ?? new Date();
+    const lastCheckedAt = providerStatusThrottle.get(orderCode);
+    if (
+      lastCheckedAt !== undefined &&
+      now.getTime() - lastCheckedAt < PROVIDER_STATUS_THROTTLE_MS
+    ) {
+      return order;
+    }
+    providerStatusThrottle.set(orderCode, now.getTime());
+    if (providerStatusThrottle.size > PROVIDER_STATUS_THROTTLE_MAX_ENTRIES) {
+      for (const [code, checkedAt] of providerStatusThrottle) {
+        if (now.getTime() - checkedAt > PROVIDER_STATUS_THROTTLE_MS * 4) {
+          providerStatusThrottle.delete(code);
+        }
+      }
+    }
+
+    let status: ProviderPaymentStatus;
+    try {
+      status = await this.options.providerFactory().getPaymentStatus(orderCode);
+    } catch {
+      // Provider tạm thời không sẵn sàng — giữ nguyên trạng thái hiện tại.
+      return order;
+    }
+    if (status.orderCode !== orderCode) return order;
+    if (status.status === "PENDING" && (status.amountPaid ?? 0) === 0) return order;
+
+    const applied = await this.applyVerifiedProviderEvent(providerStatusToEvent(status));
+    // `applied.status` có thể là "duplicate" khi event đã được ghi nhận ở
+    // lần trước (ví dụ webhook tới trước lazy sync). Khi đó vẫn phải đọc lại
+    // DB để trả về đơn đã `succeeded` — nếu trả `order` cũ, mobile sẽ thấy
+    // "đang chờ thanh toán" mãi dù đã thanh toán.
+    if (applied.status !== "succeeded" && applied.status !== "duplicate") return order;
+
+    const refreshed = await this.unitOfWork.execute(async (repositories) => {
+      const current = await repositories.payments.findById(order.id);
+      return current ?? order;
+    });
+    return refreshed;
   }
 
   async cancelPaymentOrder(
@@ -480,6 +569,9 @@ export class PaymentService {
     };
     for (const order of pending) {
       try {
+      // Bỏ qua throttle để worker luôn hỏi provider (throttle chỉ áp dụng cho
+      // đường đọc theo yêu cầu của client).
+      providerStatusThrottle.delete(order.providerOrderCode);
       if (order.status === "created") {
         const restored = await this.initializePaymentLink(order, provider, this.options.returnUrl(), this.options.cancelUrl());
         if (restored.status === "succeeded") { result.succeeded += 1; continue; }

@@ -18,28 +18,34 @@ import {
   finalizeUpload,
   putBytesToSignedUrl,
   sha256Hex,
+  MEDIA_MAX_BYTES,
   type MediaContentType,
+  type MediaPurpose,
 } from '@/lib/media-uploads-service';
-import {
-  addAssignmentMedia,
-  type AssignmentMediaPurpose,
-  type AssignmentMediaRecord,
-} from '@/lib/mechanic-jobs-service';
 import { cn } from '@/lib/utils';
 
 /**
  * FieldPhotoUploader - chọn + upload ảnh thực địa cho assignment.
  *
- * Quy trình 4 bước (BE đã chốt qua `apps/api/docs`):
+ * Quy trình 3 bước (BE đã chốt qua `apps/api/src/features/media-uploads`):
  *  1. Tạo intent: `POST /api/v1/media/upload-intents`
  *  2. PUT file lên signed URL của Supabase Storage.
  *  3. Finalize: `POST /api/v1/media/upload-intents/{id}/finalize`
- *  4. Gắn metadata: `POST /api/v1/assignments/{id}/media`
+ *
+ * LƯU Ý QUAN TRỌNG:
+ *  - BƯỚC 3 (finalize) đã tự tạo luôn bản ghi media metadata cho
+ *    assignment (`media-upload.service.ts` → `createAssignmentMediaMetadata`).
+ *    Vì vậy KHÔNG gọi thêm `POST /api/v1/assignments/{id}/media` — làm vậy sẽ
+ *    tạo bản ghi trùng và vượt giới hạn 5 media / resource.
+ *  - Contract của `POST /api/v1/media/upload-intents` là schema Zod `.strict()`
+ *    của BE: đúng các field `resource_type`, `resource_id`, `purpose`,
+ *    `content_type`, `size_bytes`, `sha256`. Gửi field lạ (ví dụ `context`)
+ *    sẽ bị BE reject 400 "Media upload intent input is invalid.".
  *
  * Guard chống crash UI:
  *  - Mọi async call bọc `try/catch`; lỗi set state cục bộ.
  *  - Component unmount giữa lúc upload → dùng `cancelled` flag, không setState.
- *  - Image `defaultSource`/`onError` fallback khi URL ảnh lỗi.
+ *  - Image `onError` fallback khi URL ảnh lỗi.
  *  - Style động (opacity) qua `style={({ pressed }) => [...]}`, không nhồi className.
  *  - Không nhét <View> trong <Text>; mọi layout dùng <View> bọc ngoài.
  */
@@ -49,21 +55,21 @@ interface LocalPhoto {
   uid: string;
   /** Local URI từ ImagePicker. */
   uri: string;
-  /** Kích thước file bytes. */
+  /** Kích thước file bytes (đo thực tế sau khi đọc bytes). */
   sizeBytes: number;
-  /** MIME type - hiện chỉ nhận 4 loại BE whitelist. */
+  /** MIME type - chỉ nhận loại BE whitelist. */
   contentType: MediaContentType;
   /** Trạng thái upload. */
   status: 'pending' | 'uploading' | 'done' | 'error';
   /** Lỗi cục bộ (nếu có). */
   errorMessage?: string;
-  /** Server record sau khi upload xong. */
-  serverRecord?: AssignmentMediaRecord;
+  /** Id bản ghi media sau khi BE finalize thành công. */
+  serverMediaId?: string;
 }
 
 export interface FieldPhotoUploaderProps {
   assignmentId: string;
-  purpose: AssignmentMediaPurpose;
+  purpose: MediaPurpose;
   label: string;
   /** Số ảnh tối đa. Mặc định 4. */
   maxCount?: number;
@@ -84,26 +90,18 @@ function genUid(): string {
   return `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function isSupportedContentType(t: string | undefined): t is MediaContentType {
-  return (
-    t === 'image/jpeg' ||
-    t === 'image/png' ||
-    t === 'image/webp' ||
-    t === 'image/heic' ||
-    t === 'image/heif'
-  );
-}
-
-/** Lấy SHA-256 hex của 1 file URI qua fetch + ArrayBuffer. */
-async function sha256ForUri(uri: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(uri);
-    const buf = await res.arrayBuffer();
-    return await sha256Hex(buf);
-  } catch {
-    // Checksum optional - BE không bắt buộc.
-    return undefined;
-  }
+/**
+ * Chuẩn hoá MIME của ảnh về giá trị BE whitelist.
+ *
+ * BE (`mediaContentTypes`) chỉ nhận `image/jpeg` | `image/png` | `image/webp`.
+ * `image/heic` / `image/heif` sẽ bị reject 400. ImagePicker thường đã
+ * re-encode sang JPEG khi có `quality` nên fallback về `image/jpeg` là an toàn
+ * (bytes thực tế luôn được đo/hash lại ở bước upload).
+ */
+function normalizeContentType(mimeType: string | undefined): MediaContentType {
+  if (mimeType === 'image/png') return 'image/png';
+  if (mimeType === 'image/webp') return 'image/webp';
+  return 'image/jpeg';
 }
 
 export function FieldPhotoUploader({
@@ -117,15 +115,6 @@ export function FieldPhotoUploader({
   const [banner, setBanner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Cleanup khi unmount.
-  useEffect(() => {
-    let cancelled = false;
-    return () => {
-      cancelled = true;
-      void cancelled;
-    };
-  }, []);
-
   const updatePhoto = useCallback((uid: string, patch: Partial<LocalPhoto>) => {
     setPhotos((prev) => prev.map((p) => (p.uid === uid ? { ...p, ...patch } : p)));
   }, []);
@@ -135,7 +124,7 @@ export function FieldPhotoUploader({
   }, []);
 
   /**
-   * Upload 1 ảnh qua 4-step flow. Tất cả step bọc try/catch; lỗi set local
+   * Upload 1 ảnh qua 3-step flow. Tất cả step bọc try/catch; lỗi set local
    * state thay vì throw ra ngoài (UI sẽ hiển thị dưới thumbnail).
    */
   const uploadOne = useCallback(
@@ -144,46 +133,53 @@ export function FieldPhotoUploader({
       try {
         updatePhoto(photo.uid, { status: 'uploading', errorMessage: undefined });
 
-        // Bước 1: tạo intent
-        const checksum = await sha256ForUri(photo.uri);
+        // Đọc bytes MỘT LẦN và dùng chúng cho cả size, hash và upload.
+        // `asset.fileSize` KHÔNG đáng tin (ImagePicker có thể re-encode ảnh khi
+        // có `quality` → kích thước file gốc ≠ kích thước bytes thực tế,
+        // khiến BE reject ở finalize với "does not match the upload intent").
+        const fetchRes = await fetch(photo.uri);
+        const buffer = await fetchRes.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        const sizeBytes = bytes.byteLength;
+        if (sizeBytes < 1) {
+          throw new Error('Ảnh rỗng, không thể tải lên.');
+        }
+        if (sizeBytes > MEDIA_MAX_BYTES) {
+          throw new Error(
+            `Ảnh vượt quá ${Math.round(MEDIA_MAX_BYTES / (1024 * 1024))}MB. Hãy chụp ảnh với chất lượng thấp hơn.`,
+          );
+        }
+        const checksum = await sha256Hex(buffer);
+
+        // Bước 1: tạo intent (contract đúng theo BE).
         const intent = await createUploadIntent({
-          context: 'assignment_media',
+          resource_type: 'assignment',
           resource_id: assignmentId,
+          purpose,
           content_type: photo.contentType,
-          size_bytes: photo.sizeBytes,
-          ...(checksum ? { checksum } : {}),
+          size_bytes: sizeBytes,
+          sha256: checksum,
         });
         if (cancelled) return;
 
         // Bước 2: PUT file lên signed URL
-        const fetchRes = await fetch(photo.uri);
-        const bytes = await fetchRes.arrayBuffer();
         await putBytesToSignedUrl(
           intent.upload_url,
           bytes,
           photo.contentType,
+          intent.required_headers ?? {},
         );
         if (cancelled) return;
 
-        // Bước 3: finalize
-        await finalizeUpload(intent.intent_id, {
-          size_bytes: photo.sizeBytes,
-          ...(checksum ? { checksum } : {}),
-        });
+        // Bước 3: finalize (BE verify byte-for-byte + tự tạo media metadata).
+        const finalized = await finalizeUpload(intent.intent_id);
         if (cancelled) return;
 
-        // Bước 4: gắn metadata với assignment
-        const record = await addAssignmentMedia(assignmentId, {
-          media_reference: intent.object_path,
-          purpose,
-          content_type: photo.contentType,
-          size_bytes: photo.sizeBytes,
-          ...(checksum ? { checksum } : {}),
+        updatePhoto(photo.uid, {
+          status: 'done',
+          sizeBytes,
+          serverMediaId: finalized.media?.id,
         });
-
-        if (!cancelled) {
-          updatePhoto(photo.uid, { status: 'done', serverRecord: record });
-        }
       } catch (e) {
         if (cancelled) return;
         const msg =
@@ -195,11 +191,9 @@ export function FieldPhotoUploader({
   );
 
   const handlePickerResult = useCallback(
-    async (result: ImagePicker.ImagePickerResult | { canceled: true } | { assets?: ImagePicker.ImagePickerAsset[]; canceled?: boolean }) => {
-      if ((result as { canceled?: boolean }).canceled) {
-        return;
-      }
-      const assets = (result as ImagePicker.ImagePickerResult).assets;
+    async (result: ImagePicker.ImagePickerResult) => {
+      if (result.canceled) return;
+      const assets = result.assets;
       if (!assets || assets.length === 0) return;
 
       const remaining = Math.max(0, maxCount - photos.length);
@@ -213,16 +207,11 @@ export function FieldPhotoUploader({
       for (const asset of toAdd) {
         const uri = asset.uri;
         if (!uri) continue;
-        const mime = (asset.mimeType ?? 'image/jpeg') as MediaContentType;
-        if (!isSupportedContentType(mime)) {
-          setBanner(`Định dạng ảnh không được hỗ trợ: ${mime}`);
-          continue;
-        }
         newPhotos.push({
           uid: genUid(),
           uri,
           sizeBytes: typeof asset.fileSize === 'number' ? asset.fileSize : 0,
-          contentType: mime,
+          contentType: normalizeContentType(asset.mimeType),
           status: 'pending',
         });
       }
@@ -307,11 +296,7 @@ export function FieldPhotoUploader({
       </View>
 
       {banner ? (
-        <Banner
-          tone="warning"
-          title="Lưu ý"
-          description={banner}
-        />
+        <Banner tone="warning" title="Lưu ý" description={banner} />
       ) : null}
 
       {/* Existing (read-only) */}

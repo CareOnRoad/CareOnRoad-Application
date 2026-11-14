@@ -14,6 +14,7 @@
  */
 import { apiGet, apiPost } from '@/lib/api';
 import { newIdempotencyKey } from '@/lib/idempotency';
+import type { Quote } from '@/lib/quotes-service';
 
 export type AssignmentStatus =
   | 'accepted'
@@ -104,7 +105,7 @@ export interface MechanicJobDetailResponse {
     year?: number;
     license_plate?: string;
   };
-  latest_quote?: unknown;
+  latest_quote?: Quote;
   agreements?: {
     rescue_labor?: unknown;
     rescue_payment_timing?: string;
@@ -382,27 +383,174 @@ export function statusLabel(s: AssignmentStatus): string {
   }
 }
 
-/** Transition status hợp lệ từ trạng thái hiện tại (theo BE state machine). */
-export function nextAllowedStatuses(current: AssignmentStatus): AssignmentStatus[] {
+/**
+ * Ngữ cảnh dùng để mirror chính xác state machine của BE.
+ *
+ * BE áp workflow khác nhau theo `service_type`:
+ *  - `emergency_rescue` / `periodic_maintenance` → sau khi rider duyệt báo giá
+ *    cuối, BE đưa assignment về `diagnosis` (không phải `awaiting_payment`),
+ *    và chỉ cho mechanic chuyển `diagnosis → in_progress` khi đã có quote
+ *    cuối được duyệt.
+ *  - `standard` → rider duyệt quote sẽ đưa assignment thẳng sang
+ *    `awaiting_payment`, và BE yêu cầu payment `succeeded` mới cho
+ *    `awaiting_payment → in_progress`.
+ */
+export type NextAllowedStatusesOptions = {
+  /** `service_type` của service request (BE trả ở job detail / jobs list). */
+  serviceType?: string | null;
+  /**
+   * Đã có quote cuối được rider duyệt chưa:
+   *  - `rescue_final` cho cứu hộ
+   *  - `maintenance_work` cho bảo dưỡng
+   */
+  hasApprovedFinalQuote?: boolean;
+};
+
+/**
+ * Transition status hợp lệ từ trạng thái hiện tại (theo BE state machine).
+ *
+ * Đây là MIRROR của BE `assignment-state.ts` (`TRANSITIONS`), nhưng đã loại bỏ
+ * các transition mà BE CHỦ ĐỘNG từ chối cho mechanic:
+ *  - `diagnosis → quoted` và `quoted → awaiting_payment`: BE tự chuyển khi
+ *    quote được tạo/duyệt, mechanic tự bấm sẽ nhận 409
+ *    ("This assignment transition requires its authorized quote or payment
+ *    workflow.").
+ *  - `in_progress → completed`: đóng assignment cần thanh toán đủ + (bảo
+ *    dưỡng) checklist → do BE/rider quyết định.
+ *
+ * Mục đích: nút "Cập nhật tiến độ" chỉ hiện các bước mà mechanic BẤM ĐƯỢC
+ * thật sự, tránh bấm xong nhận 409 khó hiểu.
+ */
+export function nextAllowedStatuses(
+  current: AssignmentStatus,
+  options: NextAllowedStatusesOptions = {},
+): AssignmentStatus[] {
+  const serviceType = options.serviceType ?? null;
+  const hasApprovedFinalQuote = options.hasApprovedFinalQuote ?? false;
+  // Cứu hộ + bảo dưỡng dùng workflow nhiều bước: BE đưa assignment về
+  // `diagnosis` sau khi rider duyệt quote cuối, rồi mechanic mới được
+  // `diagnosis → in_progress` (có kiểm tra quote cuối đã approved).
+  const multiStepWorkflow =
+    serviceType === 'emergency_rescue' || serviceType === 'periodic_maintenance';
+
   switch (current) {
     case 'accepted':
+      // `en_route`: BE có thể yêu cầu rider đã duyệt báo giá tiền công
+      // (cứu hộ `rescue_labor` / bảo dưỡng `maintenance_labor`) và đã thanh
+      // toán trước — lỗi đó BE trả 409 kèm message rõ ràng.
       return ['en_route', 'canceled'];
     case 'en_route':
       return ['on_site', 'canceled'];
     case 'on_site':
       return ['diagnosis', 'canceled'];
     case 'diagnosis':
-      return ['quoted', 'canceled'];
+      // `quoted` do BE tự set khi quote version đầu tiên được tạo.
+      // `in_progress` chỉ mở cho workflow nhiều bước (cứu hộ / bảo dưỡng)
+      // VÀ đã có quote cuối được rider duyệt — mirror đúng guard của BE
+      // (`assignment.service.ts` → "An approved final rescue quote is
+      // required before repair." / "Approved maintenance work ...").
+      if (multiStepWorkflow && hasApprovedFinalQuote) {
+        return ['in_progress', 'canceled'];
+      }
+      return ['canceled'];
     case 'quoted':
-      return ['awaiting_payment', 'canceled'];
+      // `awaiting_payment` do BE tự set khi rider duyệt quote.
+      return ['canceled'];
     case 'awaiting_payment':
+      // `in_progress`: BE kiểm tra thanh toán / quote final đã duyệt.
       return ['in_progress', 'canceled'];
     case 'in_progress':
-      return ['completed', 'canceled'];
+      // BE cho phép `in_progress → awaiting_payment` (báo đã sửa xong, chờ
+      // thanh toán phần còn lại).
+      return ['awaiting_payment', 'canceled'];
     case 'completed':
     case 'canceled':
       return [];
     default:
       return [];
   }
+}
+
+/**
+ * Hướng dẫn bước tiếp theo cho mechanic, theo trạng thái BE hiện tại.
+ *
+ * Vì sao cần: Ở nhiều trạng thái BE **không có** transition thủ công mà
+ * mechanic bấm được (BE tự chuyển khi tạo/duyệt quote). Nếu UI chỉ hiện
+ * "Không có bước chuyển trạng thái nào khả dụi" thì mechanic tưởng app hỏng.
+ * Thay vào đó, chỉ rõ họ cần làm gì tiếp theo.
+ *
+ * Trả về `null` khi không có hướng dẫn cụ thể.
+ */
+export function nextStepHint(
+  current: AssignmentStatus | string,
+  options: NextAllowedStatusesOptions = {},
+): string | null {
+  const serviceType = options.serviceType ?? null;
+  const hasApprovedFinalQuote = options.hasApprovedFinalQuote ?? false;
+  const multiStepWorkflow =
+    serviceType === 'emergency_rescue' || serviceType === 'periodic_maintenance';
+
+  switch (current) {
+    case 'accepted':
+      return multiStepWorkflow
+        ? 'Bước tiếp theo: gửi báo giá tiền công cho khách ở mục "Chẩn đoán & Báo giá" phía trên. Sau khi khách duyệt và thanh toán, bạn bấm "Bắt đầu đi" ở đây.'
+        : 'Bước tiếp theo: bấm "Bắt đầu đi" để thông báo bạn đang đến nơi.';
+    case 'en_route':
+      return 'Bước tiếp theo: tới nơi thì bấm "Đã tới nơi".';
+    case 'on_site':
+      return 'Bước tiếp theo: bấm "Bắt đầu chẩn đoán", sau đó điền chẩn đoán và gửi báo giá ở mục "Chẩn đoán & Báo giá" phía trên.';
+    case 'diagnosis':
+      if (multiStepWorkflow && hasApprovedFinalQuote) {
+        return 'Bước tiếp theo: bấm "Bắt đầu sửa" để chuyển sang bước sửa chữa.';
+      }
+      return 'Bước tiếp theo: điền chẩn đoán và gửi báo giá ở mục "Chẩn đoán & Báo giá" phía trên. Hệ thống sẽ tự chuyển sang bước "Đã gửi báo giá" sau khi bạn gửi.';
+    case 'quoted':
+      return 'Bước tiếp theo: chờ khách duyệt báo giá. Hệ thống sẽ tự chuyển sang "Chờ thanh toán" khi khách duyệt.';
+    case 'awaiting_payment':
+      return 'Bước tiếp theo: chờ khách thanh toán. Sau khi hệ thống xác nhận thanh toán thành công, bấm "Bắt đầu sửa" ở đây.';
+    case 'in_progress':
+      return 'Bước tiếp theo: khi sửa xong, bấm "Báo đã sửa xong" để chuyển sang chờ thanh toán phần còn lại.';
+    case 'completed':
+      return 'Công việc đã hoàn tất.';
+    case 'canceled':
+    case 'recovery_canceled':
+      return 'Công việc đã kết thúc.';
+    default:
+      return null;
+  }
+}
+
+// =========================================================
+// Timeline (tiến trình công việc)
+// =========================================================
+
+/**
+ * Timeline tiến trình công việc theo **BE assignment status** (raw).
+ *
+ * Không dùng UI `MechanicJobStatus` vì nó gộp 8 BE state vào 5 giá trị
+ * (`accepted|en_route|on_site|diagnosis|quoted` → `pending`) → timeline luôn
+ * dừng ở bước đầu, không phản ánh tiến trình thật.
+ */
+export const BE_JOB_TIMELINE: readonly { status: AssignmentStatus; label: string }[] = [
+  { status: 'accepted', label: 'Đã nhận việc' },
+  { status: 'en_route', label: 'Đang đến nơi' },
+  { status: 'on_site', label: 'Đã tới nơi' },
+  { status: 'diagnosis', label: 'Đang chẩn đoán' },
+  { status: 'quoted', label: 'Đã gửi báo giá' },
+  { status: 'awaiting_payment', label: 'Chờ thanh toán' },
+  { status: 'in_progress', label: 'Đang sửa' },
+  { status: 'completed', label: 'Hoàn tất' },
+];
+
+/**
+ * Index của bước hiện tại trong `BE_JOB_TIMELINE`.
+ *
+ * - `canceled` / `recovery_canceled` → `-1` (không có bước nào đạt).
+ * - `recovery_canceled` không có trong enum `AssignmentStatus` của FE nhưng
+ *   BE vẫn trả về → xử lý như `canceled`.
+ */
+export function timelineIndexForStatus(status: string | undefined): number {
+  if (!status) return -1;
+  if (status === 'canceled' || status === 'recovery_canceled') return -1;
+  return BE_JOB_TIMELINE.findIndex((step) => step.status === status);
 }

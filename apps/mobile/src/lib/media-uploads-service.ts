@@ -2,58 +2,89 @@
  * Service wrappers cho media upload APIs:
  *
  *  - POST /api/v1/media/upload-intents                 - tạo intent (intent_id, upload URL, expires_at)
- *  - POST /api/v1/media/upload-intents/{id}/finalize   - xác nhận upload từ client (size + sha256)
+ *  - POST /api/v1/media/upload-intents/{id}/finalize   - xác nhận upload từ client (BE verify byte-for-byte)
  *
- * BE cấp presigned URL trỏ vào Supabase Storage; client upload trực tiếp rồi
+ * BE cấp signed URL trỏ vào Supabase Storage; client upload trực tiếp rồi
  * gọi finalize để BE verify metadata.
+ *
+ * ⚠️ CONTRACT (mirror `apps/api/src/features/media-uploads/media-upload.schemas.ts`):
+ *  - `resource_type` BẮT BUỘC: `service_request` | `assignment` (KHÔNG dùng
+ *    `context` — BE schema `.strict()` sẽ reject field lạ).
+ *  - `purpose` BẮT BUỘC: `problem_photo` (rider) | `diagnosis` | `work_proof`
+ *    | `safety` | `other` (mechanic).
+ *  - `content_type` chỉ được `image/jpeg` | `image/png` | `image/webp`.
+ *  - `sha256` BẮT BUỘC (hex 64 ký tự) — BE dùng để verify byte-for-byte sau
+ *    khi upload. Không có `crypto.subtle` trên Hermes nên dùng helper thuần
+ *    TS tại `@/lib/sha256`.
+ *  - `size_bytes` BẮT BUỘC, ≥ 1 byte, ≤ 8MB.
  */
 import { apiPost } from '@/lib/api';
 import { newIdempotencyKey } from '@/lib/idempotency';
+import { sha256Hex as sha256HexBytes } from '@/lib/sha256';
 
-export type MediaUploadContext =
-  | 'service_request_media'
-  | 'assignment_media'
-  | 'rider_review';
+export type MediaResourceType = 'service_request' | 'assignment';
 
-export type MediaContentType =
-  | 'image/jpeg'
-  | 'image/png'
-  | 'image/webp'
-  | 'image/heic'
-  | 'image/heif';
+/** Purpose hợp lệ theo resource type (mirror BE). */
+export type MediaPurpose =
+  | 'problem_photo'
+  | 'diagnosis'
+  | 'work_proof'
+  | 'safety'
+  | 'other';
+
+/**
+ * Content type BE whitelist (storage provider cũng dùng để tạo object key).
+ * `image/heic` / `image/heif` KHÔNG được — phải chuyển sang jpeg trước.
+ */
+export type MediaContentType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+export const MEDIA_CONTENT_TYPES: readonly MediaContentType[] = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+];
+
+/** Kích thước tối đa (mirror `MEDIA_MAX_BYTES` của BE = 8MB). */
+export const MEDIA_MAX_BYTES = 8 * 1024 * 1024;
 
 export interface CreateUploadIntentInput {
-  context: MediaUploadContext;
+  resource_type: MediaResourceType;
   /** UUID của resource liên quan (request_id / assignment_id). */
   resource_id: string;
+  purpose: MediaPurpose;
   content_type: MediaContentType;
-  /** Kích thước bytes đã xác định trước khi upload (bắt buộc). */
+  /** Kích thước bytes đã đo thực tế (bắt buộc). */
   size_bytes: number;
-  /** SHA-256 hex của payload (lowercase). Optional nhưng được khuyến nghị. */
-  checksum?: string;
+  /** SHA-256 hex của payload (lowercase, 64 ký tự) — bắt buộc. */
+  sha256: string;
 }
 
 export interface UploadIntentResponse {
   intent_id: string;
   /** Signed PUT URL trỏ vào Supabase Storage. */
   upload_url: string;
-  /** Path bắt buộc phải upload tới. */
-  object_path: string;
+  /** Path bắt buộc phải upload tới (BE gọi là `object_key`). */
+  object_key: string;
+  /** Method HTTP cho signed URL (luôn `PUT`). */
+  upload_method: 'PUT';
+  /** Header bắt buộc khi PUT (thường là `content-type`). */
+  required_headers: Record<string, string>;
   /** Thời điểm hết hạn (sau thời điểm này URL sẽ không dùng được). */
   expires_at: string;
 }
 
-export interface FinalizeUploadInput {
-  size_bytes: number;
-  checksum?: string;
-}
-
-export interface FinalizeUploadResponse {
+export interface FinalizedUploadResponse {
   intent_id: string;
-  object_path: string;
-  size_bytes: number;
-  content_type: string;
-  finalized_at: string;
+  status: 'finalized';
+  resource_type: MediaResourceType;
+  resource_id: string;
+  media: {
+    id: string;
+    purpose: string;
+    content_type: string;
+    size_bytes: number;
+    created_at: string;
+  };
 }
 
 export async function createUploadIntent(
@@ -72,14 +103,20 @@ export async function createUploadIntent(
   );
 }
 
+/**
+ * Finalize upload.
+ *
+ * BE đọc thông tin từ intent đã lưu (không nhận body) và tự verify
+ * content-type / size / sha256 của object trên storage → nếu lệch sẽ xoá
+ * object và trả 409.
+ */
 export async function finalizeUpload(
   intentId: string,
-  input: FinalizeUploadInput,
   options: { signal?: AbortSignal } = {},
-): Promise<FinalizeUploadResponse> {
-  return apiPost<FinalizeUploadResponse>(
+): Promise<FinalizedUploadResponse> {
+  return apiPost<FinalizedUploadResponse>(
     `/api/v1/media/upload-intents/${encodeURIComponent(intentId)}/finalize`,
-    input,
+    undefined,
     {
       headers: {
         'X-Idempotency-Key': newIdempotencyKey(),
@@ -90,17 +127,34 @@ export async function finalizeUpload(
 }
 
 /**
- * Upload 1 file nhỏ qua fetch PUT tới signed URL. Trả về true nếu thành công.
+ * Upload 1 file nhỏ qua fetch PUT tới signed URL. Throws nếu thất bại.
  * Với file > 5MB trên RN nên dùng XHR để stream.
+ *
+ * `required_headers` của BE thường là `{ "content-type": "image/jpeg" }`
+ * (chữ thường). Nếu gửi kèm `Content-Type` (chữ hoa) → 2 header trùng
+ * nhau → storage provider có thể từ chối signature. Vì vậy chuẩn hoá về
+ * MỘT key `Content-Type` duy nhất.
  */
 export async function putBytesToSignedUrl(
   url: string,
   bytes: ArrayBuffer | Uint8Array,
   contentType: MediaContentType,
+  requiredHeaders: Record<string, string> = {},
 ): Promise<void> {
+  const headers: Record<string, string> = {};
+  let resolvedContentType = contentType;
+  for (const [key, value] of Object.entries(requiredHeaders)) {
+    if (key.toLowerCase() === 'content-type') {
+      resolvedContentType = value as MediaContentType;
+      continue;
+    }
+    headers[key] = value;
+  }
+  headers['Content-Type'] = resolvedContentType;
+
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': contentType },
+    headers,
     body: bytes as BodyInit,
   });
   if (!res.ok) {
@@ -111,16 +165,7 @@ export async function putBytesToSignedUrl(
 
 /** SHA-256 hex của ArrayBuffer (lowercase). */
 export async function sha256Hex(buf: ArrayBuffer): Promise<string> {
-  // expo-crypto & react-native-get-random-values đều có sẵn trong app
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const subtle = (globalThis as any).crypto?.subtle;
-  if (!subtle) {
-    throw new Error('crypto.subtle không khả dụng trên môi trường này.');
-  }
-  const digest = await subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return sha256HexBytes(new Uint8Array(buf));
 }
 
 export function mediaErrorCode(err: unknown): string | null {

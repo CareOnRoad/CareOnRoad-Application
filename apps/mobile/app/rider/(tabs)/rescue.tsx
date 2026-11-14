@@ -34,8 +34,9 @@ import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { Field, FormTextInput } from '@/components/ui/form';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { PaymentTimingModal } from '@/components/ui/payment-timing-modal';
 import { cn } from '@/lib/utils';
-import { formatVnd } from '@/lib/quotes-service';
+import { formatVnd, isQuotePayableNow, requiresPaymentTiming, type PaymentTiming } from '@/lib/quotes-service';
 import { issueCategories } from '@/lib/ui-catalog';
 import {
   captureCurrentLocation,
@@ -83,6 +84,8 @@ export default function RescueScreen() {
   const [captured, setCaptured] = useState<CapturedLocation | null>(null);
   const [locationBusy, setLocationBusy] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  // Modal chọn thời điểm thanh toán (chỉ mở khi quote `rescue_labor`).
+  const [timingModalVisible, setTimingModalVisible] = useState(false);
 
   // Tự động lấy vị trí hiện tại 1 lần khi mở màn hình.
   // Nếu thất bại → vẫn cho phép user nhập tay.
@@ -119,6 +122,29 @@ export default function RescueScreen() {
   const vehicle = vehicles[0];
   const vehicleName = vehicle?.name ?? 'Xe của bạn';
   const phase = sr.active.phase;
+
+  /**
+   * Quote dùng để thanh toán.
+   *
+   * Sau khi rider duyệt, BE không còn quote `pending` nào — active session chỉ
+   * giữ `approvedQuote`. Vì vậy phải ưu tiên `approvedQuote`, fallback `quote`
+   * (trường hợp vào màn hình khi quote vừa được tạo).
+   */
+  const payableQuote = sr.active.approvedQuote ?? sr.active.quote;
+
+  /**
+   * Có thể thanh toán ngay lúc này không?
+   *
+   * Cứu hộ `labor_upfront`: request chuyển `assigned` → phase `tracking`
+   * (không phải `payment`), nhưng rider VẪN phải trả tiền công trước khi
+   * thợ đi. Vì vậy điều kiện phải dựa vào BE `payment-summary`, không chỉ
+   * dựa vào phase.
+   */
+  const paymentSummary = sr.active.paymentSummary;
+  const canPayNow = isQuotePayableNow(sr.active.approvedQuote, {
+    paymentTiming: paymentSummary?.payment_timing ?? null,
+    assignmentStatus: paymentSummary?.assignment_status ?? null,
+  });
 
   const refreshLocation = async () => {
     setLocationBusy(true);
@@ -157,6 +183,28 @@ export default function RescueScreen() {
   const handleReset = () => {
     sr.reset();
     setIssue(null);
+  };
+
+  /**
+   * Duyệt báo giá.
+   *
+   * - Quote `rescue_labor` → BE bắt buộc `payment_timing` → mở modal chọn.
+   * - Quote khác → duyệt thẳng (BE trả 400 nếu gửi `payment_timing` thừa).
+   */
+  const handleApprove = async (timing?: PaymentTiming) => {
+    const quote = sr.active.quote;
+    if (!quote) return;
+    if (requiresPaymentTiming(quote)) {
+      setTimingModalVisible(true);
+      return;
+    }
+    await sr.approveQuote();
+    setTimingModalVisible(false);
+  };
+
+  const handleConfirmTiming = async (timing: PaymentTiming) => {
+    await sr.approveQuote(timing);
+    setTimingModalVisible(false);
   };
 
   // Searching state
@@ -378,7 +426,7 @@ export default function RescueScreen() {
                   </ActionButton>
                   <ActionButton
                     fullWidth
-                    onPress={() => sr.approveQuote()}
+                    onPress={() => void handleApprove()}
                     accessibilityLabel="Duyệt báo giá"
                     disabled={sr.active.busy}
                   >
@@ -389,48 +437,148 @@ export default function RescueScreen() {
             </Card>
           )}
 
-          {/* Phase payment - placeholder, Phase 6 sẽ render QR */}
-              {phase === 'payment' && (
-                <Card className="mt-4 border-amber-500/40 bg-amber-500/10 p-4">
-                  <View className="flex-row items-center gap-2">
-                    <Badge tone="amber">
-                      <Text className="text-xs font-semibold text-amber-700">Chờ thanh toán</Text>
-                    </Badge>
+          {/* Báo giá đã duyệt — mirror card ở màn chi tiết.
+              Hiển thị khi đã có quote đã duyệt (kể cả lúc đang chờ thợ
+              đi sau khi duyệt báo giá tiền công cứu hộ). */}
+          {sr.active.approvedQuote && (
+            <Card className="mt-4 border-green/30 bg-green/5 p-4">
+              <View className="mb-2 flex-row items-center justify-between">
+                <Text className="text-sm font-bold text-foreground">
+                  Báo giá đã duyệt v{sr.active.approvedQuote.version}
+                </Text>
+                <Badge tone="green">
+                  <Text className="text-xs font-semibold text-green">Đã duyệt</Text>
+                </Badge>
+              </View>
+              <View className="gap-1.5">
+                {sr.active.approvedQuote.lines.map((line) => (
+                  <View key={line.id} className="flex-row items-center justify-between">
+                    <Text className="flex-1 text-sm text-foreground">
+                      {line.description}{' '}
+                      <Text className="text-xs text-muted-foreground">× {line.quantity}</Text>
+                    </Text>
+                    <Text className="text-sm font-semibold text-foreground">
+                      {formatVnd(line.line_total_amount)}
+                    </Text>
                   </View>
-                  <Text className="mt-2 text-sm text-foreground">
-                    Báo giá đã được duyệt. Vui lòng thanh toán để thợ bắt đầu công việc.
-                  </Text>
-                  {sr.active.quote && (
-                    <Text className="mt-1 text-base font-bold text-primary">
-                      {formatVnd(sr.active.quote.total_amount)}
+                ))}
+              </View>
+              <View className="mt-2 border-t border-border pt-2">
+                {sr.active.approvedQuote.discount_amount > 0 && (
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-sm text-muted-foreground">Giảm giá</Text>
+                    <Text className="text-sm text-foreground">
+                      -{formatVnd(sr.active.approvedQuote.discount_amount)}
                     </Text>
-                  )}
-                  <ActionButton
-                    fullWidth
-                    className="mt-3"
-                    onPress={() => {
-                      if (sr.active.quote && sr.active.requestId) {
-                        router.push({
-                          pathname: '/rider/payments/[quoteId]',
-                          params: {
-                            quoteId: sr.active.quote.id,
-                            requestId: sr.active.requestId,
-                          },
-                        });
-                      }
-                    }}
-                    accessibilityLabel="Mở màn hình thanh toán"
-                  >
-                    <Text className="text-sm font-semibold text-primary-foreground">
-                      Thanh toán ngay
-                    </Text>
-                  </ActionButton>
-                  <Text className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                    Bạn sẽ được chuyển sang màn hình thanh toán PayOS. Vui lòng hoàn tất
-                    trong thời gian đơn hàng còn hiệu lực.
+                  </View>
+                )}
+                <View className="mt-1 flex-row items-center justify-between">
+                  <Text className="text-base font-bold text-foreground">Tổng đã chốt</Text>
+                  <Text className="text-base font-bold text-primary">
+                    {formatVnd(sr.active.approvedQuote.total_amount)}
                   </Text>
-                </Card>
+                </View>
+              </View>
+              {sr.active.approvedQuote.responded_at ? (
+                <Text className="mt-1 text-[11px] text-muted-foreground">
+                  Duyệt lúc {new Date(sr.active.approvedQuote.responded_at).toLocaleString('vi-VN')}
+                </Text>
+              ) : null}
+            </Card>
+          )}
+
+          {/* Thanh toán — hiển thị khi BE còn khoản phải trả.
+              - Cứu hộ `labor_upfront`: request ở `assigned` (phase tracking) nhưng
+                rider vẫn phải trả tiền công trước khi thợ đi.
+              - Sau khi thợ gửi báo giá phụ tùng: request ở `awaiting_payment`
+                (phase payment) → thanh toán lần 2 cho phần còn lại. */}
+          {(phase === 'payment' || canPayNow) && (
+            <Card className="mt-4 border-amber-500/40 bg-amber-500/10 p-4">
+              <View className="flex-row items-center gap-2">
+                <Badge tone="amber">
+                  <Text className="text-xs font-semibold text-amber-700">Chờ thanh toán</Text>
+                </Badge>
+              </View>
+              <Text className="mt-2 text-sm text-foreground">
+                {paymentSummary?.payment_timing === 'labor_upfront'
+                  ? 'Vui lòng thanh toán tiền công cứu hộ để thợ xuất phát.'
+                  : 'Báo giá đã được duyệt. Vui lòng thanh toán để thợ bắt đầu công việc.'}
+              </Text>
+              {/* Tổng tiền đã chốt lấy từ quote ĐÃ DUYỆT — sau khi duyệt
+                  không còn quote pending nào trong active session. */}
+              {payableQuote && (
+                <Text className="mt-1 text-base font-bold text-primary">
+                  {formatVnd(payableQuote.total_amount)}
+                </Text>
               )}
+              {/* Thanh toán nhiều bước: BE `payment-summary` là nguồn
+                  chính xác cho "đã trả / còn trả". */}
+              {paymentSummary && paymentSummary.paid_amount > 0 && (
+                <View className="mt-2 rounded-2xl bg-white/60 px-3 py-2">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-xs text-muted-foreground">Đã thanh toán</Text>
+                    <Text className="text-xs font-semibold text-green">
+                      {formatVnd(paymentSummary.paid_amount)}
+                    </Text>
+                  </View>
+                  <View className="mt-1 flex-row items-center justify-between">
+                    <Text className="text-xs text-muted-foreground">Còn phải trả</Text>
+                    <Text className="text-xs font-bold text-foreground">
+                      {formatVnd(paymentSummary.remaining_amount)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+              {canPayNow && payableQuote ? (
+                <ActionButton
+                  fullWidth
+                  className="mt-3"
+                  onPress={() => {
+                    if (sr.active.requestId) {
+                      router.push({
+                        pathname: '/rider/payments/[quoteId]',
+                        params: {
+                          quoteId: payableQuote.id,
+                          requestId: sr.active.requestId,
+                        },
+                      });
+                    }
+                  }}
+                  accessibilityLabel="Mở màn hình thanh toán"
+                >
+                  <Text className="text-sm font-semibold text-primary-foreground">
+                    Thanh toán ngay
+                  </Text>
+                </ActionButton>
+              ) : payableQuote ? (
+                <Banner
+                  tone="info"
+                  className="mt-3"
+                  title="Chưa đến bước thanh toán"
+                  description={
+                    paymentSummary?.payment_timing === 'after_repair'
+                      ? 'Bạn đã chọn trả sau khi sửa xong. Thợ sẽ gửi báo giá phụ tùng phát sinh, bạn duyệt rồi thanh toán phần còn lại.'
+                      : paymentSummary?.payment_timing === 'after_service'
+                        ? 'Bạn sẽ thanh toán sau khi dịch vụ hoàn tất.'
+                        : 'Thợ đang xử lý. Bạn sẽ được thông báo khi đến bước thanh toán.'
+                  }
+                />
+              ) : (
+                <Banner
+                  tone="warning"
+                  className="mt-3"
+                  title="Chưa có báo giá đã duyệt"
+                  description="Chưa tìm thấy báo giá đã duyệt cho yêu cầu này. Vui lòng tải lại trang hoặc liên hệ hỗ trợ."
+                />
+              )}
+              {canPayNow && (
+                <Text className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Bạn sẽ được chuyển sang màn hình thanh toán PayOS. Vui lòng hoàn tất
+                  trong thời gian đơn hàng còn hiệu lực.
+                </Text>
+              )}
+            </Card>
+          )}
 
           {/* Phase completed — review */}
           {phase === 'completed' && sr.active.assignment && (
@@ -480,6 +628,16 @@ export default function RescueScreen() {
             <AiChatbox />
           </View>
         </ScreenScroll>
+
+        <PaymentTimingModal
+          visible={timingModalVisible && requiresPaymentTiming(sr.active.quote)}
+          totalAmountLabel={
+            sr.active.quote ? formatVnd(sr.active.quote.total_amount) : undefined
+          }
+          loading={sr.active.busy}
+          onConfirm={handleConfirmTiming}
+          onCancel={() => setTimingModalVisible(false)}
+        />
       </View>
     );
   }

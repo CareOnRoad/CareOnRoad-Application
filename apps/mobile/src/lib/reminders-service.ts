@@ -7,12 +7,19 @@
  *  - PATCH  /api/v1/reminders/{id}      - update
  *  - POST   /api/v1/reminders/{id}/snooze
  *
+ * Mẫu nhắc bảo dưỡng theo linh kiện (gói Advance / VIP):
+ *  - GET    /api/v1/reminder-presets                     - catalog mẫu
+ *  - POST   /api/v1/motorcycles/{id}/reminder-presets     - bật mẫu cho 1 xe
+ *  - POST   /api/v1/reminders/{id}/done                   - đánh dấu đã làm
+ *
  * Field shapes (snake_case từ BE):
  *  - interval_days?: number (1-3650)
  *  - next_due_at: ISO datetime
  *  - snoozed_until?: ISO datetime
  *  - enabled: boolean
  *  - last_completed_at?: ISO datetime
+ *  - item_code?: mã mẫu (rule được sinh từ preset)
+ *  - last_done_on?: YYYY-MM-DD
  *
  * Mapping UI:
  *  - "recurrence" UI (none/weekly/monthly/quarterly) → `interval_days` (0/7/30/90) + enabled
@@ -21,6 +28,7 @@
  */
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { newIdempotencyKey } from '@/lib/idempotency';
+import type { PaidPlanCode } from '@/lib/plan-gate';
 
 /** UI recurrence enum – ánh xạ sang interval_days. */
 export type ReminderRecurrence = 'none' | 'weekly' | 'monthly' | 'quarterly';
@@ -42,6 +50,10 @@ export interface Reminder {
   snoozed_until?: string;
   enabled: boolean;
   last_completed_at?: string;
+  /** Mã mẫu nhắc bảo dưỡng (rule được sinh từ preset). */
+  item_code?: ReminderItemCode;
+  /** Ngày làm gần nhất (YYYY-MM-DD) — chỉ có với rule preset. */
+  last_done_on?: string;
   created_at: string;
   updated_at: string;
 }
@@ -154,5 +166,140 @@ export async function snoozeReminder(id: string, snoozeUntil: string): Promise<R
     `/api/v1/reminders/${encodeURIComponent(id)}/snooze`,
     { until: snoozeUntil },
     { headers: { 'X-Idempotency-Key': newIdempotencyKey() } },
+  );
+}
+
+// =========================================================
+// Mẫu nhắc bảo dưỡng theo linh kiện (gói Advance / VIP)
+// =========================================================
+
+/**
+ * Mã mẫu nhắc. Khớp `reminderItemCodes` của BE
+ * (`apps/api/src/features/reminders/reminder-presets.ts`).
+ */
+export const REMINDER_ITEM_CODES = [
+  'engine_oil',
+  'gear_oil',
+  'brake_fluid',
+  'coolant',
+  'insurance_renewal',
+] as const;
+
+export type ReminderItemCode = (typeof REMINDER_ITEM_CODES)[number];
+
+/** Mức sử dụng xe. Khớp `usageLevels` của BE. */
+export const USAGE_LEVELS = ['light', 'normal', 'heavy'] as const;
+export type UsageLevel = (typeof USAGE_LEVELS)[number];
+
+/** Nhãn tiếng Việt cho mức sử dụng. */
+export const USAGE_LEVEL_LABELS: Record<UsageLevel, string> = {
+  light: 'Ít',
+  normal: 'Vừa',
+  heavy: 'Nhiều',
+};
+
+/** Nhãn tiếng Việt cho mẫu nhắc. */
+export const REMINDER_ITEM_LABELS: Record<ReminderItemCode, string> = {
+  engine_oil: 'Thay nhớt máy',
+  gear_oil: 'Thay nhớt láp (xe tay ga)',
+  brake_fluid: 'Thay dầu phanh',
+  coolant: 'Thay nước làm mát',
+  insurance_renewal: 'Gia hạn bảo hiểm TNDS',
+};
+
+/** Một mẫu nhắc trong catalog của BE. */
+export interface ReminderPreset {
+  item_code: ReminderItemCode;
+  title: string;
+  required_plan: PaidPlanCode;
+  /** Chu kỳ (ngày) theo từng mức sử dụng. */
+  interval_days: Record<UsageLevel, number>;
+  /** Số ngày nhắc trước hạn (bảo hiểm = 14 ngày). */
+  lead_days: number;
+}
+
+/** Response của `GET /api/v1/reminder-presets`. */
+export interface ReminderPresetCatalog {
+  /** Chu kỳ dùng khi không biết "lần làm gần nhất" (BE quy định). */
+  unknown_last_done_due_days: number;
+  items: ReminderPreset[];
+}
+
+/** Lấy catalog mẫu nhắc (gói Advance/VIP). Luôn trả kể cả khi gói thấp hơn. */
+export async function listReminderPresets(): Promise<ReminderPresetCatalog> {
+  return apiGet<ReminderPresetCatalog>('/api/v1/reminder-presets');
+}
+
+/** Một mẫu được chọn khi bật cho xe. */
+export interface ReminderPresetApplyItem {
+  item_code: ReminderItemCode;
+  /** Lần làm gần nhất (YYYY-MM-DD). Không bắt buộc. */
+  last_done_on?: string;
+}
+
+/** Input của `POST /api/v1/motorcycles/{id}/reminder-presets`. */
+export interface ApplyReminderPresetsInput {
+  usage_level: UsageLevel;
+  items: ReminderPresetApplyItem[];
+}
+
+/** Kết quả bật mẫu: mỗi rule kèm cờ `created` (mới tạo hay đã có sẵn). */
+export interface AppliedReminderPreset extends Reminder {
+  created: boolean;
+}
+
+/**
+ * Bật mẫu nhắc bảo dưỡng cho 1 xe.
+ *
+ * BE yêu cầu gói `advance`, hoặc `vip` nếu có mẫu `insurance_renewal`.
+ * Mẫu đã bật cho xe sẽ được giữ nguyên (`created: false`), không tạo trùng.
+ *
+ * Lỗi có thể trả 403 `plan_required`.
+ */
+export async function applyReminderPresets(
+  motorcycleId: string,
+  input: ApplyReminderPresetsInput,
+): Promise<{ items: AppliedReminderPreset[] }> {
+  return apiPost<{ items: AppliedReminderPreset[] }>(
+    `/api/v1/motorcycles/${encodeURIComponent(motorcycleId)}/reminder-presets`,
+    input,
+  );
+}
+
+/**
+ * Chu kỳ (ngày) của một mẫu theo mức sử dụng đã chọn.
+ *
+ * Catalog BE trả `interval_days` cho cả 3 mức → UI chỉ cần chọn 1.
+ */
+export function presetIntervalDays(
+  preset: ReminderPreset,
+  usageLevel: UsageLevel,
+): number {
+  return preset.interval_days[usageLevel];
+}
+
+/**
+ * Mẫu này có cần gói VIP không?
+ *
+ * Mẫu `insurance_renewal` cần `vip`; các mẫu còn lại cần `advance`.
+ */
+export function presetRequiresVip(preset: ReminderPreset): boolean {
+  return preset.required_plan === 'vip';
+}
+
+/**
+ * Đánh dấu một lịch nhắc mẫu đã làm → BE tính lại `next_due_at`.
+ *
+ * - Chỉ rule có `item_code` mới gọi được (BE trả 400 `INVALID_INPUT` nếu không).
+ * - BE yêu cầu đúng gói của preset (`advance`/`vip`).
+ * - `done_on` phải là `YYYY-MM-DD`, không ở tương lai, tối đa 10 năm trở lại.
+ */
+export async function markReminderDone(
+  ruleId: string,
+  doneOn: string,
+): Promise<Reminder> {
+  return apiPost<Reminder>(
+    `/api/v1/reminders/${encodeURIComponent(ruleId)}/done`,
+    { done_on: doneOn },
   );
 }

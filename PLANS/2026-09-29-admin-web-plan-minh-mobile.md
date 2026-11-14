@@ -2,7 +2,7 @@
 
 **Ngày:** 2026-09-29
 **Branch chuẩn:** `minh/mobile` (đã xác nhận với người phụ trách)
-**Thay thế:** `PLANS/FE-BE-CONTRACT-ADMIN-WEB-REVIEW-AND-AI-IMPLEMENTATION-GUIDE.md` (viết trên `main` — sai baseline)
+**Thay thế:** `PLANS/admin-web/FE-BE-CONTRACT-ADMIN-WEB-REVIEW-AND-AI-IMPLEMENTATION-GUIDE-v1.md` (viết trên `main` — sai baseline)
 **Phạm vi:** contract admin-only → auth → server API client → read-only UI → mutation
 **Ngoài scope:** mobile, chatbot, payment UI, live tracking UI, route ETA UI
 

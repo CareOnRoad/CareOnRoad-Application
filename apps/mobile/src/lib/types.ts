@@ -14,12 +14,33 @@ export interface Vehicle {
   name: string;
   brand: string;
   plate: string;
-  mileage: number;
+  /** Màu sắc (gói VIP). '—' khi chưa có dữ liệu. */
   color: string;
   year: number;
   lastMaintenance: string;
   nextMaintenance: string;
   image: string;
+  /** Hồ sơ xe đầy đủ (gói VIP). Luôn có khi rider đã lưu. */
+  details?: MotorcycleDetails;
+}
+
+/**
+ * Chi tiết xe gói VIP. Đúng tên cột BE trong bảng `motorcycles`
+ * (migration `202606250048_maintenance_presets_and_plans.sql`).
+ *
+ * Ngày có dạng `YYYY-MM-DD`.
+ */
+export interface MotorcycleDetails {
+  color?: string;
+  frame_number?: string;
+  engine_number?: string;
+  purchase_date?: string;
+  purchase_price_vnd?: number;
+  insurance_provider?: string;
+  insurance_policy_number?: string;
+  insurance_expires_on?: string;
+  warranty_expires_on?: string;
+  preferred_service_center?: string;
 }
 
 export interface ServiceRecord {

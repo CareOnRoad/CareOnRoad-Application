@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { VerifiedSupabaseIdentity } from "@/features/auth/auth.types";
 import { AssignmentService } from "@/features/assignments/assignment.service";
@@ -11,7 +11,7 @@ import type {
   ProviderPaymentStatus,
   VerifiedPaymentEvent
 } from "../payment-provider";
-import { PaymentService } from "../payment.service";
+import { PaymentService, resetPaymentProviderStatusThrottle } from "../payment.service";
 
 const riderId = "11111111-1111-4111-8111-111111111111";
 const mechanicId = "22222222-2222-4222-8222-222222222222";
@@ -310,6 +310,101 @@ describe("payment service", () => {
     await expect(service.handlePayosWebhook({})).resolves.toMatchObject({ status: "needs_review" });
     await expect(service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "late-paid-retry-key")).rejects.toMatchObject({ status: 409 });
     expect(unitOfWork.snapshot().paymentOrders[0]).toMatchObject({ reviewReason: "paid_after_cancellation", canceledAt: undefined });
+  });
+});
+
+describe("payment lazy provider sync", () => {
+  beforeEach(() => {
+    resetPaymentProviderStatusThrottle();
+  });
+
+  it("syncs a pending order from the provider when the webhook never arrives", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "lazy-sync-key");
+    expect(order.status).toBe("pending");
+
+    const read = await service.getPaymentOrder(identity(riderId), order.id);
+
+    expect(read.status).toBe("succeeded");
+    expect(read.succeeded_at).toBeDefined();
+    expect(unitOfWork.snapshot().paymentOrders[0]?.status).toBe("succeeded");
+  });
+
+  it("throttles provider lookups to one call per order code inside the window", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "lazy-throttle-key");
+    const status = vi.spyOn(provider, "getPaymentStatus");
+
+    await service.getPaymentOrder(identity(riderId), order.id);
+    await service.getPaymentOrder(identity(riderId), order.id);
+
+    expect(status).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the provider again once the throttle window has passed", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "lazy-window-key");
+    const status = vi.spyOn(provider, "getPaymentStatus").mockResolvedValue({ orderCode: order.provider_order_code,
+      paymentLinkId: order.provider_payment_link_id, amount: order.amount, amountPaid: 0, currency: "VND", status: "PENDING" });
+
+    await service.getPaymentOrder(identity(riderId), order.id);
+    const later = new PaymentService(unitOfWork, {
+      now: () => new Date(now.getTime() + 31_000),
+      providerFactory: () => provider,
+      returnUrl: () => "https://example.test/payment/return",
+      cancelUrl: () => "https://example.test/payment/cancel"
+    });
+    await later.getPaymentOrder(identity(riderId), order.id);
+
+    expect(status).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the current snapshot when the provider throws instead of failing the read", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "lazy-offline-key");
+    vi.spyOn(provider, "getPaymentStatus").mockRejectedValue(new Error("provider offline"));
+
+    const read = await service.getPaymentOrder(identity(riderId), order.id);
+
+    expect(read.status).toBe("pending");
+    expect(read.succeeded_at).toBeUndefined();
+  });
+
+  it("does not call the provider for an already settled order", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "lazy-settled-key");
+    provider.nextWebhook = { kind: "valid", eventDedupeKey: "settled-first", success: true,
+      orderCode: order.provider_order_code, amount: order.amount, currency: "VND", status: "00" };
+    await service.handlePayosWebhook({});
+    const status = vi.spyOn(provider, "getPaymentStatus");
+
+    const read = await service.getPaymentOrder(identity(riderId), order.id);
+
+    expect(read.status).toBe("succeeded");
+    expect(status).not.toHaveBeenCalled();
+  });
+
+  it("leaves a pending order pending when the provider still reports PENDING", async () => {
+    const provider = new FakeProvider();
+    const unitOfWork = createUnitOfWork();
+    const service = createPaymentService(unitOfWork, provider);
+    const order = await service.createPaymentOrder(identity(riderId), { quote_id: quoteId }, "lazy-still-pending-key");
+    vi.spyOn(provider, "getPaymentStatus").mockResolvedValue({ orderCode: order.provider_order_code,
+      paymentLinkId: order.provider_payment_link_id, amount: order.amount, amountPaid: 0, currency: "VND", status: "PENDING" });
+
+    const read = await service.getPaymentOrder(identity(riderId), order.id);
+
+    expect(read.status).toBe("pending");
   });
 });
 

@@ -118,7 +118,7 @@ export default function HomeScreen() {
 
   // Request đang chạy — hiện banner ở đầu Home để rider không bị mất đường
   // vào màn hình theo dõi sau khi rời tab Rescue hoặc restart app.
-  const { list: activeRequestList } = useServiceRequests();
+  const { list: activeRequestList, reloadList: reloadActiveRequestList } = useServiceRequests();
   const runningRequest = activeRequestList.find((r) =>
     [
       'submitted',
@@ -141,7 +141,11 @@ export default function HomeScreen() {
       // Gói có thể đổi ở màn "Gói của tôi" (thanh toán) → đồng bộ lại
       // để badge ở hero card hiện đúng gói hiện tại.
       void refreshActor();
-    }, [reloadNotifications, reloadReminders, refreshActor]),
+      // Danh sách request đang chạy → banner "Yêu cầu đang chạy" luôn đúng.
+      // Provider đã hydrate 1 lần lúc mount; reload khi focus để bắt thay
+      // đổi (huỷ / duyệt báo giá / thanh toán) ở màn khác.
+      void reloadActiveRequestList();
+    }, [reloadNotifications, reloadReminders, refreshActor, reloadActiveRequestList]),
   );
 
   // Ưu tiên tên từ auth session, fallback empty.

@@ -141,11 +141,19 @@ export default function ProfileScreen() {
         <HeroCard>
           <View className="flex-row items-center gap-4">
               <View className="size-16 overflow-hidden rounded-full border-2 border-white/20">
-                <Image
-                  source={{ uri: user.avatar }}
-                  className="size-full"
-                  resizeMode="cover"
-                />
+                {user.avatar ? (
+                  <Image
+                    source={{ uri: user.avatar }}
+                    className="size-full"
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View className="size-full items-center justify-center bg-white/15">
+                    <Text className="text-xl font-bold text-white">
+                      {user.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
               </View>
               <View className="flex-1">
                 <Text className="text-lg font-bold text-white">{user.name}</Text>

@@ -4,7 +4,7 @@ Workspace gồm mobile, web và API độc lập. Role-flow repair chỉ thay đ
 
 ## Trạng thái và tài liệu
 
-- Evidence Batch 00–12 được giữ nguyên trong [batch report](BACKEND-FIX-BATCHES-REPORT.md). Batch 13 thêm reminder recovery và SQL dashboard; Batch 15 thêm optional dispatch configuration. Batch 14 có suite HTTP local, provider mô phỏng và các gate riêng; kết quả mới nhất và blockers nằm trong report.
+- Evidence Batch 00–12 được giữ nguyên trong [batch report](PLANS/backend/BACKEND-FIX-BATCHES-REPORT.md). Batch 13 thêm reminder recovery và SQL dashboard; Batch 15 thêm optional dispatch configuration. Batch 14 có suite HTTP local, provider mô phỏng và các gate riêng; kết quả mới nhất và blockers nằm trong report.
 - Source migrations liên tục **001–046**; local Docker test đã apply đến **046**. Production là Supabase project đã được xác nhận; task local không migrate/seed production. Rollout bắt buộc dùng [schema checklist](apps/api/SCHEMA-RELEASE-CHECKLIST.md).
 - Auth/dispatch/schedule/job detail và admin recovery: [workflow docs](apps/api/PROFILE-LISTS-ADMIN-DISPATCH.md), [scheduled fulfillment](apps/api/SCHEDULED-FULFILLMENT.md), [mechanic job detail](apps/api/MECHANIC-JOB-DETAIL.md), [admin recovery](apps/api/ADMIN-RECOVERY-OPERATIONS.md).
 - Batch 13/15 API, bounds, locks, thresholds và opt-in: [reminder/dashboard/configuration](apps/api/ADMIN-REMINDER-DASHBOARD-CONFIGURATION.md).

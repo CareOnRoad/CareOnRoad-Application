@@ -15,7 +15,7 @@ Patches B-J map to the prioritized user stories below.
 Implementation reconciliation (03/10/2026): Patches A–I and explicitly authorized J are
 implemented in role-flow Batches 00–15; local acceptance results and remaining
 provider/device/production gates are recorded in the root batch report. Tests are consolidated rather than copied per planned
-filename. See root BACKEND-FIX-BATCHES-REPORT.md and
+filename. See PLANS/backend/BACKEND-FIX-BATCHES-REPORT.md and
 apps/api/ADMIN-RECOVERY-OPERATIONS.md for scope, policies and evidence.
 
 ## Patch-to-Task Index

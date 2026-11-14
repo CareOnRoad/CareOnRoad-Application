@@ -165,8 +165,12 @@ apps/mobile/
 - Tap notification từ inbox (`/rider/notifications`, `/mechanic/notifications`)
   sẽ gọi `hrefForNotification(notification, role)` ở
   `lib/notification-routing.ts` để navigate in-app:
-  - `quote` (rider) → `/rider/payments/{quoteId}?requestId=...`
-  - `payment` (rider) → `/rider/(tabs)/rescue`
+  - `quote` (rider) → `/rider/rescue/{requestId}` — **KHÔNG** mở thẳng
+    `/rider/payments/{quoteId}`. Lúc thông báo quote được gửi, quote còn
+    `pending` nên BE từ chối tạo payment order (`409 Quote is not payable`).
+    Màn chi tiết tự hiển thị card báo giá + nút Duyệt/Từ chối, và chỉ hiện
+    nút "Thanh toán ngay" sau khi quote đã được duyệt.
+  - `payment` (rider) → `/rider/rescue/{requestId}`
   - `review` (rider) → `/rider/review?requestId=...`
   - `reminder` (rider) → `/rider/(tabs)/schedule?reminderId=...`
   - `service_request` (mechanic) → `/mechanic/(tabs)/offers`
@@ -202,12 +206,22 @@ apps/mobile/
 
 ### 4.9. Mechanic submit quote
 - `apps/mobile/src/lib/mechanic-quotes-service.ts` export `submitQuote()`.
-- `purpose` auto-fill theo `serviceType`:
-  `emergency_rescue` → `rescue_final`, `periodic_maintenance` → `maintenance_work`,
-  khác → `standard`.
-- Optimistic placeholder quote trong context `latestQuoteMap`; rollback khi BE
-  fail (đặc biệt 409 - state machine không cho phép).
+- **`quotePurposePlanFor(serviceType, assignmentStatus, hasApprovedWorkQuote)`**
+  quyết định bước báo giá hiện tại (thay cho `suggestPurposeForServiceType`):
+  - `emergency_rescue`: `accepted` → `rescue_labor` (bắt buộc `labor_pricing`),
+    sau đó → `rescue_final` (chỉ parts).
+  - `periodic_maintenance`: `accepted` → `maintenance_labor`,
+    `diagnosis` → `maintenance_work` (chỉ parts),
+    `in_progress` → `maintenance_work` addition (bắt buộc `basis_quote_id` =
+    quote `maintenance_work` đã approved).
+  - còn lại → `standard`.
+  - Tham số `hasApprovedWorkQuote` KHÔNG còn dùng để chọn plan — BE chỉ cho
+    báo giá phát sinh thêm khi assignment = `in_progress`
+    (`quote.service.ts` → `maintenanceAddition`).
 - Form UI ở `components/mechanic/forms/quote-form.tsx` + `diagnosis-form.tsx`.
+  `quote-form.tsx` nhận `plan: QuotePurposePlan` để tự ẩn/hiện field theo bước
+  (`labor_pricing` cho `rescue_labor`, chỉ line `part` cho `rescue_final` /
+  `maintenance_work`).
 
 ### 4.10. Gói của tôi (plan subscription)
 - `apps/mobile/src/lib/subscriptions-service.ts` export `getPlanCatalog()`,
@@ -295,6 +309,213 @@ apps/mobile/
   chuẩn: `className` (kèm `active:`) nằm trên `<Pressable>` gốc; Android dùng
   imperative API `DateTimePickerAndroid.open()` (không dùng `<DateTimePicker>`
   khai báo vì Android không có `mode='datetime'` và `onChange` đã deprecated).
+
+### 4.13. Payment status contract + `approvedQuote` (rider quote → payment)
+- **Contract phải khớp BE 1-1.** `PaymentStatus` ở `lib/payments-service.ts`
+  phải đúng bằng `PaymentOrderStatus` của BE
+  (`apps/api/src/features/payments/payment.service.ts`):
+  `created | pending | succeeded | failed | canceled | needs_review`.
+  - BE dùng **`succeeded`** (KHÔNG phải `paid`) → màn "thanh toán thành công"
+    kiểm `order.status === 'succeeded'`.
+  - BE trả **`succeeded_at`** (KHÔNG phải `paid_at`).
+  - BE không có status `expired` → đơn hết hạn vẫn là `canceled`.
+- Dùng helper có sẵn thay vì so sánh chuỗi:
+  - `isFinalStatus(s)` → `succeeded | canceled | failed` (dừng polling).
+  - `isPendingStatus(s)` → `created | pending` (tiếp tục polling).
+- **`ActiveSession` giữ CẢ `quote` và `approvedQuote`.** Sau khi rider duyệt,
+  BE không còn quote `pending` nào; chỉ dựa vào `quote` thì nút "Thanh toán
+  ngay" biến mất và tổng tiền đã chốt không hiển thị.
+  - `lib/quotes-service.ts` export `getQuoteBundle(requestId)` (1 request) và
+    helper thuần `selectQuoteBundle(all)` để test.
+  - UI dùng `approvedQuote ?? quote` cho mọi thao tác thanh toán.
+- **Chỉ tạo payment order từ quote ĐÃ DUYỆT.** BE trả `409 Quote is not
+  payable.` nếu quote còn `pending` → deep-link thông báo `quote` không được
+  mở thẳng màn `/rider/payments/{quoteId}` (xem 4.6).
+
+### 4.14. Quote nhiều bước (cứu hộ / bảo dưỡng) — `purpose` + `payment_timing`
+- **BE có 5 `purpose`** (`quote.schemas.ts`): `standard`, `rescue_labor`,
+  `rescue_final`, `maintenance_labor`, `maintenance_work`. Mỗi purpose có
+  quy tắc riêng — FE KHÔNG được tự suy luận.
+- **Rider duyệt quote `rescue_labor` PHẢI chọn `payment_timing`**:
+  - `labor_upfront` → trả tiền công TRƯỚC khi thợ đi.
+  - `after_repair`  → trả sau khi sửa xong.
+  - BE trả **400** nếu approve `rescue_labor` mà thiếu `payment_timing`, và
+    **400** nếu truyền `payment_timing` cho quote khác.
+  - Modal chọn: `src/components/ui/payment-timing-modal.tsx` (dùng chung cho
+    tab Cứu hộ và màn chi tiết).
+  - Helper thuần: `requiresPaymentTiming(quote)` trong `lib/quotes-service.ts`.
+- **`maintenance_labor` KHÔNG bao giờ payable.** Tiền công bảo dưỡng được gộp
+  vào báo giá vật tư `maintenance_work` (BE tự cộng). Cùng logic cho
+  `rescue_labor` với `rescue_final`.
+- **Helper `isQuotePayableNow(quote, { paymentTiming, assignmentStatus })`** —
+  mirror điều kiện của BE `createPaymentOrder`:
+  - `rescue_labor` → chỉ payable khi `paymentTiming === 'labor_upfront'` VÀ
+    assignment `accepted`.
+  - `maintenance_labor` → không payable.
+  - còn lại → chỉ payable khi assignment `awaiting_payment`.
+- **`GET /api/v1/service-requests/{id}/payment-summary`** là nguồn chính xác
+  cho "đã trả / còn trả" (`lib/payments-service.ts` → `getPaymentSummary`).
+  `ActiveSession.paymentSummary` được load trong `refreshActive()`.
+  - Cứu hộ `labor_upfront`: request ở `assigned` (phase `tracking`) nhưng
+    rider VẪN phải trả tiền công → điều kiện thanh toán dựa trên
+    `payment-summary`, KHÔNG dựa trên phase.
+- **Checklist hoàn tất bắt buộc cho bảo dưỡng.** BE yêu cầu checklist gắn
+  quote `maintenance_work` đã approved trước khi chuyển
+  `in_progress → awaiting_payment` (BE trả 409 nếu thiếu).
+  - Form: `src/components/mechanic/forms/completion-checklist-form.tsx`.
+  - BE tự gắn `approved_quote_id` (server-owned) → client KHÔNG chọn quote.
+  - `work_summary` phải ≥ 10 ký tự (BE trả 400 nếu thiếu).
+- **Kế hoạch báo giá của mechanic**: `quotePurposePlanFor(serviceType,
+  assignmentStatus)` trong `lib/mechanic-quotes-service.ts` trả kế hoạch bước
+  hiện tại (`rescue_labor` → `rescue_final`; `maintenance_labor` →
+  `maintenance_work` → `maintenance_work` addition với `basis_quote_id`).
+
+### 4.7. Form GỘP chẩn đoán + báo giá (luồng rút gọn)
+- **Form**: `src/components/mechanic/forms/diagnosis-quote-form.tsx`.
+- **Context**: `submitDiagnosisAndQuote(jobId, input)` trong
+  `contexts/mechanic-app-context.tsx`.
+- **Cơ chế**: FE gọi TUẦN TỰ 2 API:
+  1. `POST /api/v1/assignments/{id}/diagnoses` (nếu thợ có nhập chẩn đoán)
+  2. `POST /api/v1/service-requests/{requestId}/quotes` với `diagnosis_id`
+     trỏ tới chẩn đoán vừa tạo.
+- **BE KHÔNG cần thay đổi** — `quote.service.ts` đã validate `diagnosis_id`
+  thuộc đúng assignment/request, và đã cho phép `diagnosis_id` cho các
+  purpose sau khi tới nơi.
+- **Ưu điểm**: rider nhận 1 yêu cầu duyệt duy nhất (trước đây thợ phải gửi
+  chẩn đoán rồi mới gửi báo giá → 2 lần bấm, 2 lần round-trip).
+- **Ràng buộc KHÔNG gộp được**:
+  - `rescue_labor` / `maintenance_labor` (tiền công TRƯỚC khi đi): BE cấm
+    `diagnosis_id` (`quote.schemas.ts`) và lúc đó thợ chưa tới nơi.
+  - `maintenance_work` phát sinh thêm (`isAddition`): báo giá PHẢI trỏ
+    `basis_quote_id` tới quote `maintenance_work` đã approved.
+- **State machine**: BE yêu cầu assignment = `diagnosis` khi tạo version báo
+  giá đầu tiên sau khi tới nơi → `ensureDiagnosisStage()` tự chuyển
+  `on_site → diagnosis` trước khi gửi.
+- **Rollback**: nếu bước 1 OK nhưng bước 2 fail → chẩn đoán ĐÃ được lưu
+  (BE upsert 1 record / assignment). Form hiển thị lỗi và giữ nội dung;
+  lần thử lại sẽ bỏ qua bước 1 vì đã có chẩn đoán.
+
+### 4.15. Upload ảnh thực địa (media upload intent) — contract BE
+- **BE schema là `.strict()`** (`apps/api/src/features/media-uploads/media-upload.schemas.ts`).
+  Body của `POST /api/v1/media/upload-intents` PHẢI đúng các field:
+  `resource_type` (`service_request` | `assignment`), `resource_id` (uuid),
+  `purpose`, `content_type` (`image/jpeg` | `image/png` | `image/webp`),
+  `size_bytes` (1..8MB), `sha256` (hex 64 ký tự).
+  - Gửi field lạ (vd `context`, `checksum`) → BE trả **400 "Media upload intent
+    input is invalid."**
+  - `purpose` hợp lệ theo resource: request → `problem_photo` | `other`;
+    assignment → `diagnosis` | `work_proof` | `safety` | `other`.
+- **SHA-256 tính TRÊN THIẾT BỊ.** Hermes không có `globalThis.crypto.subtle`,
+  nên dùng helper thuần TS `src/lib/sha256.ts` (`sha256Hex(bytes)`), đã test
+  khớp `node:crypto` trên nhiều độ dài.
+  - `size_bytes` phải là số byte ĐO THỰC TẾ sau khi đọc buffer, KHÔNG dùng
+    `asset.fileSize` của ImagePicker (ảnh có thể bị re-encode → lệch →
+    finalize fail 409 "Uploaded media does not match the upload intent.").
+- **Quy trình là 3 BƯỚC, không phải 4.** Bước `finalize` đã tự tạo bản ghi
+  media metadata cho assignment (`media-upload.service.ts` →
+  `createAssignmentMediaMetadata`) → KHÔNG gọi thêm
+  `POST /api/v1/assignments/{id}/media` (tạo bản ghi trùng + vượt giới hạn
+  5 media / resource).
+- **Component**: `src/components/mechanic/forms/field-photo-uploader.tsx`.
+
+### 4.16. Trạng thái `diagnosis` — không có nút chuyển trạng thái thủ công
+- Ở trạng thái `diagnosis`, BE **không** cho mechanic chuyển trạng thái thủ
+  công (BE tự set `quoted` khi tạo quote version đầu tiên). Nếu UI chỉ hiện
+  "Không có bước chuyển trạng thái nào khả dụng" thì mechanic tưởng app lỗi.
+- **Helper `nextStepHint(status, { serviceType, hasApprovedFinalQuote })`** trong
+  `lib/mechanic-jobs-service.ts` trả hướng dẫn bước tiếp theo (luôn có, trừ
+  trạng thái kết thúc / không xác định). `JobUpdateForm` dùng nó để thay câu
+  "không có bước chuyển trạng thái".
+- **Quote đã duyệt của bước TRƯỚC không được chặn form của bước HIỆN TẠI.**
+  Cứu hộ có `rescue_labor` → `rescue_final`, bảo dưỡng có `maintenance_labor`
+  → `maintenance_work`. Màn chi tiết dùng:
+  - `approvedQuoteForStep` (đúng `purpose` của bước hiện tại) → read-only,
+    chặn form.
+  - `previousApprovedQuote` (khác `purpose`) → chỉ hiển thị, KHÔNG chặn form.
+  - `pendingQuoteForStep` (đúng `purpose`, đang chờ duyệt) → read-only, chặn
+    form.
+  - Dùng `quotePlanForPurpose(purpose)` (không phải `quotePurposePlanFor`) khi
+    hiển thị quote đã tồn tại — plan theo trạng thái sẽ trỏ sai bước.
+
+### 4.17. Session + payment recovery (rider)
+- **Nguồn sự thật chung cho danh sách request:** `list` / `listLoading` /
+  `listError` / `reloadList` nằm trong `ActiveRequestProvider`
+  (`src/contexts/active-request-context.tsx`), KHÔNG phải state cục bộ của
+  `useServiceRequests()`. Provider tự hydrate 1 lần lúc mount → app mở là
+  có data, tab "Theo dõi" và banner "Yêu cầu đang chạy" ở Home luôn đúng
+  (trước đây mỗi screen một bản riêng → trống sau restart).
+  - `reloadList` dùng `useCallback` deps rỗng → identity ổn định, dùng được
+    trong deps của `useEffect` / `useFocusEffect` mà không re-fire vô hạn.
+  - `active` (ActiveSession) vẫn nằm trong `useServiceRequests()` vì có
+    nhiều timer/polling.
+- **`paymentSummary` tải KHÔNG điều kiện** theo `assignment`.
+  `GET /api/v1/service-requests/{id}/payment-summary` chỉ cần `requestId` →
+  gọi vô điều kiện trong `refreshActive()` (BE trả 404 nếu chưa có quote).
+  Trước đây nằm trong `if (assignment)` → ở khoảng thời gian thợ vừa accept,
+  phần "đã trả / còn trả" không hiện dù BE đã có dữ liệu.
+- **Màn `/rider/payments/[quoteId]`:** mount → `GET` đơn đã lưu trong
+  AsyncStorage trước, mới `POST` tạo mới.
+  - Storage key `@careonroad/rider/payment_orders`, map `{ [quoteId]: orderId }`
+    (helper `savePaymentOrderRef` / `readPaymentOrderRef` /
+    `removePaymentOrderRef` trong `src/lib/payments-service.ts`).
+  - Đơn `succeeded` → hiện màn success, không lỗi 409 "This quote has already
+    been paid." (BE chặn tạo đơn mới khi quote đã có đơn `succeeded`).
+  - `POST` mà gặp 409 already-paid → xác nhận lại bằng `getPaymentSummary`; nếu
+    `paid_amount >= total_amount` → hiện màn success dựa trên summary.
+  - Ref được xoá khi đơn chốt (`succeeded` / `canceled`); GIỮ ref cho
+    `failed` vì nhánh retry cần `order.id` để huỷ.
+- **Đơn `failed` không bị kẹt:** BE giữ đơn `failed` trong
+  `findActiveByQuoteForUpdate` → `POST` tạo đơn mới sẽ trả lại chính đơn cũ.
+  Nhánh `failed` có nút **"Huỷ đơn & tạo lại"**: `cancelPaymentOrder(order.id)`
+  → `createPaymentOrder(quoteId)` → poll lại.
+  - Nếu huỷ 409 ("Payment cancellation was not confirmed…") → DỪNG, KHÔNG tạo
+    đơn mới, báo liên hệ hỗ trợ (chống double-charge).
+  - Helper thuần `paymentRetryDecision(order)` trả
+    `'retryable' | 'already_paid' | 'needs_support'`; `needs_review` → admin
+    xem xét, rider không tự retry.
+
+### 4.18. Tính năng theo gói (Advance / VIP) — hồ sơ xe + mẫu nhắc bảo dưỡng
+
+BE đã implement đầy đủ, mobile gọi đúng contract:
+
+| Endpoint BE | Client mobile |
+|---|---|
+| `PATCH /api/v1/motorcycles/{id}/details` | `updateMotorcycleDetails()` — `src/lib/motorcycles-service.ts` |
+| `GET /api/v1/reminder-presets` | `listReminderPresets()` — `src/lib/reminders-service.ts` |
+| `POST /api/v1/motorcycles/{id}/reminder-presets` | `applyReminderPresets()` |
+| `POST /api/v1/reminders/{id}/done` | `markReminderDone()` |
+
+- **Helper thuần khoá theo gói:** `src/lib/plan-gate.ts`
+  (`planSatisfies`, `hasAdvancePlan`, `hasVipPlan`, `isPlanRequiredError`,
+  `planRequiredOf`, `planRequiredMessageFor`). Nguồn gói: `useAuth().user.planCode`
+  (đã refresh khi app foreground → khớp BE).
+- **Hồ sơ xe (VIP) — 10 field** trong `src/lib/vehicle-details.ts`
+  (`VEHICLE_DETAIL_FIELDS`): màu, số khung, số máy, ngày mua, giá mua, hạn
+  bảo hành, nhà cung cấp BH, số hợp đồng BH, hạn BH, trung tâm bảo hành ưu tiên.
+  - Ngữ nghĩa partial-update đúng BE: **không đổi → bỏ qua key** (BE giữ),
+    **xoá → gửi `null`**, **sửa → gửi giá trị mới**. Chuỗi rỗng KHÔNG hợp lệ
+    (`z.string().trim().min(1)`) → `formStateToDetailsPatch` tự đổi thành `null`.
+  - Đọc LUÔN được phép, kể cả khi gói hết hạn (D7: không xoá, không ẩn).
+  - Ghi giá trị MỚI cần gói VIP; **xoá luôn được phép** kể cả khi hết gói (D14).
+    → UI: không có VIP thì field đã lưu vẫn xoá được, field chưa có thì khoá.
+- **Mẫu nhắc bảo dưỡng (Advance/VIP):** 5 mẫu trong `REMINDER_ITEM_CODES`;
+  4 mẫu cần `advance`, `insurance_renewal` cần `vip`. Chu kỳ do BE quy định
+  theo `usage_level` (`light`/`normal`/`heavy`) — UI chỉ chọn mức, không tự tính.
+  - UI: section "Mẫu nhắc bảo dưỡng" trong tab "Nhắc nhở"
+    (`app/rider/(tabs)/schedule.tsx`) → `ReminderPresetSheet`
+    (`src/components/reminder-preset-sheet.tsx`): chọn xe → mức sử dụng →
+    chọn mẫu → tuỳ chọn "lần làm gần nhất".
+  - Rule sinh từ preset có `item_code` → `ReminderCard` hiện badge + nút
+    **"Đã làm"** (`POST /reminders/{id}/done`, body `{ done_on }`).
+  - Sửa/snooze/tắt một lịch nhắc **đã có** vẫn luôn được phép, kể cả hết gói.
+- **Lỗi 403 `plan_required`:** BE trả body phẳng
+  `{ error_code, message, details: { reason: "plan_required", required_plan } }`.
+  Mobile dùng `planRequiredMessageFor(err)` để hiện message tiếng Việt + CTA
+  `/rider/plans`, KHÔNG crash.
+- **KHÔNG có `mileage` trong `Vehicle`:** BE cố ý không lưu số km
+  (design decision D1 trong `apps/api/VEHICLE-MAINTENANCE-PLANS-DESIGN.md`).
+  UI đã bỏ ô "Số km" (trước đây hiện số giả `0 km`). Màu sắc nằm trong
+  `details.color` → `Vehicle.color`.
 
 ## 5. Test trên thiết bị thật (Expo Go)
 

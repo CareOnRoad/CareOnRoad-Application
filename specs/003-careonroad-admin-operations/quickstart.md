@@ -4,7 +4,7 @@ Current local status: Patches A–I and explicitly authorized J are implemented.
 Source/local schema requires 046. Batch 14 exercises real local Supabase JWT,
 Next HTTP and PostgreSQL with a simulated payOS provider. Real provider/device
 acceptance and production rollout remain pending. See the root
-BACKEND-FIX-BATCHES-REPORT.md for final run results and limits.
+PLANS/backend/BACKEND-FIX-BATCHES-REPORT.md for final run results and limits.
 
 ## Purpose
 

@@ -181,6 +181,29 @@ export async function listMechanicJobs(
   return apiGet<MechanicJobsPage>('/api/v1/mechanics/me/jobs', { query });
 }
 
+/**
+ * Gộp danh sách job từ 2 query: toàn bộ + job active.
+ *
+ * Lý do: BE sort `assignment.created_at desc` và giới hạn `limit` → job đang
+ * làm nhưng tạo từ lâu (ví dụ cứu hộ kéo dài qua ngày) có thể bị đẩy khỏi
+ * trang đầu → mechanic mở lại app thấy mất job đang xử lý.
+ *
+ * Query `active_only=true` chỉ trả job active nên luôn nằm trong `limit` đầu.
+ * Khi gộp, bản ghi trong danh sách "toàn bộ" được ưu tiên (đầy đủ hơn), job
+ * active chỉ bổ sung cho assignment chưa có.
+ */
+export function mergeMechanicJobLists(
+  all: readonly MechanicDashboardJob[],
+  active: readonly MechanicDashboardJob[],
+): MechanicDashboardJob[] {
+  const merged = new Map<string, MechanicDashboardJob>();
+  for (const item of all) merged.set(item.assignment_id, item);
+  for (const item of active) {
+    if (!merged.has(item.assignment_id)) merged.set(item.assignment_id, item);
+  }
+  return Array.from(merged.values());
+}
+
 // =========================================================
 // Performance
 // =========================================================

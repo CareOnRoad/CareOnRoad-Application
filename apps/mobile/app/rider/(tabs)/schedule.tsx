@@ -10,6 +10,7 @@ import {
   Check,
   LucideIcon,
   Plus,
+  Sparkles,
   Wrench,
   XCircle,
   FileText,
@@ -28,15 +29,18 @@ import { CancelAppointmentModal } from '@/components/cancel-appointment-modal';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { DateTimePickerField } from '@/components/ui/datetime-picker-field';
-import { formatDdMmYyyyHHmm, isPastDateTime } from '@/lib/format';
+import { ReminderPresetSheet } from '@/components/reminder-preset-sheet';
+import { formatDdMmYyyy, formatDdMmYyyyHHmm, isPastDateTime, toIsoDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { updateReminder, snoozeReminder } from '@/lib/reminders-service';
+import { hasAdvancePlan, planRequiredMessageFor } from '@/lib/plan-gate';
+import { updateReminder, snoozeReminder, markReminderDone } from '@/lib/reminders-service';
 import type { Appointment } from '@/lib/types';
 import type { ServiceRequestResponse } from '@/lib/service-requests-service';
 import {
   deriveStatus,
   intervalDaysToRecurrence,
   recurrenceLabel,
+  REMINDER_ITEM_LABELS,
   type Reminder,
   type ReminderRecurrence,
 } from '@/lib/reminders-service';
@@ -98,11 +102,15 @@ function requestToAppointment(
 export default function ScheduleScreen() {
   const { vehicles, reminders, remindersLoading, remindersError, reloadReminders } = useApp();
   const sr = useServiceRequests();
-  const { status: authStatus, isBackendConfigured } = useAuth();
+  const { status: authStatus, isBackendConfigured, user } = useAuth();
   const [tab, setTab] = useState<HistoryTab>('maintenance');
   const [maintenanceFilter, setMaintenanceFilter] = useState<MaintenanceFilter>('upcoming');
   const [cancelling, setCancelling] = useState<Appointment | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [presetSheetOpen, setPresetSheetOpen] = useState(false);
+
+  // Gói hiện tại quyết định có mở được mẫu nhắc bảo dưỡng (cần advance).
+  const advanceActive = hasAdvancePlan(user?.planCode);
 
   // Guard: nếu chưa authenticated hoặc BE chưa cấu hình → render sớm.
   // Tránh flash EmptyState vì lý do auth.
@@ -316,6 +324,54 @@ export default function ScheduleScreen() {
         )}
         {tab === 'reminders' && (
           <View className="gap-3">
+            {/* =========================================================
+                Mẫu nhắc bảo dưỡng theo linh kiện (gói Advance / VIP)
+                ========================================================= */}
+            {advanceActive ? (
+              <Card className="border-primary/30 bg-primary/5 p-4">
+                <View className="flex-row items-center gap-2">
+                  <Sparkles size={18} color="#1974f7" />
+                  <Text className="flex-1 text-sm font-bold text-foreground">
+                    Mẫu nhắc bảo dưỡng
+                  </Text>
+                </View>
+                <Text className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                  Bật sẵn các mẫu nhắc thay nhớt, dầu phanh, nước làm mát và bảo
+                  hiểm. Chu kỳ được tính tự động theo mức sử dụng xe của bạn.
+                </Text>
+                <ActionButton
+                  fullWidth
+                  className="mt-3"
+                  onPress={() => setPresetSheetOpen(true)}
+                  accessibilityLabel="Bật mẫu nhắc bảo dưỡng"
+                >
+                  <Sparkles size={16} color="#ffffff" />
+                  <Text className="text-sm font-semibold text-primary-foreground">
+                    Bật mẫu nhắc
+                  </Text>
+                </ActionButton>
+              </Card>
+            ) : (
+              <View className="gap-2">
+                <Banner
+                  tone="info"
+                  title="Mẫu nhắc bảo dưỡng là tính năng của gói Advance"
+                  description="Nâng cấp để bật sẵn lịch nhắc thay nhớt, dầu phanh, nước làm mát và bảo hiểm theo mức sử dụng xe."
+                />
+                <ActionButton
+                  fullWidth
+                  variant="outline"
+                  onPress={() => router.push('/rider/plans')}
+                  accessibilityLabel="Nâng cấp lên gói Advance"
+                >
+                  <Sparkles size={16} color="#16202f" />
+                  <Text className="text-sm font-semibold text-foreground">
+                    Nâng cấp lên Advance
+                  </Text>
+                </ActionButton>
+              </View>
+            )}
+
             <ActionButton
               fullWidth
               className="mb-3 py-3"
@@ -407,6 +463,13 @@ export default function ScheduleScreen() {
           setCancelError(null);
         }}
         onConfirm={handleCancelMaintenance}
+      />
+
+      <ReminderPresetSheet
+        visible={presetSheetOpen}
+        vehicles={vehicles}
+        onClose={() => setPresetSheetOpen(false)}
+        onApplied={reloadReminders}
       />
       {cancelError && (
         <View className="px-5 pb-3">
@@ -667,6 +730,27 @@ function ReminderCard({
   };
   const fireDate = new Date(reminder.next_due_at);
   const recurrence = intervalDaysToRecurrence(reminder.interval_days);
+  const isPreset = !!reminder.item_code;
+  const [doneOpen, setDoneOpen] = useState(false);
+  const [doneDate, setDoneDate] = useState<Date | null>(new Date());
+  const [doneError, setDoneError] = useState<string | null>(null);
+
+  const handleMarkDone = async (date: Date) => {
+    setBusy(true);
+    setDoneError(null);
+    try {
+      await markReminderDone(reminder.id, toIsoDate(date));
+      setDoneOpen(false);
+      await onChanged();
+    } catch (e) {
+      const planMessage = planRequiredMessageFor(e);
+      setDoneError(
+        planMessage ?? (e instanceof Error ? e.message : 'Không thể đánh dấu đã làm'),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <>
     <Card className="p-4">
@@ -681,15 +765,24 @@ function ReminderCard({
             </Text>
           )}
         </View>
-        <Badge tone={status === 'active' ? 'blue' : status === 'snoozed' ? 'amber' : 'neutral'}>
-          <Text className="text-xs font-semibold">
-            {status === 'active'
-              ? 'Đang bật'
-              : status === 'snoozed'
-                ? 'Tạm hoãn'
-                : 'Tắt'}
-          </Text>
-        </Badge>
+        <View className="items-end gap-1.5">
+          <Badge tone={status === 'active' ? 'blue' : status === 'snoozed' ? 'amber' : 'neutral'}>
+            <Text className="text-xs font-semibold">
+              {status === 'active'
+                ? 'Đang bật'
+                : status === 'snoozed'
+                  ? 'Tạm hoãn'
+                  : 'Tắt'}
+            </Text>
+          </Badge>
+          {isPreset ? (
+            <Badge tone="blue">
+              <Text className="text-[10px] font-semibold text-primary">
+                {REMINDER_ITEM_LABELS[reminder.item_code!] ?? 'Mẫu bảo dưỡng'}
+              </Text>
+            </Badge>
+          ) : null}
+        </View>
       </View>
       <View className="mt-2 flex-row items-center gap-2">
         <View className="flex-row items-center gap-1 rounded-full bg-secondary px-2.5 py-1">
@@ -703,8 +796,36 @@ function ReminderCard({
             {recurrenceLabel(recurrence as ReminderRecurrence)}
           </Text>
         </View>
+        {reminder.last_done_on ? (
+          <View className="flex-row items-center gap-1 rounded-full bg-green/10 px-2.5 py-1">
+            <Check size={12} color="#145413" />
+            <Text className="text-xs font-semibold text-green">
+              Đã làm {formatDdMmYyyy(`${reminder.last_done_on}T00:00:00`)}
+            </Text>
+          </View>
+        ) : null}
       </View>
+      {doneError ? (
+        <View className="mt-3">
+          <Banner tone="error" description={doneError} />
+        </View>
+      ) : null}
       <View className="mt-3 flex-row gap-2">
+        {isPreset ? (
+          <ActionButton
+            variant="primary"
+            fullWidth
+            onPress={() => {
+              setDoneDate(new Date());
+              setDoneOpen(true);
+            }}
+            disabled={busy}
+            accessibilityLabel="Đánh dấu đã làm"
+          >
+            <Check size={14} color="#ffffff" />
+            <Text className="text-sm font-semibold text-primary-foreground">Đã làm</Text>
+          </ActionButton>
+        ) : null}
         {status !== 'disabled' && (
           <ActionButton
             variant="secondary"
@@ -738,6 +859,64 @@ function ReminderCard({
         </ActionButton>
       </View>
     </Card>
+    {/* Modal đánh dấu đã làm */}
+    <Modal
+      visible={doneOpen}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setDoneOpen(false)}
+    >
+      <View className="flex-1 items-center justify-center bg-black/40 px-5">
+        <Pressable
+          className="absolute inset-0"
+          onPress={() => setDoneOpen(false)}
+        />
+        <View className="w-full max-w-sm rounded-3xl bg-card p-5">
+          <View className="mb-1 flex-row items-center gap-2">
+            <Check size={18} color="#22c55e" />
+            <Text className="text-base font-bold text-foreground">
+              Đánh dấu đã làm
+            </Text>
+          </View>
+          <Text className="mb-3 text-xs text-muted-foreground">
+            Chọn ngày bạn vừa thực hiện. Lịch nhắc sẽ được tính lại từ ngày này.
+          </Text>
+          <DateTimePickerField
+            mode="date"
+            value={doneDate}
+            onChange={setDoneDate}
+            maximumDate={new Date()}
+            placeholder="Chọn ngày"
+            accessibilityLabel="Ngày đã làm"
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={!doneDate || busy}
+            onPress={() => doneDate && handleMarkDone(doneDate)}
+            className={cn(
+              'mt-3 items-center rounded-xl py-2.5',
+              !doneDate || busy ? 'bg-secondary' : 'bg-primary active:scale-95',
+            )}
+          >
+            <Text
+              className={cn(
+                'text-sm font-semibold',
+                !doneDate || busy ? 'text-muted-foreground' : 'text-primary-foreground',
+              )}
+            >
+              {busy ? 'Đang lưu...' : 'Xác nhận đã làm'}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setDoneOpen(false)}
+            className="mt-2 items-center rounded-xl border border-border py-2.5 active:scale-95"
+          >
+            <Text className="text-sm font-semibold text-foreground">Đóng</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
     {/* Snooze modal */}
     <Modal
       visible={snoozeOpen}

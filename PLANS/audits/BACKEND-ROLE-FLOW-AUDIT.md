@@ -4,7 +4,7 @@ Ngày kiểm tra: **01/10/2026, giờ Việt Nam**. Phạm vi: working tree hi�
 
 Ghi chú đối chiếu sau implementation: nội dung dưới đây là baseline audit lịch sử.
 Các sửa đổi và bằng chứng local đến Batch 15 nằm trong
-[batch report](BACKEND-FIX-BATCHES-REPORT.md). Source/Docker test đã tới migration
+[batch report](../backend/BACKEND-FIX-BATCHES-REPORT.md). Source/Docker test đã tới migration
 046; provider/device thật và production rollout vẫn cần gate riêng. Không dùng
 các số FAIL/schema cũ bên dưới làm trạng thái hiện tại của local implementation.
 

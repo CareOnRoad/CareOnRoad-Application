@@ -17,20 +17,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
-  cancelServiceRequest as apiCancelServiceRequest,
+    cancelServiceRequest as apiCancelServiceRequest,
   createServiceRequest as apiCreateServiceRequest,
   getServiceRequest,
-  listServiceRequests,
   startDispatch as apiStartDispatch,
   statusToPhase,
+  type DispatchRoundResponse,
+  type RouteEtaResponse,
   type ServiceRequestResponse,
 } from '@/lib/service-requests-service';
-import { getRouteEta, getLiveLocation } from '@/lib/assignments-service';
-import { getLatestPendingQuote, approveQuote, rejectQuote, type Quote } from '@/lib/quotes-service';
-import { listAssignments, type AssignmentListItem } from '@/lib/assignments-service';
+import {
+  getRouteEta,
+  getLiveLocation,
+  listAssignments,
+  type AssignmentListItem,
+  type LiveLocationResponse,
+} from '@/lib/assignments-service';
+import { getPaymentSummary, type PaymentSummary } from '@/lib/payments-service';
+import { getQuoteBundle, approveQuote, rejectQuote, type Quote, type PaymentTiming } from '@/lib/quotes-service';
 import { useActiveRequest } from '@/contexts/active-request-context';
-import type { DispatchRoundResponse, RouteEtaResponse } from '@/lib/service-requests-service';
-import type { LiveLocationResponse } from '@/lib/assignments-service';
 
 export type Phase = 'idle' | 'searching' | 'tracking' | 'quote' | 'payment' | 'completed' | 'canceled';
 
@@ -40,7 +45,24 @@ export interface ActiveSession {
   request: ServiceRequestResponse | null;
   round: DispatchRoundResponse | null;
   assignment: AssignmentListItem | null;
+  /** Quote đang chờ rider duyệt (nếu có). */
   quote: Quote | null;
+  /**
+   * Quote đã được rider duyệt (version cao nhất).
+   *
+   * Cần thiết vì sau khi duyệt, BE không còn quote `pending` nào — nếu chỉ
+   * dựa vào `quote` thì nút "Thanh toán ngay" sẽ biến mất và tổng tiền đã
+   * chốt không hiển thị được.
+   */
+  approvedQuote: Quote | null;
+  /**
+   * Tổng hợp thanh toán (đã trả / còn trả) — nguồn chính xác từ BE
+   * `GET /service-requests/{id}/payment-summary`.
+   *
+   * Dùng cho thanh toán nhiều bước: cứu hộ trả tiền công trước rồi trả
+   * phần phụ tùng sau; bảo dưỡng trả công trước rồi trả phần còn lại.
+   */
+  paymentSummary: PaymentSummary | null;
   eta: RouteEtaResponse | null;
   liveLocation: LiveLocationResponse | null;
   lastError: string | null;
@@ -58,6 +80,8 @@ const INITIAL_SESSION: ActiveSession = {
   round: null,
   assignment: null,
   quote: null,
+  approvedQuote: null,
+  paymentSummary: null,
   eta: null,
   liveLocation: null,
   lastError: null,
@@ -88,8 +112,14 @@ interface UseServiceRequestsReturn {
   cancel: (reason: string) => Promise<void>;
   /** Huỷ 1 request cụ thể qua id (dùng từ danh sách, không cần đang tracking). */
   cancelById: (requestId: string, reason: string) => Promise<void>;
-  /** Duyệt báo giá. */
-  approveQuote: () => Promise<void>;
+  /**
+   * Duyệt báo giá.
+   *
+   * `paymentTiming` bắt buộc khi quote có `purpose === 'rescue_labor'`
+   * (BE trả 400 nếu thiếu). Với quote khác thì KHÔNG được truyền
+   * (BE trả 400 "Payment timing applies only to rescue labor.").
+   */
+  approveQuote: (paymentTiming?: PaymentTiming) => Promise<void>;
   /** Từ chối báo giá. */
   rejectQuote: (reason?: string) => Promise<void>;
   /** Reset session (cho về idle). */
@@ -97,9 +127,6 @@ interface UseServiceRequestsReturn {
 }
 
 export function useServiceRequests(): UseServiceRequestsReturn {
-  const [list, setList] = useState<ServiceRequestResponse[]>([]);
-  const [listLoading, setListLoading] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
   const [active, setActive] = useState<ActiveSession>(INITIAL_SESSION);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const etaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,8 +135,21 @@ export function useServiceRequests(): UseServiceRequestsReturn {
   // Persist request đang theo dõi qua AsyncStorage. Đây là nguồn sự thật
   // duy nhất — mọi screen gọi `useServiceRequests()` đều thấy cùng giá trị,
   // và giá trị sống qua app restart. Xem `active-request-context.tsx`.
-  const { activeRequestId, hydrated: activeHydrated, setActiveRequest, clearActiveRequest } =
-    useActiveRequest();
+  //
+  // `list` / `reloadList` cũng lấy từ context (không phải state cục bộ của
+  // hook) để mọi screen dùng CHUNG 1 danh sách và provider tự nạp 1 lần lúc
+  // mount — nếu không, tab "Theo dõi" và banner "Yêu cầu đang chạy" ở Home
+  // sẽ trống sau khi restart app.
+  const {
+    activeRequestId,
+    hydrated: activeHydrated,
+    setActiveRequest,
+    clearActiveRequest,
+    list,
+    listLoading,
+    listError,
+    reloadList,
+  } = useActiveRequest();
 
   const clearTimers = useCallback(() => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
@@ -118,19 +158,6 @@ export function useServiceRequests(): UseServiceRequestsReturn {
     pollTimerRef.current = null;
     etaTimerRef.current = null;
     liveTimerRef.current = null;
-  }, []);
-
-  const reloadList = useCallback(async () => {
-    setListLoading(true);
-    setListError(null);
-    try {
-      const items = await listServiceRequests();
-      setList(items);
-    } catch (e) {
-      setListError(e instanceof Error ? e.message : 'Không thể tải danh sách yêu cầu');
-    } finally {
-      setListLoading(false);
-    }
   }, []);
 
   /**
@@ -152,10 +179,15 @@ export function useServiceRequests(): UseServiceRequestsReturn {
       }
 
       let quote: Quote | null = null;
+      let approvedQuote: Quote | null = null;
       try {
-        quote = await getLatestPendingQuote(requestId);
+        // Một request lấy cả quote pending + quote đã duyệt.
+        const bundle = await getQuoteBundle(requestId);
+        quote = bundle.pending;
+        approvedQuote = bundle.approved;
       } catch {
         quote = null;
+        approvedQuote = null;
       }
 
       let eta: RouteEtaResponse | null = null;
@@ -173,14 +205,31 @@ export function useServiceRequests(): UseServiceRequestsReturn {
         }
       }
 
+      // Tổng hợp thanh toán (đã trả / còn trả) — KHÔNG phụ thuộc assignment.
+      //
+      // Endpoint chỉ cần `requestId`; BE trả 404 nếu chưa có quote nào →
+      // lỗi không được làm hỏng cả refresh.
+      //
+      // Trước đây lệnh này nằm trong `if (assignment)` → ở khoảng thời gian
+      // thợ vừa accept (chưa có assignment active) phần "đã trả / còn trả"
+      // không hiện dù BE đã có dữ liệu.
+      let paymentSummary: PaymentSummary | null = null;
+      try {
+        paymentSummary = await getPaymentSummary(requestId);
+      } catch {
+        paymentSummary = null;
+      }
+
       setActive((prev) => ({
         ...prev,
         phase,
         request,
         assignment,
         quote,
+        approvedQuote,
         eta,
         liveLocation,
+        paymentSummary,
         lastError: null,
       }));
 
@@ -411,23 +460,29 @@ export function useServiceRequests(): UseServiceRequestsReturn {
     [reloadList, activeRequestId, clearActiveRequest],
   );
 
-  const approveQuoteHandler = useCallback(async () => {
-    const { requestId, quote } = active;
-    if (!requestId || !quote) return;
-    setActive((prev) => ({ ...prev, busy: true }));
-    try {
-      await approveQuote(quote.id);
-      await refreshActive(requestId);
-      await reloadList();
-      setActive((prev) => ({ ...prev, busy: false }));
-    } catch (e) {
-      setActive((prev) => ({
-        ...prev,
-        lastError: e instanceof Error ? e.message : 'Không thể duyệt báo giá',
-        busy: false,
-      }));
-    }
-  }, [active, refreshActive, reloadList]);
+  const approveQuoteHandler = useCallback(
+    async (paymentTiming?: PaymentTiming) => {
+      const { requestId, quote } = active;
+      if (!requestId || !quote) return;
+      // BE chỉ nhận `payment_timing` cho quote `rescue_labor`.
+      const needsTiming = quote.purpose === 'rescue_labor';
+      const timing = needsTiming ? paymentTiming : undefined;
+      setActive((prev) => ({ ...prev, busy: true }));
+      try {
+        await approveQuote(quote.id, timing ? { payment_timing: timing } : undefined);
+        await refreshActive(requestId);
+        await reloadList();
+        setActive((prev) => ({ ...prev, busy: false }));
+      } catch (e) {
+        setActive((prev) => ({
+          ...prev,
+          lastError: e instanceof Error ? e.message : 'Không thể duyệt báo giá',
+          busy: false,
+        }));
+      }
+    },
+    [active, refreshActive, reloadList],
+  );
 
   const rejectQuoteHandler = useCallback<UseServiceRequestsReturn['rejectQuote']>(
     async (reason) => {

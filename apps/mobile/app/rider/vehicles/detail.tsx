@@ -5,14 +5,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Calendar,
   CalendarClock,
-  Gauge,
   Palette,
   Pencil,
+  Shield,
+  Sparkles,
   Trash2,
   LucideIcon,
 } from 'lucide-react-native';
 
 import { useApp } from '@/contexts/app-context';
+import { useAuth } from '@/contexts/auth-context';
 import { ActionButton } from '@/components/ui/action-button';
 import { AppHeader } from '@/components/ui/app-header';
 import { Badge } from '@/components/ui/badge';
@@ -20,21 +22,50 @@ import { Card } from '@/components/ui/card';
 import { Banner } from '@/components/ui/banner';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
 import { ApiError } from '@/lib/api';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatVND } from '@/lib/format';
+import { hasVipPlan } from '@/lib/plan-gate';
+import { VEHICLE_DETAIL_FIELDS } from '@/lib/vehicle-details';
 
 /**
  * VehicleDetailScreen - chi tiết một xe đã đăng ký.
  *
- * - Nút "Lưu trữ xe" gọi DELETE /api/v1/motorcycles/[id] (khi đã tích hợp backend).
+ * - Nút "Lưu trữ xe" gọi DELETE /api/v1/motorcycles/[id].
  * - Trong demo mode: xoá khỏi state local.
  * - Sau khi archive thành công: quay về danh sách.
+ *
+ * Hồ sơ xe đầy đủ (gói VIP):
+ *  - Đọc LUÔN được phép — BE luôn trả `details` khi rider đã lưu, kể cả khi
+ *    gói đã hết hạn (design decision D7: không xoá, không ẩn).
+ *  - Ghi giá trị mới cần gói VIP; xoá (gửi `null`) luôn được phép (D14).
  */
 export default function VehicleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { vehicles, archiveVehicle, reloadVehicles } = useApp();
+  const { user } = useAuth();
   const vehicle = vehicles.find((v) => v.id === id);
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const vipActive = hasVipPlan(user?.planCode);
+  const details = vehicle?.details;
+
+  const detailRows = VEHICLE_DETAIL_FIELDS.map((field) => {
+    const value = details?.[field.key];
+    return {
+      key: field.key,
+      label: field.label,
+      value:
+        value === undefined || value === null || value === ''
+          ? null
+          : field.kind === 'number'
+            ? `${formatVND(Number(value))}`
+            : field.kind === 'date'
+              ? formatDate(String(value))
+              : String(value),
+    };
+  }).filter((row) => row.value !== null);
+
+  const hasDetails = detailRows.length > 0;
 
   // Refresh vehicles list when detail mounts so user sees latest data
   // (e.g. after editing another tab) without manual pull-to-refresh.
@@ -117,10 +148,14 @@ export default function VehicleDetailScreen() {
           </View>
         )}
 
-        {/* Stats grid 2x2 */}
+        {/* Stats grid — không có "Số km" (BE cố ý không lưu km, D1). */}
         <View className="mt-5 flex-row flex-wrap gap-3">
-          <StatTile icon={Gauge} tone="blue" label="Số km" value={`${vehicle.mileage.toLocaleString()} km`} />
-          <StatTile icon={Palette} tone="green" label="Màu sắc" value={vehicle.color} />
+          <StatTile
+            icon={Palette}
+            tone="green"
+            label="Màu sắc"
+            value={vehicle.color && vehicle.color !== '—' ? vehicle.color : 'Chưa cập nhật'}
+          />
           <StatTile
             icon={Calendar}
             tone="neutral"
@@ -140,6 +175,87 @@ export default function VehicleDetailScreen() {
             <Banner tone="error" description={error} />
           </View>
         )}
+
+        {/* =========================================================
+            Hồ sơ xe đầy đủ (gói VIP)
+            ========================================================= */}
+        <View className="mt-6">
+          <SectionTitle
+            icon={Shield}
+            title="Hồ sơ xe đầy đủ"
+            badge={vipActive ? 'VIP' : undefined}
+          />
+
+          {!vipActive && (
+            <View className="mb-3">
+              <Banner
+                tone="info"
+                title="Tính năng của gói VIP"
+                description={
+                  hasDetails
+                    ? 'Gói VIP của bạn đã hết hạn hoặc chưa kích hoạt. Thông tin đã lưu vẫn còn và bạn vẫn có thể xoá, nhưng không thể thêm hoặc sửa.'
+                    : 'Lưu số khung, số máy, ngày mua, giá mua, bảo hành và bảo hiểm để báo giá và nhắc bảo dưỡng chính xác hơn.'
+                }
+              />
+            </View>
+          )}
+
+          {hasDetails ? (
+            <Card className="mt-1 p-4">
+              {detailRows.map((row, index) => (
+                <View
+                  key={row.key}
+                  className={`flex-row items-start justify-between gap-3 py-2 ${
+                    index < detailRows.length - 1 ? 'border-b border-border' : ''
+                  }`}
+                >
+                  <Text className="text-xs text-muted-foreground">{row.label}</Text>
+                  <Text
+                    className="flex-1 text-right text-sm font-semibold text-foreground"
+                    numberOfLines={2}
+                  >
+                    {row.value}
+                  </Text>
+                </View>
+              ))}
+            </Card>
+          ) : (
+            <Card className="mt-1 border-dashed bg-secondary/40 p-4">
+              <Text className="text-center text-xs text-muted-foreground">
+                Chưa có hồ sơ xe. Nhấn &quot;Chỉnh sửa hồ sơ&quot; để thêm thông tin chi tiết.
+              </Text>
+            </Card>
+          )}
+
+          <View className="mt-3">
+            {vipActive ? (
+              <ActionButton
+                fullWidth
+                variant="outline"
+                onPress={() =>
+                  router.push({ pathname: '/rider/vehicles/form', params: { id: vehicle.id } })
+                }
+                accessibilityLabel="Chỉnh sửa hồ sơ xe"
+              >
+                <Sparkles size={16} color="#16202f" />
+                <Text className="text-sm font-semibold text-foreground">
+                  Chỉnh sửa hồ sơ xe
+                </Text>
+              </ActionButton>
+            ) : (
+              <ActionButton
+                fullWidth
+                onPress={() => router.push('/rider/plans')}
+                accessibilityLabel="Nâng cấp lên gói VIP"
+              >
+                <Sparkles size={16} color="#ffffff" />
+                <Text className="text-sm font-semibold text-primary-foreground">
+                  Nâng cấp lên VIP
+                </Text>
+              </ActionButton>
+            )}
+          </View>
+        </View>
 
         {/* Action buttons */}
         <View className="mt-6 gap-3">
@@ -176,6 +292,24 @@ export default function VehicleDetailScreen() {
         </Text>
       </ScreenScroll>
     </SafeAreaView>
+  );
+}
+
+function SectionTitle({
+  icon: Icon,
+  title,
+  badge,
+}: {
+  icon: LucideIcon;
+  title: string;
+  badge?: string;
+}) {
+  return (
+    <View className="mb-2 flex-row items-center gap-2">
+      <Icon size={18} color="#1974f7" />
+      <Text className="text-base font-bold text-foreground">{title}</Text>
+      {badge ? <Badge tone="amber">{badge}</Badge> : null}
+    </View>
   );
 }
 

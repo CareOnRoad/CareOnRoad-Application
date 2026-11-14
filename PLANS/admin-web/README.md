@@ -8,6 +8,7 @@ và hướng dẫn wiring backend admin operations vào giao diện quản trị
 
 - `ADMIN-WEB-AI-IMPLEMENTATION-SOLUTION.md` — Giải pháp tích hợp AI cho admin web (1,435 dòng)
 - `FE-BE-CONTRACT-ADMIN-WEB-REVIEW-AND-AI-IMPLEMENTATION-GUIDE.md` — Hướng dẫn review FE-BE + AI implementation (1,252 dòng)
+- `FE-BE-CONTRACT-ADMIN-WEB-REVIEW-AND-AI-IMPLEMENTATION-GUIDE-v1.md` — Bản v1 (viết trên `main`, sai baseline; gần như trùng bản trên, chỉ khác trailing whitespace). Giữ lại để tham chiếu lịch sử.
 - `PAYMENT-PUSH-PLAN.md` — Kế hoạch push nhánh payment-rescue-payos lên GitHub
 
 ## Liên quan

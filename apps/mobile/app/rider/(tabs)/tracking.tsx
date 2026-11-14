@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, Siren, Wrench } from 'lucide-react-native';
 
 import { AppHeader } from '@/components/ui/app-header';
@@ -64,6 +64,17 @@ export default function RiderTrackingScreen() {
   const activeItems = useMemo(
     () => list.filter((r) => ACTIVE_STATUSES.includes(r.status)),
     [list],
+  );
+
+  // Tự nạp danh sách khi tab được focus.
+  //
+  // Provider đã hydrate 1 lần lúc mount, nhưng có thể hydrate trước khi
+  // token đăng nhập sẵn sàng, hoặc BE lúc đó lỗi → list rỗng. Guard
+  // `list.length > 0` tránh spam `GET /service-requests` mỗi lần switch tab.
+  useFocusEffect(
+    useCallback(() => {
+      if (list.length === 0) void reloadList();
+    }, [list.length, reloadList]),
   );
 
   const onOpen = useCallback(

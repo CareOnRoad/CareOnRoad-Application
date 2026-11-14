@@ -20,6 +20,7 @@ import { Banner } from '@/components/ui/banner';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ScreenScroll } from '@/components/ui/screen-scroll';
+import { PaymentTimingModal } from '@/components/ui/payment-timing-modal';
 import { cn } from '@/lib/utils';
 import { useServiceRequests } from '@/hooks/use-service-requests';
 import {
@@ -30,10 +31,11 @@ import {
 } from '@/lib/service-requests-service';
 import {
   approveQuote,
-  getLatestPendingQuote,
-  listQuotesForRequest,
+  getQuoteBundle,
   rejectQuote,
   formatVnd,
+  requiresPaymentTiming,
+  type PaymentTiming,
   type Quote,
 } from '@/lib/quotes-service';
 import {
@@ -47,6 +49,7 @@ import {
   type AssignmentListItem,
   type CompletionChecklistResponse,
 } from '@/lib/assignments-service';
+import { getPaymentSummary, type PaymentSummary } from '@/lib/payments-service';
 
 /**
  * RiderRescueDetailScreen - chi tiết 1 yêu cầu cứu hộ / bảo dưỡng.
@@ -139,7 +142,7 @@ export default function RiderRescueDetailScreen() {
 
   const [request, setRequest] = useState<ServiceRequestResponse | null>(null);
   const [assignment, setAssignment] = useState<AssignmentListItem | null>(null);
-  const [quote, setQuote] = useState<Awaited<ReturnType<typeof getLatestPendingQuote>>>(null);
+  const [quote, setQuote] = useState<Quote | null>(null);
   // Báo giá đã được rider duyệt (status = approved) — hiển thị riêng ở các
   // phase `awaiting_payment`/`in_service`/`completed` để rider thấy tổng tiền
   // đã chốt ngay cả khi BE không còn quote pending.
@@ -157,6 +160,10 @@ export default function RiderRescueDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Modal chọn thời điểm thanh toán (chỉ mở khi quote `rescue_labor`).
+  const [timingModalVisible, setTimingModalVisible] = useState(false);
+  // Tổng hợp thanh toán (đã trả / còn trả) — nguồn chính xác từ BE.
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
 
   const liveLocation = useMemo(() => normalizeLiveLocation(liveRaw), [liveRaw]);
 
@@ -221,24 +228,22 @@ export default function RiderRescueDetailScreen() {
           setCompletionChecklist(null);
         }
 
-        // Quote pending (nếu request chờ duyệt).
+        // Quote bundle (pending + đã duyệt) — 1 request, dùng cho cả card
+        // "chờ duyệt" lẫn card "đã duyệt" (tổng tiền đã chốt).
         try {
-          setQuote(await getLatestPendingQuote(requestId));
+          const bundle = await getQuoteBundle(requestId);
+          setQuote(bundle.pending);
+          setApprovedQuote(bundle.approved);
         } catch {
           setQuote(null);
+          setApprovedQuote(null);
         }
 
-        // Báo giá đã duyệt — luôn load (kể cả khi chưa có pending),
-        // dùng để hiển thị tổng tiền ở các phase awaiting_payment /
-        // in_service / completed.
+        // Tổng hợp thanh toán — BE có thể trả 404 nếu chưa có quote nào.
         try {
-          const all = await listQuotesForRequest(requestId);
-          const approved = all
-            .filter((q) => q.status === 'approved')
-            .sort((a, b) => b.version - a.version);
-          setApprovedQuote(approved[0] ?? null);
+          setPaymentSummary(await getPaymentSummary(requestId));
         } catch {
-          setApprovedQuote(null);
+          setPaymentSummary(null);
         }
 
         setError(null);
@@ -323,19 +328,36 @@ export default function RiderRescueDetailScreen() {
     }
   }, [requestId, sr, load]);
 
-  const handleApprove = useCallback(async () => {
+  const handleApprove = useCallback(
+    async (timing?: PaymentTiming) => {
+      if (!quote) return;
+      setActionBusy(true);
+      setActionError(null);
+      try {
+        await approveQuote(quote.id, timing ? { payment_timing: timing } : undefined);
+        setTimingModalVisible(false);
+        await load('refresh');
+      } catch (e) {
+        setActionError(e instanceof Error ? e.message : 'Không duyệt được báo giá.');
+      } finally {
+        setActionBusy(false);
+      }
+    },
+    [quote, load],
+  );
+
+  /**
+   * Nhấn "Duyệt": nếu quote `rescue_labor` thì mở modal chọn thời điểm
+   * thanh toán (BE bắt buộc `payment_timing`); quote khác duyệt thẳng.
+   */
+  const handleApprovePress = useCallback(() => {
     if (!quote) return;
-    setActionBusy(true);
-    setActionError(null);
-    try {
-      await approveQuote(quote.id);
-      await load('refresh');
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Không duyệt được báo giá.');
-    } finally {
-      setActionBusy(false);
+    if (requiresPaymentTiming(quote)) {
+      setTimingModalVisible(true);
+      return;
     }
-  }, [quote, load]);
+    void handleApprove();
+  }, [quote, handleApprove]);
 
   const handleReject = useCallback(async () => {
     if (!quote) return;
@@ -711,7 +733,7 @@ export default function RiderRescueDetailScreen() {
                 >
                   <Text className="text-sm font-semibold text-foreground">Từ chối</Text>
                 </ActionButton>
-                <ActionButton fullWidth disabled={actionBusy} onPress={() => void handleApprove()}>
+                <ActionButton fullWidth disabled={actionBusy} onPress={handleApprovePress}>
                   <Text className="text-sm font-semibold text-white">Duyệt & thanh toán</Text>
                 </ActionButton>
               </View>
@@ -766,6 +788,23 @@ export default function RiderRescueDetailScreen() {
                   Duyệt lúc {new Date(approvedQuote.responded_at).toLocaleString('vi-VN')}
                 </Text>
               ) : null}
+              {/* Thanh toán nhiều bước: đã trả / còn trả từ BE payment-summary. */}
+              {paymentSummary && paymentSummary.paid_amount > 0 ? (
+                <View className="mt-2 rounded-2xl bg-secondary px-3 py-2">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-xs text-muted-foreground">Đã thanh toán</Text>
+                    <Text className="text-xs font-semibold text-green">
+                      {formatVnd(paymentSummary.paid_amount)}
+                    </Text>
+                  </View>
+                  <View className="mt-1 flex-row items-center justify-between">
+                    <Text className="text-xs text-muted-foreground">Còn phải trả</Text>
+                    <Text className="text-xs font-bold text-foreground">
+                      {formatVnd(paymentSummary.remaining_amount)}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
             </View>
           </Card>
         ) : null}
@@ -785,13 +824,40 @@ export default function RiderRescueDetailScreen() {
         ) : null}
 
         {request.status === 'awaiting_payment' ? (
+          approvedQuote ? (
+            <ActionButton
+              fullWidth
+              className="mt-5 py-4"
+              onPress={() => router.push(`/rider/payments/${approvedQuote.id}`)}
+              accessibilityLabel="Thanh toán"
+            >
+              <Text className="text-sm font-semibold text-white">Thanh toán ngay</Text>
+            </ActionButton>
+          ) : (
+            <Banner
+              tone="warning"
+              className="mt-5"
+              title="Chưa có báo giá đã duyệt"
+              description="Chưa tìm thấy báo giá đã duyệt cho yêu cầu này. Vui lòng tải lại trang hoặc liên hệ hỗ trợ."
+            />
+          )
+        ) : null}
+
+        {/* Cứu hộ `labor_upfront`: request ở `assigned` (thợ đang chờ đi) nhưng
+            rider vẫn phải trả tiền công TRƯỚC khi thợ xuất phát. */}
+        {request.status === 'assigned' &&
+        approvedQuote &&
+        paymentSummary?.payment_timing === 'labor_upfront' &&
+        paymentSummary.remaining_amount > 0 ? (
           <ActionButton
             fullWidth
             className="mt-5 py-4"
-            onPress={() => router.push(`/rider/payments/${quote?.id ?? ''}`)}
-            accessibilityLabel="Thanh toán"
+            onPress={() => router.push(`/rider/payments/${approvedQuote.id}`)}
+            accessibilityLabel="Thanh toán tiền công cứu hộ"
           >
-            <Text className="text-sm font-semibold text-white">Thanh toán ngay</Text>
+            <Text className="text-sm font-semibold text-white">
+              Thanh toán tiền công ({formatVnd(paymentSummary.remaining_amount)})
+            </Text>
           </ActionButton>
         ) : null}
 
@@ -810,6 +876,14 @@ export default function RiderRescueDetailScreen() {
           </ActionButton>
         ) : null}
       </ScreenScroll>
+
+      <PaymentTimingModal
+        visible={timingModalVisible && requiresPaymentTiming(quote)}
+        totalAmountLabel={quote ? formatVnd(quote.total_amount) : undefined}
+        loading={actionBusy}
+        onConfirm={(timing) => void handleApprove(timing)}
+        onCancel={() => setTimingModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }

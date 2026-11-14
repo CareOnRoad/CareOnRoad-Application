@@ -1,5 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
-import type { Vehicle } from '@/lib/types';
+import type { MotorcycleDetails, Vehicle } from '@/lib/types';
 
 /**
  * Service wrapper cho /api/v1/motorcycles.
@@ -10,9 +10,32 @@ import type { Vehicle } from '@/lib/types';
  * derive từ `service_requests` (completed + upcoming) và `reminder_rules`.
  * Map thẳng vào UI Vehicle.lastMaintenance / nextMaintenance.
  *
- * Backend vẫn không lưu mileage / image → giữ giá trị default an toàn khi map
- * sang UI để không phá các trang đang dùng Vehicle type.
+ * Backend KHÔNG lưu số km (design decision D1 trong
+ * `apps/api/VEHICLE-MAINTENANCE-PLANS-DESIGN.md`) → UI không có field mileage.
+ *
+ * Backend CÓ lưu chi tiết xe (gói VIP) qua `details`:
+ *  - Đọc: luôn trả đầy đủ, kể cả khi gói đã hết hạn (D7).
+ *  - Ghi: `PATCH /api/v1/motorcycles/{id}/details` — sửa một phần, cần gói VIP.
  */
+
+/**
+ * Chi tiết xe gói VIP. Đúng tên cột BE trong bảng `motorcycles`
+ * (migration `202606250048_maintenance_presets_and_plans.sql`).
+ *
+ * Ngày có dạng `YYYY-MM-DD`.
+ */
+export type { MotorcycleDetails };
+
+/**
+ * Patch partial-update cho `PATCH /api/v1/motorcycles/{id}/details`.
+ *
+ * - `undefined` (key bị bỏ qua) → giữ nguyên giá trị đang lưu.
+ * - `null` → xoá giá trị (luôn được phép, kể cả khi hết gói — D14).
+ * - Giá trị khác `null` → cần gói VIP hiệu lực.
+ */
+export type MotorcycleDetailsPatch = {
+  [K in keyof MotorcycleDetails]?: MotorcycleDetails[K] | null;
+};
 
 export interface MotorcycleResponse {
   id: string;
@@ -22,6 +45,8 @@ export interface MotorcycleResponse {
   license_plate?: string;
   year?: number;
   notes?: string;
+  /** Chi tiết xe gói VIP (luôn được trả về khi đã có dữ liệu). */
+  details?: MotorcycleDetails;
   last_maintenance_at?: string;
   next_maintenance_at?: string;
   created_at: string;
@@ -51,12 +76,15 @@ export function toVehicle(record: MotorcycleResponse): Vehicle {
     name: `${brand} ${model}`,
     brand,
     plate: record.license_plate ?? '',
-    mileage: 0,
-    color: '—',
+    // Màu sắc nằm trong `details` (gói VIP). Chưa có dữ liệu → '—'.
+    color: record.details?.color ?? '—',
     year: record.year ?? new Date().getFullYear(),
-    lastMaintenance: record.last_maintenance_at?.slice(0, 10) ?? '',
-    nextMaintenance: record.next_maintenance_at?.slice(0, 10) ?? '',
+    lastMaintenance: record.last_maintenance_at ?? '',
+    nextMaintenance: record.next_maintenance_at ?? '',
     image: VEHICLE_IMAGE_DEFAULT,
+    ...(record.details && Object.keys(record.details).length > 0
+      ? { details: record.details }
+      : {}),
   };
 }
 
@@ -97,6 +125,30 @@ export async function updateMotorcycle(
   const record = await apiPatch<MotorcycleResponse>(
     `/api/v1/motorcycles/${encodeURIComponent(id)}`,
     input,
+  );
+  return toVehicle(record);
+}
+
+/**
+ * Cập nhật "hồ sơ xe đầy đủ" (gói VIP).
+ *
+ * Endpoint riêng `PATCH /api/v1/motorcycles/{id}/details` (design decision D13):
+ * sửa một phần, không bao giờ đụng vào thông tin cơ bản của xe.
+ *
+ * BE route này KHÔNG yêu cầu `X-Idempotency-Key`.
+ *
+ * Lỗi có thể trả:
+ *  - 403 `FORBIDDEN` + `details.reason = "plan_required"` khi gửi giá trị mới
+ *    mà không có gói VIP.
+ *  - 400 `INVALID_INPUT` khi sai định dạng / ngày ở tương lai.
+ */
+export async function updateMotorcycleDetails(
+  id: string,
+  patch: MotorcycleDetailsPatch,
+): Promise<Vehicle> {
+  const record = await apiPatch<MotorcycleResponse>(
+    `/api/v1/motorcycles/${encodeURIComponent(id)}/details`,
+    patch,
   );
   return toVehicle(record);
 }

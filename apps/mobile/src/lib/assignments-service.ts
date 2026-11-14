@@ -7,7 +7,7 @@
  *  - GET /api/v1/assignments/{id}/live-location - rider poll vị trí thợ
  *  - POST /api/v1/assignments/{id}/review  - rider tạo review sau completed
  */
-import { apiGet, apiPost, apiPut } from '@/lib/api';
+import { apiGet, apiPost, apiPut, ApiError } from '@/lib/api';
 import { newIdempotencyKey } from '@/lib/idempotency';
 import type { RouteEtaResponse } from './service-requests-service';
 
@@ -157,9 +157,13 @@ export async function getCompletionChecklist(
       `/api/v1/assignments/${encodeURIComponent(assignmentId)}/completion-checklist`,
     );
   } catch (e) {
-    // 404 → chưa có. Lỗi khác → log warning nhưng vẫn trả null để UI fallback.
-    if (__DEV__ && !(e instanceof Error && e.message.includes('404'))) {
-      // eslint-disable-next-line no-console
+    // 404 → chưa có checklist (bình thường). Lỗi khác → log warning nhưng vẫn
+    // trả null để UI fallback.
+    // Phải kiểm tra `ApiError.status === 404`, KHÔNG dùng
+    // `e.message.includes('404')` — message của BE là "Completion checklist
+    // not found." (không chứa "404") nên check cũ log warning sai.
+    const isNotFound = e instanceof ApiError && e.status === 404;
+    if (__DEV__ && !isNotFound) {
       console.warn('[assignments-service] getCompletionChecklist failed:', e);
     }
     return null;

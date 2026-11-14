@@ -55,6 +55,27 @@ export interface SubmitQuoteInput {
   expires_at?: string;
   /** Dùng cho `maintenance_work` additions - trỏ tới quote đã approved. */
   basis_quote_id?: string;
+  /**
+   * Bảng giá công cứu hộ (bắt buộc khi `purpose === 'rescue_labor'`).
+   *
+   * BE tự tính `distance_m` (theo dispatch distance đã verify) và `time_slot`
+   * (theo giờ Việt Nam) — mechanic KHÔNG tự nhập 2 field này.
+   */
+  labor_pricing?: RescueLaborPricingInput;
+}
+
+/** Input `labor_pricing` — mirror BE `quoteInputSchema.labor_pricing`. */
+export interface RescueLaborPricingInput {
+  /** Tiền công cơ bản (bắt buộc > 0). */
+  base_amount: number;
+  /** Phí khoảng cách (BE tự tính distance_m). */
+  distance_amount: number;
+  /** Phí thời tiết. */
+  weather_amount: number;
+  /** Phí thời điểm (BE tự tính time_slot). */
+  time_amount: number;
+  /** Thời tiết hiện tại. */
+  weather: 'sunny' | 'rain';
 }
 
 export interface SubmitQuoteResponse {
@@ -82,6 +103,7 @@ export async function submitQuote(
     ...(input.notes ? { notes: input.notes } : {}),
     ...(input.expires_at ? { expires_at: input.expires_at } : {}),
     ...(input.basis_quote_id ? { basis_quote_id: input.basis_quote_id } : {}),
+    ...(input.labor_pricing ? { labor_pricing: input.labor_pricing } : {}),
   };
   const res = await apiPost<Quote | { quote: Quote }>(
     `/api/v1/service-requests/${encodeURIComponent(requestId)}/quotes`,
@@ -123,6 +145,164 @@ export function suggestPurposeForServiceType(
   if (serviceType === 'emergency_rescue') return 'rescue_final';
   if (serviceType === 'periodic_maintenance') return 'maintenance_work';
   return 'standard';
+}
+
+/**
+ * Kế hoạch báo giá nhiều bước theo loại dịch vụ + trạng thái assignment.
+ *
+ * BE áp workflow khác nhau cho từng loại việc:
+ *
+ *  - `emergency_rescue` (cứu hộ):
+ *    1. `rescue_labor`   — khi assignment `accepted` (trước khi đi, rider phải
+ *       duyệt kèm `payment_timing`). Bắt buộc có `labor_pricing`.
+ *    2. `rescue_final`   — khi assignment `diagnosis` (parts-only; BE tự cộng
+ *       phần công đã thống nhất).
+ *  - `periodic_maintenance` (bảo dưỡng):
+ *    1. `maintenance_labor` — khi assignment `accepted` (công cố định +
+ *       phí đi lại; KHÔNG parts).
+ *    2. `maintenance_work`  — khi assignment `diagnosis` (parts-only).
+ *    3. `maintenance_work`  — khi assignment `in_progress` (phát sinh thêm;
+ *       bắt buộc `basis_quote_id` = quote work đã approved).
+ *  - còn lại: `standard` (labor + parts + other).
+ */
+export type QuotePurposePlan = {
+  purpose: QuotePurpose;
+  /** Form nào cần hiển thị cho mechanic. */
+  mode: 'standard' | 'rescue_labor' | 'parts_only';
+  /** Quote này là phát sinh thêm (maintenance addition) → cần `basis_quote_id`. */
+  isAddition: boolean;
+  /** Có được phép nhập `discount_amount` không (BE cấm cho rescue/maintenance). */
+  allowDiscount: boolean;
+  /** Line types được phép nhập. */
+  allowedLineTypes: QuoteLineInput['line_type'][];
+  /** Có cần form `labor_pricing` không. */
+  requiresLaborPricing: boolean;
+  /** Nhãn tiếng Việt hiển thị cho mechanic. */
+  label: string;
+  /** Gợi ý ngắn cho mechanic về bước này. */
+  hint: string;
+};
+
+const STANDARD_PLAN: QuotePurposePlan = {
+  purpose: 'standard',
+  mode: 'standard',
+  isAddition: false,
+  allowDiscount: true,
+  allowedLineTypes: ['labor', 'part', 'other'],
+  requiresLaborPricing: false,
+  label: 'Sửa chữa thường',
+  hint: 'Nhập các hạng mục công việc và phụ tùng cần thiết.',
+};
+
+const RESCUE_LABOR_PLAN: QuotePurposePlan = {
+  purpose: 'rescue_labor',
+  mode: 'rescue_labor',
+  isAddition: false,
+  allowDiscount: false,
+  allowedLineTypes: [],
+  requiresLaborPricing: true,
+  label: 'Cứu hộ · Tiền công trước',
+  hint: 'Thiết lập bảng giá công cứu hộ. Rider sẽ duyệt và chọn trả trước hoặc trả sau.',
+};
+
+const RESCUE_FINAL_PLAN: QuotePurposePlan = {
+  purpose: 'rescue_final',
+  mode: 'parts_only',
+  isAddition: false,
+  allowDiscount: false,
+  allowedLineTypes: ['part'],
+  requiresLaborPricing: false,
+  label: 'Cứu hộ · Phụ tùng phát sinh',
+  hint: 'Chỉ nhập phụ tùng cần thay. Phần công đã thống nhất sẽ được hệ thống tự cộng.',
+};
+
+const MAINTENANCE_LABOR_PLAN: QuotePurposePlan = {
+  purpose: 'maintenance_labor',
+  mode: 'standard',
+  isAddition: false,
+  allowDiscount: false,
+  allowedLineTypes: ['labor', 'other'],
+  requiresLaborPricing: false,
+  label: 'Bảo dưỡng · Tiền công',
+  hint: 'Nhập tiền công bảo dưỡng (không kèm phụ tùng).',
+};
+
+const MAINTENANCE_WORK_PLAN: QuotePurposePlan = {
+  purpose: 'maintenance_work',
+  mode: 'parts_only',
+  isAddition: false,
+  allowDiscount: false,
+  allowedLineTypes: ['part'],
+  requiresLaborPricing: false,
+  label: 'Bảo dưỡng · Phụ tùng',
+  hint: 'Chỉ nhập phụ tùng cần thay. Phần công đã thống nhất sẽ được hệ thống tự cộng.',
+};
+
+const MAINTENANCE_ADDITION_PLAN: QuotePurposePlan = {
+  purpose: 'maintenance_work',
+  mode: 'parts_only',
+  isAddition: true,
+  allowDiscount: false,
+  allowedLineTypes: ['part'],
+  requiresLaborPricing: false,
+  label: 'Bảo dưỡng · Phát sinh thêm',
+  hint: 'Nhập các hạng mục phát sinh thêm trong khi sửa. Hệ thống sẽ gắn vào báo giá đã duyệt.',
+};
+
+/**
+ * Tính kế hoạch báo giá kế tiếp mà mechanic nên gửi.
+ *
+ * @param serviceType  `service_type` của service request (BE trả).
+ * @param assignmentStatus  Trạng thái assignment hiện tại từ BE (raw).
+ * @param _hasApprovedWorkQuote  Đã có quote `maintenance_work` approved chưa.
+ *   KHÔNG dùng để chọn plan nữa: BE chỉ cho báo giá PHÁT SINH THÊM khi
+ *   assignment = `in_progress` (`quote.service.ts` → `maintenanceAddition`).
+ *   Tham số giữ lại để không phá call-site cũ.
+ */
+export function quotePurposePlanFor(
+  serviceType: string | null | undefined,
+  assignmentStatus: string | null | undefined,
+  _hasApprovedWorkQuote = false,
+): QuotePurposePlan {
+  if (serviceType === 'emergency_rescue') {
+    // Bước 1: chốt giá công trước khi đi (assignment còn `accepted`).
+    if (assignmentStatus === 'accepted') return RESCUE_LABOR_PLAN;
+    // Bước 2: sau khi tới nơi + chẩn đoán → báo giá phụ tùng phát sinh.
+    return RESCUE_FINAL_PLAN;
+  }
+  if (serviceType === 'periodic_maintenance') {
+    if (assignmentStatus === 'accepted') return MAINTENANCE_LABOR_PLAN;
+    // Bước phát sinh thêm chỉ hợp lệ khi đang SỬA (`in_progress`) — BE yêu
+    // cầu `assignment.status === 'in_progress'` cho quote `maintenance_work`
+    // có `basis_quote_id` (`quote.service.ts` → `maintenanceAddition`).
+    if (assignmentStatus === 'in_progress') return MAINTENANCE_ADDITION_PLAN;
+    // `diagnosis` (lần đầu) hoặc `quoted` (revision) → báo giá vật tư.
+    return MAINTENANCE_WORK_PLAN;
+  }
+  return STANDARD_PLAN;
+}
+
+/**
+ * Plan hiển thị cho một quote ĐÃ TỒN TẠI (read-only).
+ *
+ * Khi quote đã có sẵn, không nên dùng `quotePurposePlanFor()` (plan phụ thuộc
+ * trạng thái assignment hiện tại) vì plan có thể trỏ sang bước KHÁC —
+ * ví dụ cứu hộ: quote `rescue_labor` đã gửi (trạng thái đã sang `quoted`) nhưng
+ * `quotePurposePlanFor` lại trả `rescue_final` → nhãn hiển thị sai.
+ */
+export function quotePlanForPurpose(purpose: QuotePurpose): QuotePurposePlan {
+  switch (purpose) {
+    case 'rescue_labor':
+      return RESCUE_LABOR_PLAN;
+    case 'rescue_final':
+      return RESCUE_FINAL_PLAN;
+    case 'maintenance_labor':
+      return MAINTENANCE_LABOR_PLAN;
+    case 'maintenance_work':
+      return MAINTENANCE_WORK_PLAN;
+    default:
+      return STANDARD_PLAN;
+  }
 }
 
 /**

@@ -11,6 +11,7 @@ apps/
   mobile/   Expo Router application for Android, iOS, and web
   web/      web Next.js application
 packages/   shared package workspaces
+PLANS/      plans, audits, reviews and historical reports (see PLANS/README.md)
 supabase/   authoritative PostgreSQL migrations
 specs/      Spec Kit feature specifications and plans
 ```
@@ -90,6 +91,7 @@ explicitly with `pnpm.cmd run test:db` or `pnpm.cmd run test:full`.
 - Local Vietnamese ASR models: `apps/api/models`
 - Database migrations: `supabase/migrations`
 - Spec Kit artifacts: `specs` and `.specify`
+- Plans, audits and historical reports: [PLANS/README.md](PLANS/README.md)
 - Repository guidance: `AGENTS.md`
 
 ## Dependency boundaries

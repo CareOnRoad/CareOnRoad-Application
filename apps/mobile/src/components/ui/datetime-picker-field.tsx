@@ -43,6 +43,8 @@ type CommonProps = {
   accessibilityLabel?: string;
   /** Minute interval cho time picker. Mặc định = 1. */
   minuteInterval?: 1 | 5 | 10 | 15 | 20 | 30;
+  /** Khoá field (ví dụ khi chưa đủ gói). */
+  disabled?: boolean;
 };
 
 const BUTTON_CLASS =
@@ -80,6 +82,7 @@ export function DateTimePickerField({
   icon,
   accessibilityLabel,
   minuteInterval = 1,
+  disabled = false,
 }: CommonProps) {
   const [iosModalOpen, setIosModalOpen] = useState(false);
 
@@ -157,6 +160,7 @@ export function DateTimePickerField({
   }, [mode, value, minimumDate, maximumDate, minuteInterval, onChange]);
 
   const open = useCallback(() => {
+    if (disabled) return;
     if (Platform.OS === 'android') {
       openAndroid();
       return;
@@ -164,19 +168,25 @@ export function DateTimePickerField({
     if (Platform.OS === 'ios') {
       setIosModalOpen(true);
     }
-  }, [openAndroid]);
+  }, [openAndroid, disabled]);
 
   return (
     <>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel ?? placeholder}
+        accessibilityState={{ disabled }}
+        disabled={disabled}
         onPress={open}
         hitSlop={8}
         // `className` (kèm `active:`) phải nằm TRỰC TIẾP trên Pressable gốc.
         // Không bọc View con mang class có pseudo-class, nếu không NativeWind
         // sẽ nâng View con thành Pressable và cướm responder (mất onPress).
-        className={cn(BUTTON_CLASS, error ? BORDER_ERROR : BORDER_NORMAL)}
+        className={cn(
+          BUTTON_CLASS,
+          error ? BORDER_ERROR : BORDER_NORMAL,
+          disabled && 'opacity-50',
+        )}
       >
         <View className="flex-row items-center gap-2.5">
           <Icon size={18} color="#64748b" />

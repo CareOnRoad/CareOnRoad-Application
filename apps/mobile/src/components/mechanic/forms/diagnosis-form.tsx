@@ -206,14 +206,21 @@ function CreateView({
       setLocalError('Mô tả chẩn đoán tối thiểu 5 ký tự.');
       return;
     }
-    await onSubmit({
-      diagnosis_text: diagnosisText.trim(),
-      ...(safetyNotes.trim() ? { safety_notes: safetyNotes.trim() } : {}),
-      ...(recommendedWorkText.trim()
-        ? { recommended_work_text: recommendedWorkText.trim() }
-        : {}),
-    });
-    // Reset form khi submit thành công - parent sẽ unmount component này
+    try {
+      await onSubmit({
+        diagnosis_text: diagnosisText.trim(),
+        ...(safetyNotes.trim() ? { safety_notes: safetyNotes.trim() } : {}),
+        ...(recommendedWorkText.trim()
+          ? { recommended_work_text: recommendedWorkText.trim() }
+          : {}),
+      });
+    } catch (e) {
+      // BE từ chối → GIỮ NGUYÊN nội dung người dùng đã nhập để sửa lại.
+      // (Trước đây form xoá trắng dù submit thất bại.)
+      setLocalError(e instanceof Error ? e.message : 'Không thể tạo chẩn đoán');
+      return;
+    }
+    // Reset form khi submit THÀNH CÔNG — parent sẽ unmount component này
     // khi BE trả về record mới, nhưng reset để defensive.
     setDiagnosisText('');
     setSafetyNotes('');

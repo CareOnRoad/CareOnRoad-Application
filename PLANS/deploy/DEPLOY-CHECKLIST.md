@@ -2,8 +2,8 @@
 
 Checklist này tóm tắt các bước cần làm **bên ngoài repo** (dashboard của bên thứ ba) khi deploy web FE lên production. Repo đã có sẵn:
 
-- [`apps/web/.env.production.example`](apps/web/.env.production.example) — biến cần đặt.
-- [`apps/api/CLOUDFLARE.md`](apps/api/CLOUDFLARE.md) — trạng thái hiện tại của BE + ghi chú khi nào cần CORS.
+- [`apps/web/.env.production.example`](../../apps/web/.env.production.example) — biến cần đặt.
+- [`apps/api/CLOUDFLARE.md`](../../apps/api/CLOUDFLARE.md) — trạng thái hiện tại của BE + ghi chú khi nào cần CORS.
 
 ## 1. Hosting provider (Vercel khuyến nghị, vì Next.js native)
 
@@ -50,7 +50,7 @@ URL: <https://supabase.com/dashboard/project/lwgwprxjyemihlkspgjc>
 
 URL: <https://my.payos.vn/> (merchant portal)
 
-- [ ] **Webhook URL** đã đăng ký: `https://careonroad.dpdns.org/api/v1/payments/webhooks/payos` (theo [`apps/api/CLOUDFLARE.md`](apps/api/CLOUDFLARE.md)).
+- [ ] **Webhook URL** đã đăng ký: `https://careonroad.dpdns.org/api/v1/payments/webhooks/payos` (theo [`apps/api/CLOUDFLARE.md`](../../apps/api/CLOUDFLARE.md)).
 - [ ] **Return URL** (sau thanh toán thành công): `https://careonroad.dpdns.org/payment/return`.
 - [ ] **Cancel URL** (sau khi user hủy): `https://careonroad.dpdns.org/payment/cancel`.
 - [ ] Verify checksum key (`PAYOS_CHECKSUM_KEY`) trùng với giá trị trong `apps/api/.env.local`.
@@ -83,6 +83,6 @@ URL: <https://my.payos.vn/> (merchant portal)
 
 Trigger: wire UI rider/mechanic thật trên web gọi `/api/v1/**` từ browser.
 
-- Tạo `apps/api/src/middleware.ts` (matcher `/api/:path*`) — spec đã viết trong [`apps/api/CLOUDFLARE.md`](apps/api/CLOUDFLARE.md) mục "CORS — khi nào cần".
+- Tạo `apps/api/src/middleware.ts` (matcher `/api/:path*`) — spec đã viết trong [`apps/api/CLOUDFLARE.md`](../../apps/api/CLOUDFLARE.md) mục "CORS — khi nào cần".
 - Thêm `ALLOWED_ORIGINS` env + verify preflight qua curl.
 - Có thể dùng Vercel/Cloudflare Routes thay middleware Next.js nếu muốn (đơn giản hơn, không cần redeploy BE).
