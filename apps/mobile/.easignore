@@ -3,6 +3,7 @@
 # Xem https://docs.expo.dev/build-reference/easignore/
 
 # CHỈ giữ apps/mobile/ — bỏ tất cả thư khác
+.git/
 apps/api/
 apps/web/
 apps/admin/
@@ -14,6 +15,9 @@ tests/
 docs/
 ui-design/
 scripts/
+PLANS/
+public/
+.specify/
 .next/
 .turbo/
 .vercel/
@@ -31,13 +35,24 @@ Jenkinsfile
 # Build artifacts
 build/
 dist/
+dist-android/
+dist-ios/
+dist-test/
+dist-web/
+web-build/
 out/
 .expo/
 .expo-shared/
+.expo-typegen-tmp/
 android/build/
 android/.gradle/
 android/app/build/
 android/.idea/
+android/.kotlin/
+android/.cxx/
+android/local.properties
+android/app/.cxx/
+android/app/release/
 
 # Local files
 .env
