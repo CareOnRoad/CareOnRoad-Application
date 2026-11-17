@@ -92,8 +92,8 @@ android {
         applicationId "com.careonroad.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
-        versionName "1.0.2"
+        versionCode 8
+        versionName "1.0.3"
 
         // Read the same variant name as app.config.ts; native folders are committed.
         def appName = providers.exec {

@@ -15,7 +15,7 @@ tests/
 docs/
 ui-design/
 scripts/
-PLANS/
+/PLANS/
 public/
 .specify/
 .next/
